@@ -13,15 +13,215 @@
 //!
 //! It refuses only where continuing would produce a body that is not what the server
 //! sent, since a wrong body becomes a wrong finding.
+//!
+//! # Incremental by construction
+//!
+//! [`Decoder`] is a state machine fed whatever bytes have arrived so far. That is what
+//! lets the proxy forward a chunk the moment it is complete instead of waiting for the
+//! terminating chunk — a server can legitimately stream for minutes, and buffering the
+//! whole response first would make Hexora useless for anything long-lived.
+//!
+//! [`decode`] is the one-shot convenience wrapper, built on the same state machine so
+//! there is only ever one parser to get right.
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use hexora_types::error::{HexoraError, ProtocolError, Result};
 use hexora_types::http::{Header, Headers};
 use hexora_types::limits::Limits;
 
 use crate::parse::Quirk;
 
-/// The result of decoding a chunked body.
+/// Where the decoder is in the chunked grammar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    /// Reading a chunk-size line.
+    Size,
+    /// Copying chunk data; this many bytes still to come.
+    Data { remaining: usize },
+    /// Expecting the CRLF that follows chunk data.
+    DataTerminator,
+    /// Reading trailer fields up to the blank line.
+    Trailers,
+    /// The terminating chunk and its trailers have been consumed.
+    Done,
+}
+
+/// An incremental chunked-body decoder.
+#[derive(Debug)]
+pub struct Decoder {
+    state: State,
+    quirks: Vec<Quirk>,
+    trailers: Headers,
+    produced: u64,
+    truncated: bool,
+}
+
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Decoder {
+    /// A decoder positioned at the first chunk-size line.
+    pub fn new() -> Self {
+        Self {
+            state: State::Size,
+            quirks: Vec::new(),
+            trailers: Headers::new(),
+            produced: 0,
+            truncated: false,
+        }
+    }
+
+    /// Consumes as much of `buf` as forms complete chunk data, returning the decoded
+    /// bytes. Whatever cannot yet be interpreted is left in `buf` for next time.
+    ///
+    /// Returning empty is normal, and simply means "need more bytes".
+    pub fn push(&mut self, buf: &mut BytesMut, limits: &Limits) -> Result<Bytes> {
+        let mut out = BytesMut::new();
+
+        loop {
+            match self.state {
+                State::Done => break,
+
+                State::Size => {
+                    let Some((line, consumed)) = take_line(buf) else {
+                        break;
+                    };
+                    let (size, extension) = parse_chunk_size(&line, &mut self.quirks)?;
+                    buf.advance(consumed);
+                    if extension {
+                        push_once(&mut self.quirks, Quirk::ChunkExtension);
+                    }
+                    self.state = if size == 0 {
+                        State::Trailers
+                    } else {
+                        let size = usize::try_from(size).map_err(|_| {
+                            HexoraError::LimitExceeded(
+                                hexora_types::error::LimitError::BodyTooLarge {
+                                    limit: limits.max_body_bytes,
+                                },
+                            )
+                        })?;
+                        State::Data { remaining: size }
+                    };
+                }
+
+                State::Data { remaining } => {
+                    if buf.is_empty() {
+                        break;
+                    }
+
+                    // Enforced here rather than after the body is assembled: a server
+                    // that streams forever must be cut off while it is streaming.
+                    let room = limits.max_body_bytes.saturating_sub(self.produced);
+                    if room == 0 {
+                        self.truncated = true;
+                        self.state = State::Done;
+                        break;
+                    }
+
+                    let take = remaining.min(buf.len()).min(room as usize);
+                    out.extend_from_slice(&buf[..take]);
+                    buf.advance(take);
+                    self.produced += take as u64;
+
+                    self.state = match remaining - take {
+                        0 => State::DataTerminator,
+                        left => State::Data { remaining: left },
+                    };
+                }
+
+                State::DataTerminator => match buf.first() {
+                    None => break,
+                    Some(b'\r') => {
+                        if buf.len() < 2 {
+                            break;
+                        }
+                        // A lone CR followed by something else is malformed, but the
+                        // byte count already told us where the chunk ended.
+                        if buf[1] == b'\n' {
+                            buf.advance(2);
+                        } else {
+                            push_once(&mut self.quirks, Quirk::MissingChunkTerminator);
+                            buf.advance(1);
+                        }
+                        self.state = State::Size;
+                    }
+                    Some(b'\n') => {
+                        push_once(&mut self.quirks, Quirk::BareLf);
+                        buf.advance(1);
+                        self.state = State::Size;
+                    }
+                    Some(_) => {
+                        push_once(&mut self.quirks, Quirk::MissingChunkTerminator);
+                        self.state = State::Size;
+                    }
+                },
+
+                State::Trailers => {
+                    let Some((line, consumed)) = take_line(buf) else {
+                        break;
+                    };
+                    buf.advance(consumed);
+
+                    if line.is_empty() {
+                        if !self.trailers.is_empty() {
+                            push_once(&mut self.quirks, Quirk::TrailerFields);
+                        }
+                        self.state = State::Done;
+                        break;
+                    }
+
+                    if self.trailers.len() >= limits.max_header_count {
+                        return Err(HexoraError::LimitExceeded(
+                            hexora_types::error::LimitError::HeadersTooLarge {
+                                limit: limits.max_header_count,
+                            },
+                        ));
+                    }
+                    match line.iter().position(|b| *b == b':') {
+                        Some(colon) => self.trailers.append(Header {
+                            name: String::from_utf8_lossy(trim_ascii(&line[..colon])).into_owned(),
+                            value: Bytes::copy_from_slice(trim_ascii(&line[colon + 1..])),
+                        }),
+                        None => push_once(&mut self.quirks, Quirk::HeaderWithoutColon),
+                    }
+                }
+            }
+        }
+
+        Ok(out.freeze())
+    }
+
+    /// Whether the terminating chunk has been consumed.
+    pub fn is_done(&self) -> bool {
+        self.state == State::Done
+    }
+
+    /// Whether a limit stopped decoding early.
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// Deviations seen so far.
+    pub fn quirks(&self) -> &[Quirk] {
+        &self.quirks
+    }
+
+    /// Trailer fields, populated once decoding is done.
+    pub fn trailers(&self) -> &Headers {
+        &self.trailers
+    }
+
+    /// Records a quirk observed by the caller rather than by the parser.
+    pub fn note(&mut self, quirk: Quirk) {
+        push_once(&mut self.quirks, quirk);
+    }
+}
+
+/// The result of decoding a complete chunked body in one go.
 #[derive(Debug, Clone)]
 pub struct DecodedChunks {
     /// The reassembled body.
@@ -34,9 +234,9 @@ pub struct DecodedChunks {
     pub truncated: bool,
     /// How many input bytes the chunked framing consumed.
     ///
-    /// Bytes beyond this in the buffer were not part of this message — on a keep-alive
-    /// connection they belong to the next response, and if none was requested their
-    /// presence is itself a smuggling signal.
+    /// Bytes beyond this were not part of this message — on a keep-alive connection
+    /// they belong to the next response, and if none was requested their presence is
+    /// itself a smuggling signal.
     pub consumed: usize,
 }
 
@@ -45,82 +245,37 @@ pub struct DecodedChunks {
 /// Returns `Ok(None)` when the input ends mid-message and more bytes are needed, so
 /// the caller can read again rather than guessing.
 pub fn decode(input: &[u8], limits: &Limits) -> Result<Option<DecodedChunks>> {
-    let mut cursor = 0usize;
-    let mut body = BytesMut::new();
-    let mut quirks: Vec<Quirk> = Vec::new();
-    let mut truncated = false;
+    let mut decoder = Decoder::new();
+    let mut buf = BytesMut::from(input);
+    let body = decoder.push(&mut buf, limits)?;
 
-    loop {
-        let Some((line, after_line)) = read_line(input, cursor) else {
-            return Ok(None);
-        };
-
-        let (size, extension) = parse_chunk_size(line, &mut quirks)?;
-
-        if extension && !quirks.contains(&Quirk::ChunkExtension) {
-            quirks.push(Quirk::ChunkExtension);
-        }
-
-        if size == 0 {
-            let Some((trailers, consumed)) = read_trailers(input, after_line, limits, &mut quirks)?
-            else {
-                return Ok(None);
-            };
-
-            if consumed < input.len() && !quirks.contains(&Quirk::DataAfterFinalChunk) {
-                // Bytes after the terminator on a connection with no pipelined request
-                // outstanding are the classic smuggled-prefix signature.
-                quirks.push(Quirk::DataAfterFinalChunk);
-            }
-
-            return Ok(Some(DecodedChunks {
-                body: body.freeze(),
-                trailers,
-                quirks,
-                truncated,
-                consumed,
-            }));
-        }
-
-        // Bound the chunk before allocating for it: the size is attacker-controlled.
-        let size = usize::try_from(size).map_err(|_| {
-            HexoraError::LimitExceeded(hexora_types::error::LimitError::BodyTooLarge {
-                limit: limits.max_body_bytes,
-            })
-        })?;
-        if body.len() as u64 + size as u64 > limits.max_body_bytes {
-            body.truncate(limits.max_body_bytes as usize);
-            truncated = true;
-            return Ok(Some(DecodedChunks {
-                body: body.freeze(),
-                trailers: Headers::new(),
-                quirks,
-                truncated,
-                consumed: input.len(),
-            }));
-        }
-
-        let end = after_line + size;
-        if input.len() < end {
-            return Ok(None);
-        }
-        body.extend_from_slice(&input[after_line..end]);
-
-        // The chunk data is followed by CRLF. A server that omits it is a differential
-        // worth noting, but the byte count already told us where the chunk ended.
-        cursor = match input.get(end..end + 2) {
-            Some(b"\r\n") => end + 2,
-            Some([b'\n', _]) | Some([b'\n']) => {
-                push_once(&mut quirks, Quirk::BareLf);
-                end + 1
-            }
-            Some(_) => {
-                push_once(&mut quirks, Quirk::MissingChunkTerminator);
-                end
-            }
-            None => return Ok(None),
-        };
+    if !decoder.is_done() && !decoder.truncated() {
+        return Ok(None);
     }
+
+    let consumed = input.len() - buf.len();
+    if !buf.is_empty() {
+        decoder.note(Quirk::DataAfterFinalChunk);
+    }
+
+    Ok(Some(DecodedChunks {
+        body,
+        trailers: decoder.trailers().clone(),
+        quirks: decoder.quirks().to_vec(),
+        truncated: decoder.truncated(),
+        consumed,
+    }))
+}
+
+/// Returns a complete line and how many bytes it occupied, terminator included.
+fn take_line(buf: &BytesMut) -> Option<(Vec<u8>, usize)> {
+    let lf = buf.iter().position(|b| *b == b'\n')?;
+    let end = if lf > 0 && buf[lf - 1] == b'\r' {
+        lf - 1
+    } else {
+        lf
+    };
+    Some((buf[..end].to_vec(), lf + 1))
 }
 
 /// Parses a chunk-size line, returning the size and whether an extension was present.
@@ -167,59 +322,6 @@ fn parse_chunk_size(line: &[u8], quirks: &mut Vec<Quirk>) -> Result<(u64, bool)>
         .map_err(|_| malformed(&format!("chunk size {text:?} does not fit in 64 bits")))?;
 
     Ok((size, extension))
-}
-
-/// Reads trailer fields after the terminating chunk, up to the blank line.
-fn read_trailers(
-    input: &[u8],
-    mut cursor: usize,
-    limits: &Limits,
-    quirks: &mut Vec<Quirk>,
-) -> Result<Option<(Headers, usize)>> {
-    let mut trailers = Headers::new();
-
-    loop {
-        let Some((line, next)) = read_line(input, cursor) else {
-            return Ok(None);
-        };
-        cursor = next;
-
-        if line.is_empty() {
-            if !trailers.is_empty() {
-                push_once(quirks, Quirk::TrailerFields);
-            }
-            return Ok(Some((trailers, cursor)));
-        }
-
-        if trailers.len() >= limits.max_header_count {
-            return Err(HexoraError::LimitExceeded(
-                hexora_types::error::LimitError::HeadersTooLarge {
-                    limit: limits.max_header_count,
-                },
-            ));
-        }
-
-        if let Some(colon) = line.iter().position(|b| *b == b':') {
-            trailers.append(Header {
-                name: String::from_utf8_lossy(trim_ascii(&line[..colon])).into_owned(),
-                value: Bytes::copy_from_slice(trim_ascii(&line[colon + 1..])),
-            });
-        } else {
-            push_once(quirks, Quirk::HeaderWithoutColon);
-        }
-    }
-}
-
-/// Returns the line starting at `from` and the offset just past its terminator.
-fn read_line(input: &[u8], from: usize) -> Option<(&[u8], usize)> {
-    let rest = input.get(from..)?;
-    let lf = rest.iter().position(|b| *b == b'\n')?;
-    let end = if lf > 0 && rest[lf - 1] == b'\r' {
-        lf - 1
-    } else {
-        lf
-    };
-    Some((&rest[..end], from + lf + 1))
 }
 
 fn push_once(quirks: &mut Vec<Quirk>, quirk: Quirk) {
@@ -273,8 +375,7 @@ mod tests {
 
     #[test]
     fn decodes_an_empty_body() {
-        let result = decode_ok(b"0\r\n\r\n");
-        assert!(result.body.is_empty());
+        assert!(decode_ok(b"0\r\n\r\n").body.is_empty());
     }
 
     #[test]
@@ -305,7 +406,52 @@ mod tests {
         assert_eq!(result.body.as_ref(), b"a\r\nb\r\nc");
     }
 
-    // ---------------------------------------------------------------- partial
+    // ------------------------------------------------------------- incremental
+
+    #[test]
+    fn decoding_one_byte_at_a_time_gives_the_same_answer() {
+        // The property that makes streaming safe: an arbitrary split of the input
+        // must not change the output.
+        let input = b"5\r\nhello\r\n6\r\n world\r\n0\r\nX-T: 1\r\n\r\n";
+        let mut decoder = Decoder::new();
+        let mut buf = BytesMut::new();
+        let mut out = Vec::new();
+
+        for byte in input {
+            buf.extend_from_slice(&[*byte]);
+            out.extend_from_slice(&decoder.push(&mut buf, &Limits::default()).unwrap());
+        }
+
+        assert!(decoder.is_done());
+        assert_eq!(out, b"hello world");
+        assert_eq!(decoder.trailers().get("X-T").unwrap().value_lossy(), "1");
+    }
+
+    #[test]
+    fn every_split_point_produces_the_same_body() {
+        let input = b"3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n";
+        for split in 0..input.len() {
+            let mut decoder = Decoder::new();
+            let mut buf = BytesMut::from(&input[..split]);
+            let mut out = Vec::new();
+            out.extend_from_slice(&decoder.push(&mut buf, &Limits::default()).unwrap());
+            buf.extend_from_slice(&input[split..]);
+            out.extend_from_slice(&decoder.push(&mut buf, &Limits::default()).unwrap());
+
+            assert!(decoder.is_done(), "split at {split} did not complete");
+            assert_eq!(out, b"abcdef", "split at {split} changed the body");
+        }
+    }
+
+    #[test]
+    fn a_chunk_is_emitted_before_the_body_is_complete() {
+        // The point of streaming: usable output before the terminating chunk.
+        let mut decoder = Decoder::new();
+        let mut buf = BytesMut::from(&b"5\r\nhello\r\n"[..]);
+        let first = decoder.push(&mut buf, &Limits::default()).unwrap();
+        assert_eq!(first.as_ref(), b"hello");
+        assert!(!decoder.is_done(), "more chunks may still follow");
+    }
 
     #[test]
     fn incomplete_input_asks_for_more_rather_than_guessing() {
@@ -442,6 +588,28 @@ mod tests {
         .unwrap();
         assert!(result.truncated);
         assert!(result.body.len() <= 8);
+    }
+
+    #[test]
+    fn a_body_streaming_forever_is_cut_off_mid_stream() {
+        // No terminating chunk ever arrives. The limit, not the server, ends it.
+        let limits = Limits {
+            max_body_bytes: 1024,
+            ..Default::default()
+        };
+        let mut decoder = Decoder::new();
+        let mut buf = BytesMut::new();
+
+        for _ in 0..100 {
+            buf.extend_from_slice(b"64\r\n");
+            buf.extend_from_slice(&[b'A'; 0x64]);
+            buf.extend_from_slice(b"\r\n");
+            decoder.push(&mut buf, &limits).unwrap();
+            if decoder.truncated() {
+                break;
+            }
+        }
+        assert!(decoder.truncated(), "an endless stream must be stopped");
     }
 
     #[test]

@@ -1,13 +1,22 @@
 //! The TCP transport.
 //!
-//! M1.1 scope: HTTP/1.1 (and 1.0) over plaintext TCP, bodies delimited by
-//! `Content-Length` or by connection close. TLS is M1.2, streaming is M1.3, pooling is
-//! M1.4, chunked decoding is M1.5.
+//! HTTP/1.0 and HTTP/1.1 over plaintext TCP or TLS, with bodies delimited by
+//! `Content-Length`, chunked transfer coding, or connection close.
 //!
-//! Unimplemented framing fails loudly rather than returning a wrong body. A chunked
-//! response here returns [`HexoraError::NotImplemented`], because silently handing back
-//! the raw chunk headers as if they were content would corrupt every measurement built
-//! on top of it — and in a security tool, a wrong body becomes a wrong finding.
+//! # Two ways to send
+//!
+//! [`TcpTransport::send_streaming`] returns as soon as the response *head* has
+//! arrived, handing back a [`BodyStream`] that owns the connection. That is what the
+//! proxy needs: it can forward bytes as they come rather than holding an entire
+//! response in memory, which is the difference between working and not working for
+//! downloads, server-sent events and long-poll endpoints.
+//!
+//! [`HttpTransport::send`] is the buffered convenience built on top of it, for
+//! callers — the repeater, `hexora send` — that genuinely want the whole body.
+//!
+//! Connection reuse is M1.4. Each request currently opens its own connection, which is
+//! deliberate: a pool that mis-frames one response corrupts the next, so the framing
+//! wants to be proven first.
 //!
 //! # Timeouts
 //!
@@ -19,7 +28,7 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
 use hexora_types::error::{HexoraError, NetworkError, Result, TimeoutPhase};
 use hexora_types::http::{HttpRequest, HttpResponse};
@@ -27,10 +36,10 @@ use hexora_types::limits::Limits;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+use crate::body::BodyStream;
 use crate::parse::{find_head_end, parse_response_head, BodyFraming, Quirk, ResponseHead};
 use crate::tls::TlsConfig;
 use crate::write::serialize_request;
-use crate::{chunked, decode};
 
 /// Reads from the socket in chunks of this size.
 const READ_CHUNK: usize = 16 * 1024;
@@ -62,72 +71,146 @@ impl TcpTransport {
     pub fn with_tls(tls: TlsConfig) -> Self {
         Self { tls }
     }
-}
 
-/// What came back, before it is turned into an [`HttpResponse`].
-#[derive(Debug)]
-struct RawExchange {
-    head: ResponseHead,
-    body: Bytes,
-    truncated: bool,
-    /// Quirks found while decoding the body, on top of those from the head.
-    body_quirks: Vec<Quirk>,
-}
-
-#[async_trait]
-impl HttpTransport for TcpTransport {
-    async fn send(&self, request: HttpRequest, options: SendOptions) -> Result<Exchange> {
+    /// Sends a request and returns as soon as the response *head* has arrived.
+    ///
+    /// The body is still on the wire. This is what the proxy uses: it can begin
+    /// forwarding immediately instead of holding the whole response in memory, which
+    /// is what makes downloads, server-sent events and long-poll endpoints work.
+    pub async fn send_streaming(
+        &self,
+        request: HttpRequest,
+        options: SendOptions,
+    ) -> Result<StreamingExchange> {
         let started = Instant::now();
         let limits = &options.limits;
         let wire = serialize_request(&request);
 
         let tcp = connect(&request.service.host, request.service.port, limits).await?;
 
-        let (raw, tls) = if request.service.secure {
-            let (mut stream, tls) =
+        // Boxed so the body stream can own the connection, whichever kind it is.
+        let (mut connection, tls): (Box<dyn Connection>, _) = if request.service.secure {
+            let (stream, tls) =
                 crate::tls::handshake(tcp, &request.service.host, &self.tls, limits).await?;
-            write_all(&mut stream, &wire, limits).await?;
-            let raw = read_response(&mut stream, &request.method, limits).await?;
-            (raw, Some(tls))
+            (Box::new(stream), Some(tls))
         } else {
-            let mut stream = tcp;
-            write_all(&mut stream, &wire, limits).await?;
-            let raw = read_response(&mut stream, &request.method, limits).await?;
-            (raw, None)
+            (Box::new(tcp), None)
         };
 
-        let response = HttpResponse {
-            status: raw.head.status,
-            reason: raw.head.reason.clone(),
-            version: raw.head.version,
-            headers: raw.head.headers.clone(),
-            body: raw.body,
-            truncated: raw.truncated,
-        };
+        write_all(&mut connection, &wire, limits).await?;
+        let (head, prefix) = read_head(&mut connection, &request.method, limits).await?;
 
-        let signals: Vec<&str> = raw
-            .head
-            .quirks
-            .iter()
-            .chain(raw.body_quirks.iter())
-            .filter(|q| q.is_smuggling_signal())
-            .map(Quirk::explanation)
-            .collect();
-        if !signals.is_empty() {
-            // Warn, not debug: this is a finding waiting to be raised, not noise.
-            tracing::warn!(
-                url = %request.url(),
-                signals = ?signals,
-                "response framing shows a request-smuggling signal"
-            );
+        // A declared length over the cap is refused before a byte of body is read.
+        // Streaming still enforces the limit as bytes arrive, because the declared
+        // length can lie — but there is no sense downloading 100 MB of a response that
+        // announced a gigabyte we were never going to keep.
+        if let BodyFraming::ContentLength(declared) = head.framing {
+            limits.check_body_size(declared)?;
         }
 
-        Ok(Exchange {
+        let body = BodyStream::new(connection, prefix, head.framing, limits.clone());
+
+        Ok(StreamingExchange {
             request,
-            response,
-            duration: started.elapsed(),
+            head,
             tls,
+            body,
+            started,
         })
+    }
+}
+
+/// Anything that can carry an HTTP conversation: a plain socket or a TLS stream.
+trait Connection: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> Connection for T {}
+
+/// A response whose head has arrived and whose body is still being read.
+///
+/// The stream owns the connection; dropping it closes the connection, which is the
+/// right way to abandon a response that is taking too long.
+pub struct StreamingExchange {
+    /// The request as it was sent.
+    pub request: HttpRequest,
+    /// The parsed response head, including any quirks found in it.
+    pub head: ResponseHead,
+    /// What the TLS handshake produced, for `https` exchanges.
+    pub tls: Option<hexora_types::tls::TlsInfo>,
+    /// The body, still arriving.
+    pub body: BodyStream,
+    started: Instant,
+}
+
+impl std::fmt::Debug for StreamingExchange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamingExchange")
+            .field("url", &self.request.url())
+            .field("status", &self.head.status)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StreamingExchange {
+    /// Reads the body to completion and returns the buffered exchange.
+    pub async fn collect(self) -> Result<Exchange> {
+        let content_encoding = self
+            .head
+            .headers
+            .get("Content-Encoding")
+            .map(|h| h.value_lossy().into_owned())
+            .unwrap_or_default();
+
+        let mut head = self.head;
+        let request = self.request;
+        let collected = self.body.collect(&content_encoding).await?;
+
+        // Trailers join the header list so nothing downstream has to know whether a
+        // field arrived before or after the body.
+        for trailer in collected.trailers.iter() {
+            head.headers.append(trailer.clone());
+        }
+
+        report_smuggling_signals(&request, &head, &collected.quirks);
+
+        Ok(Exchange {
+            response: HttpResponse {
+                status: head.status,
+                reason: head.reason.clone(),
+                version: head.version,
+                headers: head.headers,
+                body: collected.bytes,
+                truncated: collected.truncated,
+            },
+            request,
+            duration: self.started.elapsed(),
+            tls: self.tls,
+        })
+    }
+}
+
+/// Warns when a response's framing shows a desync primitive.
+///
+/// At `warn` rather than `debug`: this is a finding waiting to be raised, not noise.
+fn report_smuggling_signals(request: &HttpRequest, head: &ResponseHead, body_quirks: &[Quirk]) {
+    let signals: Vec<&str> = head
+        .quirks
+        .iter()
+        .chain(body_quirks.iter())
+        .filter(|q| q.is_smuggling_signal())
+        .map(Quirk::explanation)
+        .collect();
+    if !signals.is_empty() {
+        tracing::warn!(
+            url = %request.url(),
+            signals = ?signals,
+            "response framing shows a request-smuggling signal"
+        );
+    }
+}
+
+#[async_trait]
+impl HttpTransport for TcpTransport {
+    async fn send(&self, request: HttpRequest, options: SendOptions) -> Result<Exchange> {
+        self.send_streaming(request, options).await?.collect().await
     }
 }
 
@@ -187,101 +270,6 @@ async fn write_all<S: AsyncWrite + Unpin>(
     Ok(())
 }
 
-async fn read_response<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    request_method: &str,
-    limits: &Limits,
-) -> Result<RawExchange> {
-    let (mut head, mut body) = read_head(stream, request_method, limits).await?;
-
-    let mut truncated = false;
-    let mut body_quirks: Vec<Quirk> = Vec::new();
-    match head.framing {
-        BodyFraming::None => body.clear(),
-
-        BodyFraming::ContentLength(length) => {
-            limits.check_body_size(length)?;
-            let wanted = usize::try_from(length).map_err(|_| {
-                HexoraError::LimitExceeded(hexora_types::error::LimitError::BodyTooLarge {
-                    limit: limits.max_body_bytes,
-                })
-            })?;
-            read_exactly(stream, &mut body, wanted, limits).await?;
-            if body.len() > wanted {
-                // Extra bytes belong to a pipelined response we did not ask for.
-                // Keeping them would corrupt this body; they are dropped with the
-                // connection, which we close anyway until M1.4.
-                body.truncate(wanted);
-            }
-        }
-
-        BodyFraming::UntilClose => {
-            truncated = read_until_close(stream, &mut body, limits).await?;
-        }
-
-        BodyFraming::Chunked => {
-            let decoded = read_chunked(stream, &mut body, limits).await?;
-            truncated = decoded.truncated;
-            body_quirks.extend(decoded.quirks);
-            // Trailers are appended to the header list so nothing downstream has to
-            // know whether a field arrived before or after the body.
-            for trailer in decoded.trailers.iter() {
-                head.headers.append(trailer.clone());
-            }
-            body = BytesMut::from(&decoded.body[..]);
-        }
-    }
-
-    // Content coding is reversed last: transfer coding describes how the bytes were
-    // framed, content coding describes what they are.
-    if !matches!(head.framing, BodyFraming::None) && !truncated {
-        if let Some(encoding) = head.headers.get("Content-Encoding") {
-            let value = encoding.value_lossy().into_owned();
-            let decoded = decode::decode_body(&value, &body, limits)?;
-            truncated |= decoded.truncated;
-            body = BytesMut::from(&decoded.body[..]);
-        }
-    }
-
-    Ok(RawExchange {
-        head,
-        body: body.freeze(),
-        truncated,
-        body_quirks,
-    })
-}
-
-/// Reads chunks until the terminating chunk arrives.
-async fn read_chunked<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    buf: &mut BytesMut,
-    limits: &Limits,
-) -> Result<chunked::DecodedChunks> {
-    let deadline = tokio::time::Instant::now() + limits.total_timeout;
-
-    loop {
-        if let Some(decoded) = chunked::decode(buf, limits)? {
-            return Ok(decoded);
-        }
-
-        let read = tokio::time::timeout_at(deadline, read_more(stream, buf))
-            .await
-            .map_err(|_| {
-                HexoraError::Network(NetworkError::Timeout {
-                    phase: TimeoutPhase::ReadResponseBody,
-                    elapsed: limits.total_timeout,
-                })
-            })??;
-        if read == 0 {
-            return Err(HexoraError::Protocol(
-                hexora_types::error::ProtocolError::InvalidChunkedEncoding(
-                    "connection closed before the terminating chunk".to_string(),
-                ),
-            ));
-        }
-    }
-}
-
 /// Reads until the head terminator, returning the head and any body bytes that
 /// arrived in the same read.
 async fn read_head<S: AsyncRead + Unpin>(
@@ -326,66 +314,10 @@ async fn read_head<S: AsyncRead + Unpin>(
     }
 }
 
-async fn read_exactly<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    buf: &mut BytesMut,
-    wanted: usize,
-    limits: &Limits,
-) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + limits.total_timeout;
-    while buf.len() < wanted {
-        let read = tokio::time::timeout_at(deadline, read_more(stream, buf))
-            .await
-            .map_err(|_| {
-                HexoraError::Network(NetworkError::Timeout {
-                    phase: TimeoutPhase::ReadResponseBody,
-                    elapsed: limits.total_timeout,
-                })
-            })??;
-        if read == 0 {
-            return Err(HexoraError::Protocol(
-                hexora_types::error::ProtocolError::Malformed {
-                    protocol: "HTTP/1.1",
-                    reason: format!(
-                        "connection closed after {} of {wanted} declared body bytes",
-                        buf.len()
-                    ),
-                },
-            ));
-        }
-        limits.check_body_size(buf.len() as u64)?;
-    }
-    Ok(())
-}
-
-/// Reads until EOF. Returns whether the body was cut short by a limit.
-async fn read_until_close<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    buf: &mut BytesMut,
-    limits: &Limits,
-) -> Result<bool> {
-    let deadline = tokio::time::Instant::now() + limits.total_timeout;
-    loop {
-        if buf.len() as u64 >= limits.max_body_bytes {
-            buf.truncate(limits.max_body_bytes as usize);
-            // Truncation is reported rather than silently applied: a finding built on
-            // a partial body must disclose that it is partial.
-            return Ok(true);
-        }
-        let read = tokio::time::timeout_at(deadline, read_more(stream, buf))
-            .await
-            .map_err(|_| {
-                HexoraError::Network(NetworkError::Timeout {
-                    phase: TimeoutPhase::ReadResponseBody,
-                    elapsed: limits.total_timeout,
-                })
-            })??;
-        if read == 0 {
-            return Ok(false);
-        }
-    }
-}
-
+/// Reads one batch of bytes onto the end of `buf`, returning how many arrived.
+///
+/// Used only while reading the head; once the body starts, [`BodyStream`] owns the
+/// connection and does its own reading.
 async fn read_more<S: AsyncRead + Unpin>(stream: &mut S, buf: &mut BytesMut) -> Result<usize> {
     let before = buf.len();
     buf.resize(before + READ_CHUNK, 0);

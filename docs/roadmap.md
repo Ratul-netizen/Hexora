@@ -58,8 +58,8 @@ Split into small steps, because a single "HTTP engine" milestone is undebuggable
 | --- | --- | --- |
 | M1.1 | HTTP/1.1 over TCP: request writer, response head parser, `Content-Length` bodies, real `HttpTransport` | **DONE** |
 | M1.2 | TLS via rustls — SNI, ALPN, verification, client certificates | **DONE** |
-| M1.3 | Streaming bodies with **incremental** limit enforcement | PLANNED · **next** |
-| M1.4 | Connection pooling, keep-alive, per-host caps | PLANNED |
+| M1.3 | Streaming bodies with **incremental** limit enforcement | **DONE** |
+| M1.4 | Connection pooling, keep-alive, per-host caps | PLANNED · **next** |
 | M1.5 | Chunked decoding, gzip/deflate/brotli, decompression-bomb protection | **DONE** (taken early — most real sites are chunked) |
 | M1.6 | Redirects — opt-in, **scope-checked at every hop** | PLANNED |
 | M1.7 | Hostile-server test suite, `cargo-fuzz` targets for the parser | PLANNED |

@@ -31,6 +31,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod body;
 pub mod chunked;
 pub mod decode;
 pub mod parse;
@@ -38,6 +39,7 @@ pub mod tls;
 pub mod transport;
 pub mod write;
 
+pub use body::{BodyStream, CollectedBody};
 pub use parse::{BodyFraming, Quirk, ResponseHead};
 pub use tls::{ClientIdentity, TlsConfig};
-pub use transport::TcpTransport;
+pub use transport::{StreamingExchange, TcpTransport};
