@@ -60,7 +60,10 @@ pub struct BlobRef {
 impl BlobRef {
     /// Computes the reference for a body without storing it.
     pub fn of(content: &[u8]) -> Self {
-        Self { hash: hex_sha256(content), size: content.len() as u64 }
+        Self {
+            hash: hex_sha256(content),
+            size: content.len() as u64,
+        }
     }
 
     /// The lowercase hex SHA-256 of the content.
@@ -89,7 +92,10 @@ impl BlobRef {
                 reason: format!("{hash:?} is not a SHA-256 hex digest"),
             });
         }
-        Ok(Self { hash: hash.to_ascii_lowercase(), size })
+        Ok(Self {
+            hash: hash.to_ascii_lowercase(),
+            size,
+        })
     }
 }
 
@@ -187,7 +193,11 @@ impl BlobStore for FsBlobStore {
         // Write to a unique temporary name and rename into place, so a crash or a
         // concurrent writer can never leave a half-written blob visible under a hash
         // that promises complete content.
-        let temp = dir.join(format!("{}.{}.tmp", reference.hash, uuid::Uuid::now_v7().simple()));
+        let temp = dir.join(format!(
+            "{}.{}.tmp",
+            reference.hash,
+            uuid::Uuid::now_v7().simple()
+        ));
         {
             let mut file = fs::File::create(&temp)?;
             file.write_all(content)?;
@@ -211,11 +221,15 @@ impl BlobStore for FsBlobStore {
     fn get(&self, reference: &BlobRef) -> Result<Vec<u8>> {
         let path = self.path_for(&reference.hash);
         let content = fs::read(&path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => StorageError::BlobMissing { hash: reference.hash.clone() },
+            std::io::ErrorKind::NotFound => StorageError::BlobMissing {
+                hash: reference.hash.clone(),
+            },
             _ => StorageError::Io(e),
         })?;
         if hex_sha256(&content) != reference.hash {
-            return Err(StorageError::BlobIntegrity { hash: reference.hash.clone() });
+            return Err(StorageError::BlobIntegrity {
+                hash: reference.hash.clone(),
+            });
         }
         Ok(content)
     }
@@ -274,15 +288,24 @@ impl BlobStore for MemoryBlobStore {
             .expect("blob mutex poisoned")
             .get(&reference.hash)
             .cloned()
-            .ok_or_else(|| StorageError::BlobMissing { hash: reference.hash.clone() })
+            .ok_or_else(|| StorageError::BlobMissing {
+                hash: reference.hash.clone(),
+            })
     }
 
     fn contains(&self, reference: &BlobRef) -> Result<bool> {
-        Ok(self.blobs.lock().expect("blob mutex poisoned").contains_key(&reference.hash))
+        Ok(self
+            .blobs
+            .lock()
+            .expect("blob mutex poisoned")
+            .contains_key(&reference.hash))
     }
 
     fn delete(&self, reference: &BlobRef) -> Result<()> {
-        self.blobs.lock().expect("blob mutex poisoned").remove(&reference.hash);
+        self.blobs
+            .lock()
+            .expect("blob mutex poisoned")
+            .remove(&reference.hash);
         Ok(())
     }
 }
@@ -305,7 +328,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         vec![
             ("memory", Box::new(MemoryBlobStore::new()), None),
-            ("filesystem", Box::new(FsBlobStore::open(dir.path()).unwrap()), Some(dir)),
+            (
+                "filesystem",
+                Box::new(FsBlobStore::open(dir.path()).unwrap()),
+                Some(dir),
+            ),
         ]
     }
 
@@ -365,7 +392,10 @@ mod tests {
             let reference = BlobRef::of(b"never stored");
             assert!(!store.contains(&reference).unwrap(), "{name}");
             let err = store.get(&reference).unwrap_err();
-            assert!(matches!(err, StorageError::BlobMissing { .. }), "{name}: {err:?}");
+            assert!(
+                matches!(err, StorageError::BlobMissing { .. }),
+                "{name}: {err:?}"
+            );
         }
     }
 
@@ -413,9 +443,15 @@ mod tests {
         for i in 0..16 {
             store.put(format!("body {i}").as_bytes()).unwrap();
         }
+        // Match on the file name only. `tempfile::tempdir()` names the enclosing
+        // directory something like `.tmpAb12Cd`, so testing the whole path would
+        // match every blob and fail regardless of what the store did.
         let leftovers: Vec<_> = walk(dir.path())
             .into_iter()
-            .filter(|p| p.to_string_lossy().contains(".tmp"))
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(".tmp"))
+            })
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
     }
@@ -432,7 +468,10 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert!(top_level.len() > 1, "expected sharding, got {top_level:?}");
-        assert!(top_level.iter().all(|n| n.len() == 2), "shards are two hex chars: {top_level:?}");
+        assert!(
+            top_level.iter().all(|n| n.len() == 2),
+            "shards are two hex chars: {top_level:?}"
+        );
     }
 
     #[test]
@@ -457,7 +496,9 @@ mod tests {
 
     fn walk(root: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
-        let Ok(entries) = fs::read_dir(root) else { return out };
+        let Ok(entries) = fs::read_dir(root) else {
+            return out;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {

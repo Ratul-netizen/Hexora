@@ -79,20 +79,25 @@ impl Confidence {
 pub enum Evidence {
     /// A request/response pair that demonstrates the issue.
     Exchange {
+        /// The request that demonstrates the issue.
         request: RequestId,
+        /// The response it produced, if one was received.
         response: Option<ResponseId>,
         /// What the reader should notice about this exchange.
         note: String,
     },
     /// Two exchanges whose difference is the point, e.g. authorization testing.
     Comparison {
+        /// The control request, whose result is expected.
         baseline: RequestId,
+        /// The altered request, whose result is the finding.
         variant: RequestId,
         /// The observable difference, e.g. "identity B received user A's email".
         difference: String,
     },
     /// A byte range within a response body that carries the proof.
     ResponseExcerpt {
+        /// The response the excerpt was taken from.
         response: ResponseId,
         /// Byte offset into the recorded body.
         offset: usize,
@@ -101,14 +106,23 @@ pub enum Evidence {
     },
     /// An out-of-band interaction attributable to a specific request.
     OutOfBand {
+        /// The request believed to have caused the interaction.
         request: RequestId,
+        /// The recorded interaction, correlated by planted token.
         interaction: crate::ids::InteractionId,
+        /// Protocol the interaction arrived on, e.g. `dns` or `http`.
         protocol: String,
     },
     /// A measured timing difference, with the samples that produced it.
     Timing {
+        /// The request that was timed.
         request: RequestId,
+        /// Round-trip samples for the control case, in milliseconds.
+        ///
+        /// Samples rather than an average: a mean alone cannot show whether a
+        /// difference survives the noise of a real network.
         baseline_ms: Vec<u64>,
+        /// Round-trip samples for the variant case, in milliseconds.
         variant_ms: Vec<u64>,
     },
 }
@@ -201,15 +215,27 @@ pub struct Finding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FindingSource {
     /// A passive check over observed traffic.
-    PassiveScan { detector: String },
+    PassiveScan {
+        /// Detector identifier, e.g. `passive.missing_hsts`.
+        detector: String,
+    },
     /// An active check that sent its own traffic.
-    ActiveScan { detector: String },
+    ActiveScan {
+        /// Detector identifier, e.g. `active.sqli.error_based`.
+        detector: String,
+    },
     /// The authorization-testing subsystem.
     AuthorizationTest,
     /// An extension.
-    Extension { extension: String },
+    Extension {
+        /// The extension's manifest identifier.
+        extension: String,
+    },
     /// The AI layer. Always starts at [`Confidence::Reported`].
-    Ai { model: String },
+    Ai {
+        /// Which model produced the claim, recorded so a later reviewer can weigh it.
+        model: String,
+    },
     /// A human tester.
     Manual,
 }
@@ -313,26 +339,41 @@ mod tests {
 
     #[test]
     fn ai_cannot_self_certify_above_reported() {
-        let source = FindingSource::Ai { model: "some-model".into() };
+        let source = FindingSource::Ai {
+            model: "some-model".into(),
+        };
         assert_eq!(source.max_unverified_confidence(), Confidence::Reported);
     }
 
     #[test]
     fn passive_checks_cannot_self_certify_above_reported() {
-        let source = FindingSource::PassiveScan { detector: "missing_hsts".into() };
+        let source = FindingSource::PassiveScan {
+            detector: "missing_hsts".into(),
+        };
         assert_eq!(source.max_unverified_confidence(), Confidence::Reported);
     }
 
     #[test]
     fn a_confident_finding_without_evidence_is_rejected() {
-        let f = finding(Confidence::Confirmed, FindingSource::AuthorizationTest, vec![]);
+        let f = finding(
+            Confidence::Confirmed,
+            FindingSource::AuthorizationTest,
+            vec![],
+        );
         let problems = f.validate().unwrap_err();
-        assert!(problems.iter().any(|p| p.contains("no evidence")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("no evidence")),
+            "{problems:?}"
+        );
     }
 
     #[test]
     fn a_confident_finding_with_evidence_is_accepted() {
-        let f = finding(Confidence::Confirmed, FindingSource::AuthorizationTest, some_evidence());
+        let f = finding(
+            Confidence::Confirmed,
+            FindingSource::AuthorizationTest,
+            some_evidence(),
+        );
         assert!(f.validate().is_ok());
     }
 
@@ -340,20 +381,32 @@ mod tests {
     fn a_reported_finding_may_have_no_evidence() {
         let f = finding(
             Confidence::Reported,
-            FindingSource::Ai { model: "some-model".into() },
+            FindingSource::Ai {
+                model: "some-model".into(),
+            },
             vec![],
         );
-        assert!(f.validate().is_ok(), "unverified leads are allowed, they are just labelled");
+        assert!(
+            f.validate().is_ok(),
+            "unverified leads are allowed, they are just labelled"
+        );
     }
 
     #[test]
     fn actionable_findings_require_reproduction_steps() {
-        let mut f = finding(Confidence::Firm, FindingSource::ActiveScan {
-            detector: "sqli.error_based".into(),
-        }, some_evidence());
+        let mut f = finding(
+            Confidence::Firm,
+            FindingSource::ActiveScan {
+                detector: "sqli.error_based".into(),
+            },
+            some_evidence(),
+        );
         f.reproduction = "   ".into();
         let problems = f.validate().unwrap_err();
-        assert!(problems.iter().any(|p| p.contains("reproduction")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("reproduction")),
+            "{problems:?}"
+        );
     }
 
     #[test]

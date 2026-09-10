@@ -136,7 +136,10 @@ fn init_tracing(verbosity: u8) {
     // Secrets never reach a log because credentials are wrapped in
     // `hexora_types::redact::Secret`, whose Debug output is a placeholder. See
     // docs/security-invariants.md, invariant 2.
-    tracing_subscriber::fmt().with_env_filter(filter).with_target(false).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .init();
 }
 
 /// Confirms that a project directory really is one before acting on it.
@@ -175,7 +178,10 @@ mod tests {
     #[test]
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
-        assert!(help.contains("M0"), "users must not mistake this for a finished tool");
+        assert!(
+            help.contains("M0"),
+            "users must not mistake this for a finished tool"
+        );
     }
 
     #[test]

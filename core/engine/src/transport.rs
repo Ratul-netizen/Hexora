@@ -90,12 +90,20 @@ pub struct SendOptions {
 impl SendOptions {
     /// Options for an interactive, human-initiated request.
     pub fn interactive(origin: Origin) -> Self {
-        Self { origin, limits: Limits::default(), follow_redirects: false }
+        Self {
+            origin,
+            limits: Limits::default(),
+            follow_redirects: false,
+        }
     }
 
     /// Options for an automated, high-volume subsystem.
     pub fn automated(origin: Origin) -> Self {
-        Self { origin, limits: Limits::automated(), follow_redirects: false }
+        Self {
+            origin,
+            limits: Limits::automated(),
+            follow_redirects: false,
+        }
     }
 }
 
@@ -129,12 +137,18 @@ impl Default for RecordingTransport {
 impl RecordingTransport {
     /// A transport that answers every request with `200 OK` and an empty body.
     pub fn new() -> Self {
-        Self { sent: std::sync::Mutex::new(Vec::new()), status: 200 }
+        Self {
+            sent: std::sync::Mutex::new(Vec::new()),
+            status: 200,
+        }
     }
 
     /// A transport that answers with a fixed status.
     pub fn with_status(status: u16) -> Self {
-        Self { sent: std::sync::Mutex::new(Vec::new()), status }
+        Self {
+            sent: std::sync::Mutex::new(Vec::new()),
+            status,
+        }
     }
 
     /// Every request that reached the transport, in order.
@@ -149,14 +163,20 @@ impl RecordingTransport {
 
     /// The URLs that reached the transport.
     pub fn urls(&self) -> Vec<String> {
-        self.sent().iter().map(|(request, _)| request.url()).collect()
+        self.sent()
+            .iter()
+            .map(|(request, _)| request.url())
+            .collect()
     }
 }
 
 #[async_trait]
 impl HttpTransport for RecordingTransport {
     async fn send(&self, request: HttpRequest, options: SendOptions) -> Result<Exchange> {
-        self.sent.lock().expect("recording mutex poisoned").push((request.clone(), options.origin));
+        self.sent
+            .lock()
+            .expect("recording mutex poisoned")
+            .push((request.clone(), options.origin));
         Ok(Exchange {
             request,
             response: HttpResponse {
@@ -186,9 +206,17 @@ mod tests {
 
     #[test]
     fn machine_driven_origins_are_automated() {
-        for origin in [Origin::Scanner, Origin::Fuzzer, Origin::Workflow, Origin::Ai, Origin::Authz]
-        {
-            assert!(origin.is_automated(), "{origin:?} generates traffic without a human decision");
+        for origin in [
+            Origin::Scanner,
+            Origin::Fuzzer,
+            Origin::Workflow,
+            Origin::Ai,
+            Origin::Authz,
+        ] {
+            assert!(
+                origin.is_automated(),
+                "{origin:?} generates traffic without a human decision"
+            );
         }
     }
 
@@ -202,7 +230,10 @@ mod tests {
     async fn the_recording_transport_captures_what_it_was_asked_to_send() {
         let transport = RecordingTransport::new();
         let request = HttpRequest::get(HttpService::new("example.com", 443, true), "/a");
-        transport.send(request, SendOptions::interactive(Origin::Repeater)).await.unwrap();
+        transport
+            .send(request, SendOptions::interactive(Origin::Repeater))
+            .await
+            .unwrap();
         assert_eq!(transport.count(), 1);
         assert_eq!(transport.urls(), ["https://example.com/a"]);
     }

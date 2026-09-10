@@ -1,3 +1,9 @@
+# Pinned rather than tracking `stable`, so a build in CI, on a teammate's machine and
+# in six months' time all use the same compiler.
+#
+# The floor is set by Hexora's dependency graph, not by preference: Tauri pulls in
+# `plist`, `serde_with`, `time` and the ICU crates, several of which declare an MSRV of
+# 1.88. Anything older fails to resolve.
 [toolchain]
-channel = "1.85"
+channel = "1.98"
 components = ["rustfmt", "clippy"]

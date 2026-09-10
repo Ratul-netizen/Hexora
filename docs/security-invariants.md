@@ -43,18 +43,31 @@ this; the guard is what makes the invariant real.
 
 ---
 
-## 2. Secrets never appear in logs, `Debug` output or error messages
+## 2. Secrets never appear in logs, `Debug` output, error messages or serialized output
 
 **Rule.** Credentials, session cookies, bearer tokens and API keys must not reach a
-log file, a crash report, a `Debug` rendering or an error string.
+log file, a crash report, a `Debug` rendering, an error string, an export, or an IPC
+payload to the frontend.
 
 **Why.** Hexora holds live credentials for a client's systems. A stack trace pasted
-into a bug report must not be a credential disclosure.
+into a bug report must not be a credential disclosure — and neither must a project
+export or a debug dump of an identity.
 
-**Enforced by.** `hexora_types::redact::Secret<T>`, whose `Debug` prints `<redacted>`
-and which has no `Display`. Reading the value requires `.expose()`, so every place a
-secret can escape is one grep away. `Credential` stores its material in `Secret`, so a
-`Debug` of an entire `Identity` — or of a struct containing one — is safe.
+**Enforced by.** `hexora_types::redact::Secret<T>`, which has:
+
+- a `Debug` that prints `<redacted>`,
+- no `Display`, so it cannot be interpolated into a message by accident,
+- and **no `Serialize`**.
+
+The missing `Serialize` is the load-bearing part. Redacting `Debug` alone is not
+enough: a credential leaks just as completely through `serde_json::to_string` as
+through a log line, and that call is far more likely to be written by someone building
+an export or an IPC response. Because `Secret` has no `Serialize` impl,
+`#[derive(Serialize)]` on any struct holding one is a **compile error**, not a silent
+leak. `Credential` and `Identity` are therefore deliberately not `Serialize`.
+
+Reading a secret requires `.expose()`. Persisting one requires the
+`redact::exposed` serde adapter, opted into per field. Both are one grep away.
 
 **Corollaries.**
 
@@ -62,9 +75,16 @@ secret can escape is one grep away. `Credential` stores its material in `Secret`
   `X-API-Key`, …) are redacted by default when traffic is rendered outside the UI.
   The UI itself shows them: that is the tester's job.
 - Turning redaction off is a per-export, explicit user action.
+- Anything that needs to show an identity to the frontend or a report sends a
+  purpose-built redacted view, never `Identity` itself.
+- `Deserialize` **is** implemented on `Secret`: loading a stored credential back is
+  necessary and is not a disclosure.
 
-**Tests.** `core/types/src/redact.rs`, and `secrets_do_not_leak_through_identity_debug_output`
-in `core/types/src/identity.rs`.
+**Tests.** `core/types/src/redact.rs` — `secret_debug_never_leaks_the_value`,
+`secret_nested_in_a_struct_still_redacts`, `the_exposed_adapter_round_trips_a_secret`.
+`core/types/src/identity.rs` — `secrets_do_not_leak_through_identity_debug_output`.
+The no-`Serialize` property is enforced by the compiler rather than by a test, which is
+stronger: a test can only catch the cases someone thought to write.
 
 ---
 

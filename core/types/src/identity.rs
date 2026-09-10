@@ -36,19 +36,41 @@ pub enum PrivilegeLevel {
 }
 
 /// The credential material that authenticates a request as some principal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Deliberately **not** `Serialize`: it holds [`Secret`] values, which have no
+/// `Serialize` impl, so deriving one here would be a compile error. Persisting a
+/// credential is a decision that must be written out explicitly with
+/// [`crate::redact::exposed`] on the storage path (M3), rather than something a
+/// `to_string` on a containing struct can do by accident.
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Credential {
     /// No credentials. Requests are sent exactly as written.
     None,
     /// A bearer token placed in the `Authorization` header.
-    Bearer { token: Secret<String> },
+    Bearer {
+        /// The token, without the `Bearer ` prefix.
+        token: Secret<String>,
+    },
     /// HTTP Basic credentials.
-    Basic { username: String, password: Secret<String> },
+    Basic {
+        /// The user-id, which RFC 7617 forbids from containing a colon.
+        username: String,
+        /// The password.
+        password: Secret<String>,
+    },
     /// One or more cookies.
-    Cookie { value: Secret<String> },
+    Cookie {
+        /// The full `Cookie` header value, e.g. `session=abc; csrf=def`.
+        value: Secret<String>,
+    },
     /// An arbitrary header, e.g. `X-API-Key`.
-    Header { name: String, value: Secret<String> },
+    Header {
+        /// The header name.
+        name: String,
+        /// The header value.
+        value: Secret<String>,
+    },
 }
 
 impl Credential {
@@ -94,7 +116,11 @@ impl Credential {
 }
 
 /// A principal that requests can be replayed as.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Not `Serialize`, for the same reason as [`Credential`]. Anything that needs to show
+/// an identity to the frontend or put it in a report sends a redacted view built for
+/// that purpose, never this type.
+#[derive(Debug, Clone, Deserialize)]
 pub struct Identity {
     /// Stable identifier.
     pub id: IdentityId,
@@ -135,7 +161,9 @@ impl Identity {
             id: IdentityId::new(),
             label: label.into(),
             privilege: PrivilegeLevel::User,
-            credential: Credential::Bearer { token: Secret::new(token.into()) },
+            credential: Credential::Bearer {
+                token: Secret::new(token.into()),
+            },
             extra_headers: Vec::new(),
             owned_object_ids: Vec::new(),
         }
@@ -164,12 +192,15 @@ impl Identity {
 /// Kept local so `hexora-types` stays dependency-light; the engine crates use the
 /// `base64` crate where performance matters.
 fn base64_standard(input: impl AsRef<[u8]>) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let bytes = input.as_ref();
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
         let indices = [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63];
         for (i, idx) in indices.iter().enumerate() {
@@ -192,7 +223,10 @@ mod tests {
         let identity = Identity::bearer("User A", "tok-123");
         let mut headers = Headers::new();
         identity.authenticate(&mut headers);
-        assert_eq!(headers.get("Authorization").unwrap().value_lossy(), "Bearer tok-123");
+        assert_eq!(
+            headers.get("Authorization").unwrap().value_lossy(),
+            "Bearer tok-123"
+        );
     }
 
     #[test]
@@ -201,7 +235,10 @@ mod tests {
         headers.append(Header::new("Authorization", "Bearer stale"));
         Identity::bearer("User A", "fresh").authenticate(&mut headers);
         assert_eq!(headers.count("Authorization"), 1);
-        assert_eq!(headers.get("Authorization").unwrap().value_lossy(), "Bearer fresh");
+        assert_eq!(
+            headers.get("Authorization").unwrap().value_lossy(),
+            "Bearer fresh"
+        );
     }
 
     #[test]
@@ -211,7 +248,10 @@ mod tests {
         headers.append(Header::new("Cookie", "session=leftover"));
         Identity::anonymous().authenticate(&mut headers);
         assert!(headers.get("Authorization").is_none());
-        assert!(headers.get("Cookie").is_none(), "anonymous must really be anonymous");
+        assert!(
+            headers.get("Cookie").is_none(),
+            "anonymous must really be anonymous"
+        );
     }
 
     #[test]
@@ -222,19 +262,64 @@ mod tests {
         assert!(!rendered.contains("super-secret-token"), "{rendered}");
     }
 
+    /// Obviously-fake fixture credentials.
+    ///
+    /// Hexora's own repository must stay clean for secret scanners. That means no
+    /// credential-shaped literal anywhere in the tree — not even a real RFC's worked
+    /// example, which is still a valid Base64 Basic Authentication string and will be
+    /// flagged as one. Naming the values this way makes it unambiguous to a human
+    /// reviewer that nothing here was ever live.
+    const TEST_USER: &str = "TEST_USER";
+    const TEST_PASSWORD: &str = "TEST_PASSWORD_NOT_A_SECRET";
+
     #[test]
     fn basic_auth_encodes_credentials_correctly() {
         let cred = Credential::Basic {
-            username: "aladdin".into(),
-            password: Secret::new("opensesame".into()),
+            username: TEST_USER.into(),
+            password: Secret::new(TEST_PASSWORD.into()),
         };
         let mut headers = Headers::new();
         cred.apply(&mut headers);
-        // RFC 7617's own example.
+
+        let value = headers
+            .get("Authorization")
+            .unwrap()
+            .value_lossy()
+            .into_owned();
+        let payload = value
+            .strip_prefix("Basic ")
+            .expect("RFC 7617 requires the Basic scheme prefix");
+
+        // Decoded with an independently written decoder rather than compared against a
+        // hard-coded base64 string. That keeps this a genuine round-trip check *and*
+        // keeps a Basic-auth credential literal out of the repository.
         assert_eq!(
-            headers.get("Authorization").unwrap().value_lossy(),
-            "Basic YWxhZGRpbjpvcGVuc2VzYW1l"
+            base64_decode(payload),
+            format!("{TEST_USER}:{TEST_PASSWORD}").into_bytes(),
+            "RFC 7617 encodes user-id:password"
         );
+    }
+
+    /// A minimal standard-alphabet base64 decoder, for tests only.
+    fn base64_decode(input: &str) -> Vec<u8> {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut bits = 0u32;
+        let mut bit_count = 0u32;
+        let mut out = Vec::new();
+        for byte in input.bytes().filter(|b| *b != b'=') {
+            let value = ALPHABET
+                .iter()
+                .position(|c| *c == byte)
+                .unwrap_or_else(|| panic!("invalid base64 character {byte:?}"));
+            bits = (bits << 6) | value as u32;
+            bit_count += 6;
+            if bit_count >= 8 {
+                bit_count -= 8;
+                out.push((bits >> bit_count) as u8);
+            }
+        }
+        out
     }
 
     #[test]
@@ -251,7 +336,10 @@ mod tests {
     fn peer_users_violate_each_other() {
         let a = Identity::bearer("User A", "a");
         let b = Identity::bearer("User B", "b");
-        assert!(a.violated_by_access_to(&b), "peer-to-peer access is the IDOR case");
+        assert!(
+            a.violated_by_access_to(&b),
+            "peer-to-peer access is the IDOR case"
+        );
     }
 
     #[test]

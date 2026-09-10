@@ -147,12 +147,7 @@ pub trait FindingStore: Send + Sync {
 /// that swap does not touch the engine.
 pub trait TrafficSearch: Send + Sync {
     /// Returns exchanges whose request or response matches `query`.
-    fn search(
-        &self,
-        query: &str,
-        after: Option<&Cursor>,
-        limit: Limit,
-    ) -> Result<Page<RequestId>>;
+    fn search(&self, query: &str, after: Option<&Cursor>, limit: Limit) -> Result<Page<RequestId>>;
 
     /// Adds an exchange to the index.
     fn index(&self, exchange: &StoredExchange) -> Result<()>;
@@ -172,6 +167,6 @@ mod tests {
     #[test]
     fn the_default_page_size_is_within_the_permitted_range() {
         let default = Limit::default().get();
-        assert!(default >= 1 && default <= Limit::MAX);
+        assert!((1..=Limit::MAX).contains(&default));
     }
 }

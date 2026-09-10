@@ -59,7 +59,10 @@ pub fn migrate(conn: &mut Connection) -> Result<u32> {
     if from > to {
         // The project was written by a newer Hexora. Refusing is the only safe
         // option: applying old code to a newer schema silently corrupts evidence.
-        return Err(StorageError::SchemaTooNew { found: from, supported: to });
+        return Err(StorageError::SchemaTooNew {
+            found: from,
+            supported: to,
+        });
     }
 
     for migration in MIGRATIONS.iter().filter(|m| m.version > from) {
@@ -77,11 +80,12 @@ pub fn migrate(conn: &mut Connection) -> Result<u32> {
 }
 
 fn apply(tx: &Transaction<'_>, migration: &Migration) -> Result<()> {
-    tx.execute_batch(migration.sql).map_err(|e| StorageError::MigrationFailed {
-        version: migration.version,
-        name: migration.name,
-        source: e,
-    })?;
+    tx.execute_batch(migration.sql)
+        .map_err(|e| StorageError::MigrationFailed {
+            version: migration.version,
+            name: migration.name,
+            source: e,
+        })?;
     // `pragma_update` cannot be used inside a transaction for user_version on all
     // SQLite builds, so the value is set with a literal. It is a `u32` from a
     // compile-time constant, so there is no injection surface here.
@@ -115,7 +119,11 @@ mod tests {
         let mut conn = memory_db();
         migrate(&mut conn).unwrap();
         let second = migrate(&mut conn).unwrap();
-        assert_eq!(second, target_version(), "re-running migrations must be a no-op");
+        assert_eq!(
+            second,
+            target_version(),
+            "re-running migrations must be a no-op"
+        );
     }
 
     #[test]
@@ -123,7 +131,10 @@ mod tests {
         let mut conn = memory_db();
         conn.execute_batch("PRAGMA user_version = 9999").unwrap();
         let err = migrate(&mut conn).unwrap_err();
-        assert!(matches!(err, StorageError::SchemaTooNew { found: 9999, .. }), "{err:?}");
+        assert!(
+            matches!(err, StorageError::SchemaTooNew { found: 9999, .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -189,9 +200,13 @@ mod tests {
             "#,
         )
         .unwrap();
-        let remaining: i64 =
-            conn.query_row("SELECT count(*) FROM responses", [], |row| row.get(0)).unwrap();
-        assert_eq!(remaining, 0, "orphaned responses must not survive their request");
+        let remaining: i64 = conn
+            .query_row("SELECT count(*) FROM responses", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            remaining, 0,
+            "orphaned responses must not survive their request"
+        );
     }
 
     #[test]
@@ -212,7 +227,10 @@ mod tests {
              VALUES ('req_1', 'tgt_1', 'proxy', 'GET', '/', 'HTTP/1.1', x'', 'abc', 0,
                      '2026-01-01T00:00:00Z');",
         );
-        assert!(dangling_hash.is_err(), "a body reference with zero size is inconsistent");
+        assert!(
+            dangling_hash.is_err(),
+            "a body reference with zero size is inconsistent"
+        );
 
         let sizeless_body = conn.execute_batch(
             "INSERT INTO requests (id, target_id, origin, method, path, http_version,
@@ -220,7 +238,10 @@ mod tests {
              VALUES ('req_2', 'tgt_1', 'proxy', 'GET', '/', 'HTTP/1.1', x'', NULL, 42,
                      '2026-01-01T00:00:00Z');",
         );
-        assert!(sizeless_body.is_err(), "a sized body with no reference is inconsistent");
+        assert!(
+            sizeless_body.is_err(),
+            "a sized body with no reference is inconsistent"
+        );
 
         // An empty body is the normal case and must be accepted.
         conn.execute_batch(

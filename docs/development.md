@@ -25,6 +25,59 @@ dependencies](https://tauri.app/start/prerequisites/) — WebView2 on Windows, W
 on Linux, Xcode command-line tools on macOS. The core crates and the CLI build without
 them.
 
+### Windows: MSVC build tools, and a Git Bash trap
+
+The `x86_64-pc-windows-msvc` target needs a C++ linker:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override `
+  "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools"
+```
+
+**Do not build from Git Bash.** Git for Windows ships GNU coreutils at
+`/usr/bin/link.exe`, which shadows MSVC's `link.exe` on `PATH`. Cargo then hands object
+files to the wrong program and you get a baffling error that looks nothing like a
+toolchain problem:
+
+```text
+error: linking with `link.exe` failed: exit code: 1
+  = note: link: extra operand '....rcgu.o'
+          Try 'link --help' for more information.
+note: you may need to install Visual Studio build tools with the "C++ build tools" workload
+```
+
+That `Try 'link --help'` line is coreutils talking. The suggested fix is a red herring:
+the build tools may already be installed and simply not be the `link.exe` that was
+found.
+
+Build from **PowerShell** or a **Developer Command Prompt** instead. If you must use
+Git Bash, load the MSVC environment first so its `bin` directory precedes `/usr/bin`:
+
+```bat
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+cargo test --workspace
+```
+
+CI is unaffected: the `windows-latest` runner has Visual Studio installed and runs
+steps in PowerShell, where coreutils is not on `PATH`.
+
+### Toolchain policy
+
+Two separate things, easy to conflate:
+
+| File | Meaning |
+| ---- | ------- |
+| `rust-toolchain.toml` | The **exact** compiler used for development and CI. Pinned, so every machine agrees. |
+| `rust-version` in `Cargo.toml` | The **minimum** compiler Hexora claims to support (MSRV). |
+
+They are deliberately different values. The MSRV is `1.88`, which is not a preference —
+it is the floor imposed by the dependency graph (`plist`, `serde_with`, `time`,
+`darling` and the ICU crates, pulled in via Tauri and `url`, all declare 1.88). The
+development toolchain is pinned to a specific recent stable.
+
+Do not raise the MSRV to match whatever compiler you happen to have. Raise it only when
+a dependency or a language feature genuinely requires it, and say which in the commit.
+
 ## Building and testing
 
 ```bash

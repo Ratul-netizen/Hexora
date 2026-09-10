@@ -37,9 +37,15 @@ pub enum PathMatch {
     /// Matches every path on the host.
     Any,
     /// Matches paths starting with this prefix.
-    Prefix { value: String },
+    Prefix {
+        /// The prefix, e.g. `/api/`.
+        value: String,
+    },
     /// Matches this exact path, ignoring the query string.
-    Exact { value: String },
+    Exact {
+        /// The full path, e.g. `/api/v1/users`.
+        value: String,
+    },
 }
 
 impl PathMatch {
@@ -92,12 +98,19 @@ pub struct ScopeRule {
 impl ScopeRule {
     /// A rule covering every path on a host, on any port and scheme.
     pub fn host(host: impl Into<String>) -> Self {
-        Self { host: host.into(), ports: Vec::new(), scheme: SchemeMatch::Any, path: PathMatch::Any }
+        Self {
+            host: host.into(),
+            ports: Vec::new(),
+            scheme: SchemeMatch::Any,
+            path: PathMatch::Any,
+        }
     }
 
     /// Restricts this rule to a path prefix.
     pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
-        self.path = PathMatch::Prefix { value: prefix.into() };
+        self.path = PathMatch::Prefix {
+            value: prefix.into(),
+        };
         self
     }
 
@@ -229,7 +242,10 @@ impl Scope {
 fn normalize_host(host: &str) -> String {
     let host = host.trim();
     let host = host.strip_suffix('.').unwrap_or(host);
-    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    let host = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
     host.to_ascii_lowercase()
 }
 
@@ -279,9 +295,10 @@ fn normalize_path(path: &str) -> String {
         out.push('/');
         out.push_str(segment);
     }
-    if out.is_empty() {
-        out.push('/');
-    } else if decoded.ends_with('/') {
+    // Two cases need a trailing slash for the same reason — the normalized form must
+    // still name a directory-ish path: an empty result is the root, and a path that
+    // ended in a slash keeps it so `/a/` does not collapse into `/a`.
+    if out.is_empty() || decoded.ends_with('/') {
         out.push('/');
     }
     out
@@ -466,8 +483,8 @@ mod tests {
 
     #[test]
     fn exact_path_ignores_the_query_and_fragment() {
-        let scope = Scope::new()
-            .include(ScopeRule::host("example.com").with_exact_path("/api/v1/users"));
+        let scope =
+            Scope::new().include(ScopeRule::host("example.com").with_exact_path("/api/v1/users"));
         assert!(scope.contains(&https("example.com"), "/api/v1/users?page=2"));
         assert!(scope.contains(&https("example.com"), "/api/v1/users#top"));
         assert!(!scope.contains(&https("example.com"), "/api/v1/users/1"));

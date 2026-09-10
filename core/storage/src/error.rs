@@ -7,6 +7,10 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, StorageError>;
 
 /// A persistence failure.
+///
+/// As with [`hexora_types::HexoraError`], the `#[error(...)]` message on each variant
+/// is the documentation that reaches a user; field-level docs would only restate it.
+#[allow(missing_docs)]
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum StorageError {
@@ -43,13 +47,18 @@ pub enum StorageError {
 
     /// A stored row could not be turned back into a domain type.
     #[error("failed to decode stored {entity}: {reason}")]
-    Decode { entity: &'static str, reason: String },
+    Decode {
+        entity: &'static str,
+        reason: String,
+    },
 
     /// A stored blob's content does not match the hash it is filed under.
     ///
     /// Bodies are the evidence behind findings, so a mismatch is surfaced rather than
     /// repaired: returning corrupted bytes would put a false claim in a client report.
-    #[error("blob {hash} failed its integrity check; the stored body has been altered or corrupted")]
+    #[error(
+        "blob {hash} failed its integrity check; the stored body has been altered or corrupted"
+    )]
     BlobIntegrity { hash: String },
 
     /// A message references a body that is not in the blob store.

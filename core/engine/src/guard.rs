@@ -133,7 +133,10 @@ mod tests {
     async fn in_scope_automated_requests_are_sent() {
         let guard = guard(in_scope());
         guard
-            .send(request("example.com", "/api"), SendOptions::automated(Origin::Scanner))
+            .send(
+                request("example.com", "/api"),
+                SendOptions::automated(Origin::Scanner),
+            )
             .await
             .unwrap();
         assert_eq!(guard.inner.count(), 1);
@@ -142,22 +145,37 @@ mod tests {
     #[tokio::test]
     async fn out_of_scope_automated_requests_never_reach_the_transport() {
         let guard = guard(in_scope());
-        for origin in [Origin::Scanner, Origin::Fuzzer, Origin::Workflow, Origin::Ai, Origin::Authz]
-        {
+        for origin in [
+            Origin::Scanner,
+            Origin::Fuzzer,
+            Origin::Workflow,
+            Origin::Ai,
+            Origin::Authz,
+        ] {
             let err = guard
-                .send(request("not-in-scope.example.net", "/"), SendOptions::automated(origin))
+                .send(
+                    request("not-in-scope.example.net", "/"),
+                    SendOptions::automated(origin),
+                )
                 .await
                 .unwrap_err();
             assert_eq!(err.code(), "out_of_scope", "{origin:?}");
         }
-        assert_eq!(guard.inner.count(), 0, "not one byte may reach an out-of-scope host");
+        assert_eq!(
+            guard.inner.count(),
+            0,
+            "not one byte may reach an out-of-scope host"
+        );
     }
 
     #[tokio::test]
     async fn extensions_are_subject_to_scope_like_any_other_automated_caller() {
         let guard = guard(in_scope());
         let err = guard
-            .send(request("evil.example.net", "/"), SendOptions::automated(Origin::Extension))
+            .send(
+                request("evil.example.net", "/"),
+                SendOptions::automated(Origin::Extension),
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "out_of_scope");
@@ -170,17 +188,27 @@ mod tests {
         for origin in [Origin::Proxy, Origin::Repeater] {
             let options = SendOptions::interactive(origin);
             let request = request("unknown.example.net", "/");
-            assert_eq!(guard.decide(&request, &options), ScopeDecision::AllowedOutOfScope);
+            assert_eq!(
+                guard.decide(&request, &options),
+                ScopeDecision::AllowedOutOfScope
+            );
             guard.send(request, options).await.unwrap();
         }
-        assert_eq!(guard.inner.count(), 2, "a tester's own request is never silently dropped");
+        assert_eq!(
+            guard.inner.count(),
+            2,
+            "a tester's own request is never silently dropped"
+        );
     }
 
     #[tokio::test]
     async fn an_empty_scope_stops_all_automated_traffic() {
         let guard = guard(Scope::new());
         let err = guard
-            .send(request("example.com", "/"), SendOptions::automated(Origin::Scanner))
+            .send(
+                request("example.com", "/"),
+                SendOptions::automated(Origin::Scanner),
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "out_of_scope");
@@ -192,7 +220,10 @@ mod tests {
         let scope = in_scope().exclude(ScopeRule::host("example.com").with_prefix("/logout"));
         let guard = guard(scope);
         let err = guard
-            .send(request("example.com", "/logout"), SendOptions::automated(Origin::Fuzzer))
+            .send(
+                request("example.com", "/logout"),
+                SendOptions::automated(Origin::Fuzzer),
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "out_of_scope");
@@ -206,10 +237,17 @@ mod tests {
         let guard = guard(scope);
         for path in ["/admin", "/%61dmin", "/x/../admin", "//admin", "/%2fadmin"] {
             let err = guard
-                .send(request("example.com", path), SendOptions::automated(Origin::Fuzzer))
+                .send(
+                    request("example.com", path),
+                    SendOptions::automated(Origin::Fuzzer),
+                )
                 .await
                 .unwrap_err();
-            assert_eq!(err.code(), "out_of_scope", "path {path} slipped past the carve-out");
+            assert_eq!(
+                err.code(),
+                "out_of_scope",
+                "path {path} slipped past the carve-out"
+            );
         }
         assert_eq!(guard.inner.count(), 0);
     }

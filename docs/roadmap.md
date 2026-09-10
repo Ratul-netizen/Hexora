@@ -1,120 +1,247 @@
 # Roadmap
 
-Status labels: **IMPLEMENTED** · **IN PROGRESS** · **PLANNED**
+**Target: feature parity with Burp Suite Professional and Caido, on Windows and Linux.**
 
-Nothing is described in the present tense before it works. If you find a feature
-claimed here that does not exist, that is a bug in this file.
+Web and API testing only. Network/infrastructure testing is deliberately out of scope
+until web parity is reached — see [Deferred scope](#deferred-scope).
 
----
+Status labels: **DONE** · **IN PROGRESS** · **PLANNED**
 
-## M0 — Architecture foundation · IMPLEMENTED
+Nothing is described in the present tense before it works. A feature claimed here that
+does not exist is a bug in this file.
 
-- Cargo workspace, toolchain pin, lint and format configuration
-- Domain model: HTTP messages, IDs, scope, identities, findings, limits, secrets, errors
-- SQLite metadata database with transactional migrations
-- Content-addressed blob store for bodies
-- Backend-agnostic repository interfaces
-- Scope enforcement at the transport boundary
-- Extension permission model
-- AI tool-permission gate
-- CLI shell (`project init`, `project info`, `version`)
-- Tauri + React shell reporting engine status
-- CI: fmt, clippy, test, frontend typecheck and build
-- Architecture, threat model, storage and security-invariant documentation
+Parity detail per feature: [`feature-parity.md`](feature-parity.md).
 
 ---
 
-## M1 — HTTP engine · PLANNED · **next**
+## Sequencing principle
 
-The first milestone that puts bytes on a wire.
+The order below is deliberately **not** Burp's feature list sorted by prominence. Two
+observations drive it:
 
-- HTTP/1.1 client over TCP and TLS (rustls)
-- Connection pooling, keep-alive, per-host limits
-- Real implementation of `HttpTransport`
-- Streaming bodies with incremental limit enforcement
-- Content decoding (gzip, deflate, brotli) with bomb protection
-- Chunked transfer decoding, including deliberately malformed input
-- Timeouts and cancellation at every phase
-- Redirect handling (opt-in, scope-checked at each hop)
-- Fuzz targets for the response parser
-- Integration tests against a local test server, including hostile-response cases
+1. **Caido has no active scanner and is still winning users from Burp.** A great
+   manual toolkit is what earns adoption; the scanner is what earns enterprise
+   renewals. Manual and automation come first.
+2. **The scanner is the least differentiating thing we could build early.** Its value
+   comes from years of accumulated checks. Our differentiators — evidence-gated
+   findings, authorization testing, workflows — are cheaper to build and harder to
+   copy.
 
-**Done when** the CLI can send a request to a local server, record the exchange, and
-survive a test suite of malformed and hostile responses without panicking or exceeding
-its limits.
+So: **usable proxy → manual toolkit → automation → scanner → extensibility.**
 
-**Explicitly not in M1:** proxy, UI, HTTP/2, HTTP/3, WebSockets.
+A secondary rule: each milestone must leave Hexora *more usable than before*. No
+milestone exists purely as scaffolding for a later one.
 
 ---
 
-## M2 — Proxy · PLANNED
+## Phase 0 — Foundation · DONE
 
-- HTTP proxy and `CONNECT` tunnelling
-- Per-installation interception CA with generated leaf certificates
-- Certificate management and export
-- Intercept, forward, drop, modify
-- Match and replace rules
-- WebSocket pass-through
+**M0 — Architecture foundation** · DONE
 
----
+Domain model, storage (SQLite metadata + content-addressed blob store), migrations,
+scope enforcement at the transport boundary, extension permission model, AI tool gate,
+CLI shell, Tauri shell, CI, threat model, security invariants.
 
-## M3 — Traffic history · PLANNED
-
-- SQLite implementations of the repository traits
-- Capture pipeline from proxy to storage
-- History browsing, filtering and pagination in the UI
-- Search over captured traffic
-- Blob garbage collection
+157 tests passing. See [`architecture.md`](architecture.md).
 
 ---
 
-## M4 — Repeater · PLANNED
+## Phase 1 — A usable proxy
 
-- Request tabs, editing, resend
-- Request branching with parent relationships preserved
-- Response comparison
-- Collections and variables
+The goal of this phase is a tool a pentester would actually open.
 
-At M4 Hexora becomes a genuinely usable tool rather than a foundation.
+**M1 — HTTP engine** · PLANNED · **next**
+
+Split into small steps, because a single "HTTP engine" milestone is undebuggable:
+
+| | Scope |
+| --- | --- |
+| M1.1 | HTTP/1.1 over TCP: request writer, response head parser, `Content-Length` bodies, real `HttpTransport` |
+| M1.2 | TLS via rustls — SNI, ALPN, verification, client certificates |
+| M1.3 | Streaming bodies with **incremental** limit enforcement |
+| M1.4 | Connection pooling, keep-alive, per-host caps |
+| M1.5 | Chunked decoding, gzip/deflate/brotli, decompression-bomb protection |
+| M1.6 | Redirects — opt-in, **scope-checked at every hop** |
+| M1.7 | Hostile-server test suite, `cargo-fuzz` targets for the parser |
+| M1.8 | Benchmarks and hardening |
+
+Done when the CLI can send a request to a local server, record the exchange, and
+survive a suite of malformed and hostile responses without panicking or exceeding its
+limits.
+
+**M2 — Proxy** · PLANNED
+
+HTTP proxy, `CONNECT` tunnelling, per-install interception CA with generated leaf
+certificates, intercept/forward/drop/modify, certificate export and browser trust
+instructions for Windows and Linux.
+
+The CA is the security-critical part: per-installation, never shipped, easy to
+regenerate and remove. See [`threat-model.md`](threat-model.md).
+
+**M3 — Traffic history** · PLANNED
+
+SQLite implementations of the repository traits, capture pipeline, history browsing
+with filtering and pagination, blob garbage collection.
+
+**M4 — Repeater** · PLANNED
+
+Request tabs, editing, resend, collections, response comparison, and **request
+branching** — variants that retain their parent relationship, which neither competitor
+offers.
+
+> **At M4 Hexora is a usable tool rather than a foundation.** Everything after this is
+> making it a *better* tool than the alternatives.
+
+**M5 — Protocol and target breadth** · PLANNED
+
+HTTP/2 (proxying, not just client), invisible proxying, upstream proxy chaining, mTLS,
+site map / target tree.
+
+HTTP/2 is table stakes for modern targets and is the single hardest item in this phase.
 
 ---
 
-## Later
+## Phase 2 — Manual toolkit parity
 
-Ordered by dependency, not by date. Anything below here is a direction, not a
-commitment.
+**M6 — Intruder / Fuzzer** · PLANNED
 
-| Milestone | Contents |
-| --------- | -------- |
-| M5 | Target map and attack surface inventory |
-| M6 | Passive scanner |
-| M7 | Active scanner and verification engine |
-| M8 | Fuzzer / Intruder |
-| M9 | Workflow engine |
-| M10 | TypeScript extension SDK |
-| M11 | Extension runtime and sandboxing (WASM) |
-| M12 | Burp Montoya compatibility layer — **separate subproject** |
-| M13 | OAST |
-| M14 | GraphQL, JWT, OAuth modules |
-| M15 | Authorization testing |
-| M16 | AI subsystem |
-| M17 | Reporting |
-| M18 | Team server |
+All four Burp attack types (Sniper, Battering Ram, Pitchfork, Cluster Bomb), payload
+processing pipeline, concurrency and rate limiting, matchers and filters (status,
+length, regex, JSONPath, similarity, timing), pause/resume, split result view.
+
+No artificial throttling. Burp Community's throttled Intruder is a major reason people
+look for alternatives.
+
+**M7 — Editing and rules** · PLANNED
+
+Match & Replace (parameter- and header-aware, following Caido's redesign rather than
+Burp's regex-only model), Decoder, WebSocket interception and replay, request pipelines
+for race-condition testing.
+
+**M8 — Traffic query language** · PLANNED
+
+A query language over captured traffic, in the spirit of HTTPQL. Burp's Bambdas require
+writing Java lambdas; that is a worse answer for the same problem.
+
+**M9 — Session handling** · PLANNED
+
+Session handling rules, macros, cookie jars, auto-reauthentication, Sequencer.
+
+Session handling is the single most painful thing to configure in Burp. Doing it well is
+a genuine adoption lever.
 
 ---
 
-## Notes on the harder items
+## Phase 3 — Automation and the differentiators
 
-**Burp compatibility (M12)** is a multi-month engineering project of its own, not a
-checkbox. It requires an out-of-process JVM, a JNI or RPC bridge, and an independent
-implementation of a large public API. It will be independently versioned and ship with
-a public compatibility matrix (FULL / PARTIAL / UNSUPPORTED per API) rather than a
-claim of universal support. It is deliberately last among the extension work.
+**M10 — Workflow engine** · PLANNED
 
-**HTTP/2 and HTTP/3** are not in M1. Getting HTTP/1.1 right — including the malformed
-cases that make a proxy useful for security testing — is more valuable than breadth.
+Node-based visual workflows, JS nodes, extractors, string interpolation, JSON/YAML
+export.
 
-**The AI subsystem (M16)** comes after the scanner and the verification engine, not
-before. An AI layer over an unreliable core produces confident nonsense; the gate and
-the evidence model exist now so that when it arrives, it is constrained by
+**M11 — Headless and client/server** · PLANNED
+
+Full CLI parity with the desktop client on the same engine, plus a server mode that can
+run on a VPS with a thin local client — Caido's architecture, and better than Burp's
+desktop-only model. CI/CD integration.
+
+**M12 — Authorization testing and attack chains** · PLANNED
+
+Multiple identities, same request replayed as each, structural response diffing,
+evidence-gated candidate findings, manual verification workflow. Attack chains that
+retain evidence at every step.
+
+**This is the flagship feature.** Neither competitor does it properly, and it automates
+the highest-value manual work in most engagements.
+
+---
+
+## Phase 4 — Scanning
+
+**M13 — Crawler and passive scanner** · PLANNED
+**M14 — Active scanner and verification engine** · PLANNED
+**M15 — Custom scan checks** · PLANNED (a check DSL, in the spirit of BChecks)
+**M16 — OAST** · PLANNED — self-hostable, DNS/HTTP/HTTPS/SMTP, correlated to the
+originating request. Self-hosting is a selling point over Burp Collaborator.
+
+---
+
+## Phase 5 — Extensibility
+
+**M17 — TypeScript extension SDK** · PLANNED
+**M18 — Browser integration** · PLANNED — drive the user's installed Chrome over CDP
+rather than shipping Chromium; DOM XSS testing.
+**M19 — Extension runtime, sandboxing (WASM) and store** · PLANNED
+
+---
+
+## Phase 6 — Later
+
+**M20 — Burp Montoya compatibility** · PLANNED — separate subproject, out-of-process
+JVM, independently versioned, public compatibility matrix. Deliberately last among
+extension work.
+
+**M21 — AI subsystem** · PLANNED — after the scanner and verification engine, never
+before. An AI layer over an unreliable core produces confident nonsense. The tool gate
+and evidence model already exist so that when it arrives it is constrained by
 construction.
+
+**M22 — Team collaboration** · PLANNED — shared projects, PostgreSQL backend, RBAC,
+audit.
+
+---
+
+## Platform support
+
+| Platform | Status | Notes |
+| -------- | ------ | ----- |
+| Windows | **Primary** | Requires MSVC build tools; see [`development.md`](development.md) for the Git Bash linker trap |
+| Linux | **Primary** | Tauri needs WebKitGTK; ship AppImage + `.deb` |
+| macOS | Best-effort | Code stays portable and CI builds it, but notarization and signing are not set up. Promote to primary when there is an Apple Developer account |
+
+Cross-platform items that need real work, none of them glamorous:
+
+- **CA trust installation** differs per OS — Windows certificate store versus Linux NSS
+  databases. This is fiddly and is a first-run experience problem, so it belongs in M2
+  rather than being left until packaging.
+- **Antivirus false positives.** An intercepting proxy with its own CA looks exactly
+  like malware to a heuristic scanner. Budget time for vendor allowlisting.
+- **Code signing.** Windows SmartScreen will flag unsigned builds. Unsigned security
+  tools do not get adopted.
+
+---
+
+## Deferred scope
+
+Recorded so it is not silently forgotten, and not silently started.
+
+**Network and infrastructure testing.** Revisit only after Phase 3. If it happens, the
+decisions already taken are: assessment only (no exploitation), orchestrate proven
+tools rather than writing a scanner, and a separate privileged helper process so the UI
+never runs elevated. `Scope` would need a network dimension — CIDR ranges, port ranges,
+protocols — before any of it, because invariant 1 is meaningless to a port scanner
+otherwise.
+
+**Not building at all:** exploitation frameworks, C2, payload generation, our own CVE
+database, a bundled Chromium, a bundled Nmap (its licence forbids it — see
+[`feature-parity.md`](feature-parity.md)).
+
+---
+
+## Honest sizing
+
+Burp is roughly twenty years of work by a substantial team. Caido has been in
+development for years and still lacks an active scanner. This roadmap is not a
+quarterly plan.
+
+What is realistic:
+
+- **Phase 1 (M1–M5)** gets a genuinely usable interception proxy and repeater. This is
+  the milestone that matters most; everything else is incremental from a working tool.
+- **Phase 2** is what makes people consider switching.
+- **Phase 3** is what makes them switch.
+- **Phase 4 onwards** is a multi-year arc, and the scanner in particular is never
+  "finished" — its value accrues with every check added.
+
+The plan is deliberately ordered so that stopping after any phase still leaves
+something worth using.

@@ -158,7 +158,9 @@ mod tests {
     fn a_classic_zip_bomb_is_stopped_by_the_ratio_check() {
         let limits = Limits::default();
         // 1 MB in, 500 MB out: ratio 500x, well past the 200x cap.
-        let err = limits.check_decompression(1024 * 1024, 500 * 1024 * 1024).unwrap_err();
+        let err = limits
+            .check_decompression(1024 * 1024, 500 * 1024 * 1024)
+            .unwrap_err();
         assert_eq!(err.code(), "limit_exceeded");
     }
 
@@ -166,7 +168,9 @@ mod tests {
     fn a_slow_bomb_is_stopped_by_the_absolute_cap() {
         // Ratio only 2x, so the ratio check passes, but the output is enormous.
         let limits = Limits::default();
-        assert!(limits.check_decompression(500 * 1024 * 1024, 1000 * 1024 * 1024).is_err());
+        assert!(limits
+            .check_decompression(500 * 1024 * 1024, 1000 * 1024 * 1024)
+            .is_err());
     }
 
     #[test]

@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use hexora_storage::{migrations, rusqlite};
+use hexora_storage::migrations;
+use hexora_storage::rusqlite::{self, params};
 use hexora_types::{HexoraError, Result};
 
 /// Creates a new project directory.
@@ -27,7 +28,8 @@ pub fn init(path: &Path, name: Option<&str>, json: bool) -> Result<()> {
         .map_err(HexoraError::from)?
         .execute(
             "INSERT INTO project (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-            rusqlite_params(&name, &now),
+            // A fixed project id: a project database holds exactly one project row.
+            params!["prj_default", name, now],
         )
         .map_err(|e| HexoraError::Storage(e.to_string()))?;
 
@@ -50,7 +52,10 @@ pub fn init(path: &Path, name: Option<&str>, json: bool) -> Result<()> {
 /// Prints information about an existing project.
 pub fn info(path: &Path, json: bool) -> Result<()> {
     if !path.join("project.db").exists() {
-        return Err(HexoraError::not_found("project", path.display().to_string()));
+        return Err(HexoraError::not_found(
+            "project",
+            path.display().to_string(),
+        ));
     }
     let project = crate::open_project(path)?;
     let conn = project.metadata().connection().map_err(HexoraError::from)?;
@@ -64,7 +69,10 @@ pub fn info(path: &Path, json: bool) -> Result<()> {
     let targets = count(&conn, "targets")?;
     let requests = count(&conn, "requests")?;
     let findings = count(&conn, "findings")?;
-    let schema = project.metadata().schema_version().map_err(HexoraError::from)?;
+    let schema = project
+        .metadata()
+        .schema_version()
+        .map_err(HexoraError::from)?;
 
     if json {
         let payload = serde_json::json!({
@@ -90,13 +98,10 @@ pub fn info(path: &Path, json: bool) -> Result<()> {
 
 fn count(conn: &rusqlite::Connection, table: &str) -> Result<i64> {
     // `table` is never user input: every call site passes a literal.
-    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get(0))
-        .map_err(|e| HexoraError::Storage(e.to_string()))
-}
-
-fn rusqlite_params<'a>(name: &'a str, now: &'a str) -> [&'a dyn rusqlite::ToSql; 3] {
-    // A fixed project id: a project file holds exactly one project row.
-    [&"prj_default" as &dyn rusqlite::ToSql, &name, &now]
+    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })
+    .map_err(|e| HexoraError::Storage(e.to_string()))
 }
 
 fn now_rfc3339() -> String {
@@ -127,7 +132,11 @@ mod tests {
         let path = dir.path().join("engagement");
         init(&path, Some("Acme"), true).unwrap();
         let err = init(&path, Some("Acme"), true).unwrap_err();
-        assert_eq!(err.code(), "invalid_input", "an engagement's evidence is never overwritten");
+        assert_eq!(
+            err.code(),
+            "invalid_input",
+            "an engagement's evidence is never overwritten"
+        );
     }
 
     #[test]

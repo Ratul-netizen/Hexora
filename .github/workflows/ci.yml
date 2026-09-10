@@ -25,9 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned to the same version as rust-toolchain.toml. Using @stable here would
+      # install one compiler and then have cargo silently auto-install another,
+      # which makes "works in CI" mean something different from "works locally".
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -93,7 +97,9 @@ jobs:
             libsoup-3.0-dev \
             build-essential
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98"
       - uses: Swatinem/rust-cache@v2
 
       - uses: pnpm/action-setup@v4
@@ -117,8 +123,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@v2
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
+      # Fails on security advisories. Unmaintained-crate warnings are reported but do
+      # not fail the build: they arrive through transitive dependencies we do not
+      # control, and a permanently red audit job is one nobody reads. Any accepted
+      # advisory must be recorded in docs/dependencies.md with its reasoning.
       - name: Audit
-        run: cargo audit --deny warnings
+        run: cargo audit
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a credential removed from the tip is still a credential.
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

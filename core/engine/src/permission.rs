@@ -103,7 +103,9 @@ impl Capability {
             Self::Scanner => "Register scanner checks that run against targets",
             Self::Workflow => "Define and run workflows",
             Self::Filesystem => "Read and write files anywhere on this machine",
-            Self::RawNetwork => "Open connections that bypass scope enforcement and traffic capture",
+            Self::RawNetwork => {
+                "Open connections that bypass scope enforcement and traffic capture"
+            }
             Self::ProcessExecute => "Run other programs on this machine",
             Self::Credentials => "Read stored credentials for your testing identities",
         }
@@ -151,7 +153,9 @@ impl GrantSet {
     /// install or when the user edits permissions — never from a code path an
     /// extension can reach.
     pub fn granted_by_user(capabilities: impl IntoIterator<Item = Capability>) -> Self {
-        Self { granted: capabilities.into_iter().collect() }
+        Self {
+            granted: capabilities.into_iter().collect(),
+        }
     }
 
     /// Whether this grant set permits `capability`.
@@ -169,7 +173,14 @@ impl GrantSet {
     /// Used when an extension spawns a sub-task or a nested runtime: the child can
     /// never hold more than its parent.
     pub fn intersect(&self, other: &GrantSet) -> Self {
-        Self { granted: self.granted.iter().copied().filter(|c| other.allows(*c)).collect() }
+        Self {
+            granted: self
+                .granted
+                .iter()
+                .copied()
+                .filter(|c| other.allows(*c))
+                .collect(),
+        }
     }
 
     /// The granted capabilities, for display.
@@ -224,7 +235,10 @@ mod tests {
         let grants = GrantSet::none();
         assert!(grants.is_empty());
         for capability in Capability::ALL {
-            assert!(!grants.allows(*capability), "{capability} was granted implicitly");
+            assert!(
+                !grants.allows(*capability),
+                "{capability} was granted implicitly"
+            );
         }
     }
 
@@ -252,13 +266,19 @@ mod tests {
     #[test]
     fn reading_traffic_does_not_imply_being_able_to_send_it() {
         let grants = GrantSet::granted_by_user([Capability::HttpRead]);
-        assert!(!grants.allows(Capability::HttpSend), "observing is not the same as acting");
+        assert!(
+            !grants.allows(Capability::HttpSend),
+            "observing is not the same as acting"
+        );
     }
 
     #[test]
     fn dangerous_capabilities_are_never_implied_by_anything() {
         let everything_benign = GrantSet::granted_by_user(
-            Capability::ALL.iter().copied().filter(|c| !c.is_dangerous()),
+            Capability::ALL
+                .iter()
+                .copied()
+                .filter(|c| !c.is_dangerous()),
         );
         for capability in Capability::ALL.iter().filter(|c| c.is_dangerous()) {
             assert!(
@@ -286,7 +306,10 @@ mod tests {
         ]);
         let effective = parent.intersect(&child_request);
         assert!(effective.allows(Capability::HttpRead));
-        assert!(!effective.allows(Capability::Filesystem), "a child cannot exceed its parent");
+        assert!(
+            !effective.allows(Capability::Filesystem),
+            "a child cannot exceed its parent"
+        );
         assert!(!effective.allows(Capability::Credentials));
         assert!(!effective.allows(Capability::ProjectRead));
     }
@@ -301,7 +324,10 @@ mod tests {
         assert!(!request.satisfied_by(&partial));
 
         let full = GrantSet::granted_by_user([Capability::HttpRead, Capability::Scanner]);
-        assert!(request.satisfied_by(&full), "declining an optional permission must still work");
+        assert!(
+            request.satisfied_by(&full),
+            "declining an optional permission must still work"
+        );
     }
 
     #[test]
@@ -314,7 +340,10 @@ mod tests {
     fn every_capability_has_a_distinct_name_and_an_explanation() {
         let mut names = BTreeSet::new();
         for capability in Capability::ALL {
-            assert!(names.insert(capability.to_string()), "duplicate name for {capability:?}");
+            assert!(
+                names.insert(capability.to_string()),
+                "duplicate name for {capability:?}"
+            );
             assert!(!capability.explanation().is_empty());
         }
         assert_eq!(names.len(), Capability::ALL.len());

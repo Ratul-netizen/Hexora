@@ -70,7 +70,10 @@ pub struct Header {
 impl Header {
     /// Builds a header from string parts.
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { name: name.into(), value: Bytes::from(value.into()) }
+        Self {
+            name: name.into(),
+            value: Bytes::from(value.into()),
+        }
     }
 
     /// The value decoded as UTF-8, lossily. For display only — never for comparison
@@ -160,7 +163,10 @@ impl Headers {
     /// The total serialized size of the header block, for limit enforcement.
     pub fn wire_size(&self) -> usize {
         // name + ": " + value + CRLF
-        self.0.iter().map(|h| h.name.len() + 2 + h.value.len() + 2).sum()
+        self.0
+            .iter()
+            .map(|h| h.name.len() + 2 + h.value.len() + 2)
+            .sum()
     }
 }
 
@@ -191,7 +197,11 @@ pub struct HttpService {
 impl HttpService {
     /// Builds a service descriptor.
     pub fn new(host: impl Into<String>, port: u16, secure: bool) -> Self {
-        Self { host: host.into(), port, secure }
+        Self {
+            host: host.into(),
+            port,
+            secure,
+        }
     }
 
     /// The URL scheme.
@@ -298,9 +308,9 @@ impl HttpRequest {
         let cl = self.headers.count("Content-Length");
         let te = self.headers.count("Transfer-Encoding");
         if cl > 1 {
-            return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(format!(
-                "{cl} Content-Length headers"
-            ))));
+            return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(
+                format!("{cl} Content-Length headers"),
+            )));
         }
         if cl == 1 && te >= 1 {
             return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(
@@ -384,9 +394,18 @@ mod tests {
     #[test]
     fn default_ports_are_omitted_from_the_authority() {
         assert_eq!(svc().authority(), "example.com");
-        assert_eq!(HttpService::new("example.com", 8443, true).authority(), "example.com:8443");
-        assert_eq!(HttpService::new("example.com", 80, false).authority(), "example.com");
-        assert_eq!(HttpService::new("example.com", 443, false).authority(), "example.com:443");
+        assert_eq!(
+            HttpService::new("example.com", 8443, true).authority(),
+            "example.com:8443"
+        );
+        assert_eq!(
+            HttpService::new("example.com", 80, false).authority(),
+            "example.com"
+        );
+        assert_eq!(
+            HttpService::new("example.com", 443, false).authority(),
+            "example.com:443"
+        );
     }
 
     #[test]
@@ -450,7 +469,8 @@ mod tests {
     fn framing_check_flags_cl_te_conflict() {
         let mut req = HttpRequest::get(svc(), "/");
         req.headers.append(Header::new("Content-Length", "5"));
-        req.headers.append(Header::new("Transfer-Encoding", "chunked"));
+        req.headers
+            .append(Header::new("Transfer-Encoding", "chunked"));
         assert!(req.check_framing().is_err());
     }
 
@@ -488,12 +508,18 @@ mod tests {
             body: Bytes::new(),
             truncated: false,
         };
-        assert!(!res.is_redirect(), "302 without Location is not a usable redirect");
+        assert!(
+            !res.is_redirect(),
+            "302 without Location is not a usable redirect"
+        );
     }
 
     #[test]
     fn non_utf8_header_values_survive_storage() {
-        let h = Header { name: "X-Raw".into(), value: Bytes::from_static(&[0xff, 0xfe, 0x00]) };
+        let h = Header {
+            name: "X-Raw".into(),
+            value: Bytes::from_static(&[0xff, 0xfe, 0x00]),
+        };
         let json = serde_json::to_string(&h).unwrap();
         let back: Header = serde_json::from_str(&json).unwrap();
         assert_eq!(back.value, h.value);

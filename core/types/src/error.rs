@@ -12,6 +12,11 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, HexoraError>;
 
 /// A structured engine error.
+///
+/// Field-level docs are omitted deliberately: the `#[error(...)]` message on each
+/// variant is what a user actually sees, and duplicating it above every field adds
+/// noise without adding information.
+#[allow(missing_docs)]
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum HexoraError {
@@ -42,7 +47,10 @@ pub enum HexoraError {
 
     /// An extension attempted an action its manifest does not permit.
     #[error("permission denied: extension {extension} lacks capability {capability}")]
-    PermissionDenied { extension: String, capability: String },
+    PermissionDenied {
+        extension: String,
+        capability: String,
+    },
 
     /// The operation was cancelled by the user or a supervising task.
     #[error("operation cancelled")]
@@ -69,12 +77,18 @@ pub enum HexoraError {
 impl HexoraError {
     /// Convenience constructor for [`HexoraError::InvalidInput`].
     pub fn invalid_input(field: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::InvalidInput { field: field.into(), reason: reason.into() }
+        Self::InvalidInput {
+            field: field.into(),
+            reason: reason.into(),
+        }
     }
 
     /// Convenience constructor for [`HexoraError::NotFound`].
     pub fn not_found(kind: &'static str, id: impl Into<String>) -> Self {
-        Self::NotFound { kind, id: id.into() }
+        Self::NotFound {
+            kind,
+            id: id.into(),
+        }
     }
 
     /// Whether retrying the same operation could plausibly succeed.
@@ -125,7 +139,10 @@ pub enum NetworkError {
     ConnectionReset { peer: String },
 
     #[error("{phase} timed out after {}ms", .elapsed.as_millis())]
-    Timeout { phase: TimeoutPhase, elapsed: Duration },
+    Timeout {
+        phase: TimeoutPhase,
+        elapsed: Duration,
+    },
 
     #[error("TLS handshake with {peer} failed: {reason}")]
     Tls { peer: String, reason: String },
@@ -180,7 +197,10 @@ impl std::fmt::Display for TimeoutPhase {
 #[non_exhaustive]
 pub enum ProtocolError {
     #[error("malformed {protocol} message: {reason}")]
-    Malformed { protocol: &'static str, reason: String },
+    Malformed {
+        protocol: &'static str,
+        reason: String,
+    },
 
     #[error("invalid header name or value: {0}")]
     InvalidHeader(String),
@@ -237,14 +257,17 @@ mod tests {
 
     #[test]
     fn transient_network_failures_are_retryable() {
-        let e = HexoraError::Network(NetworkError::ConnectionReset { peer: "1.2.3.4:443".into() });
+        let e = HexoraError::Network(NetworkError::ConnectionReset {
+            peer: "1.2.3.4:443".into(),
+        });
         assert!(e.is_retryable());
     }
 
     #[test]
     fn refused_connections_are_not_retryable() {
-        let e =
-            HexoraError::Network(NetworkError::ConnectionRefused { peer: "1.2.3.4:443".into() });
+        let e = HexoraError::Network(NetworkError::ConnectionRefused {
+            peer: "1.2.3.4:443".into(),
+        });
         assert!(!e.is_retryable());
     }
 
@@ -257,7 +280,10 @@ mod tests {
 
     #[test]
     fn decompression_bomb_reports_the_limit_it_hit() {
-        let e = LimitError::DecompressionBomb { limit: 100_000_000, ratio: 1042.0 };
+        let e = LimitError::DecompressionBomb {
+            limit: 100_000_000,
+            ratio: 1042.0,
+        };
         let msg = e.to_string();
         assert!(msg.contains("100000000"), "{msg}");
         assert!(msg.contains("1042"), "{msg}");

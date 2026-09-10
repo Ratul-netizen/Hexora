@@ -31,7 +31,10 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "tool", rename_all = "snake_case")]
 pub enum ToolCall {
     /// Read exchanges already captured.
-    ReadTraffic { limit: u32 },
+    ReadTraffic {
+        /// Maximum number of exchanges to return.
+        limit: u32,
+    },
     /// Inspect the target map.
     InspectTarget,
     /// Read existing findings.
@@ -39,11 +42,24 @@ pub enum ToolCall {
     /// Compose a request without sending it.
     DraftRequest,
     /// Send requests to a target.
-    SendRequests { target: String, count: u32 },
+    SendRequests {
+        /// Host that will receive the traffic.
+        target: String,
+        /// How many requests will be sent. Shown verbatim in the approval prompt.
+        count: u32,
+    },
     /// Start a scanner job.
-    RunScan { target: String },
+    RunScan {
+        /// Host that will be scanned.
+        target: String,
+    },
     /// Start a fuzzing attack.
-    RunFuzz { target: String, requests: u32 },
+    RunFuzz {
+        /// Host that will be fuzzed.
+        target: String,
+        /// Approximate request count. Shown verbatim in the approval prompt.
+        requests: u32,
+    },
     /// Record a finding.
     CreateFinding,
     /// Change project settings or scope.
@@ -64,7 +80,10 @@ pub enum Approval {
     /// Reserved for actions where an approval dialog would be
     /// security theatre — the user cannot meaningfully evaluate a request to dump
     /// credentials that originated inside a model's reasoning.
-    Forbidden { reason: &'static str },
+    Forbidden {
+        /// Why the call is refused, shown to the user.
+        reason: &'static str,
+    },
 }
 
 impl Approval {
@@ -115,7 +134,9 @@ pub struct ToolGate {
 
 impl Default for ToolGate {
     fn default() -> Self {
-        Self { bulk_threshold: 100 }
+        Self {
+            bulk_threshold: 100,
+        }
     }
 }
 
@@ -225,18 +246,32 @@ mod tests {
     fn every_call_that_sends_traffic_requires_approval() {
         let gate = ToolGate::new();
         for call in [
-            ToolCall::SendRequests { target: "example.com".into(), count: 1 },
-            ToolCall::RunScan { target: "example.com".into() },
-            ToolCall::RunFuzz { target: "example.com".into(), requests: 10 },
+            ToolCall::SendRequests {
+                target: "example.com".into(),
+                count: 1,
+            },
+            ToolCall::RunScan {
+                target: "example.com".into(),
+            },
+            ToolCall::RunFuzz {
+                target: "example.com".into(),
+                requests: 10,
+            },
         ] {
-            assert!(!gate.classify(&call).is_automatic(), "{call:?} must stop for a human");
+            assert!(
+                !gate.classify(&call).is_automatic(),
+                "{call:?} must stop for a human"
+            );
         }
     }
 
     #[test]
     fn an_approval_prompt_states_the_target_and_the_volume() {
         let gate = ToolGate::new();
-        let call = ToolCall::SendRequests { target: "api.example.com".into(), count: 12_000 };
+        let call = ToolCall::SendRequests {
+            target: "api.example.com".into(),
+            count: 12_000,
+        };
         let Approval::AskUser(prompt) = gate.classify(&call) else {
             panic!("bulk traffic must ask");
         };
@@ -283,7 +318,10 @@ mod tests {
 
     #[test]
     fn tool_calls_round_trip_through_serialization() {
-        let call = ToolCall::RunFuzz { target: "example.com".into(), requests: 500 };
+        let call = ToolCall::RunFuzz {
+            target: "example.com".into(),
+            requests: 500,
+        };
         let json = serde_json::to_string(&call).unwrap();
         let back: ToolCall = serde_json::from_str(&json).unwrap();
         assert_eq!(back, call);

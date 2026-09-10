@@ -7,7 +7,7 @@ members = ["core/types", "core/storage", "core/engine", "apps/cli", "apps/deskto
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.88"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Ratul-netizen/Hexora"
 authors = ["Hexora contributors"]

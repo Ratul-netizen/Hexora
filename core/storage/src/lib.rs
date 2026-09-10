@@ -74,7 +74,9 @@ pub struct MetadataDb {
 
 impl std::fmt::Debug for MetadataDb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MetadataDb").field("path", &self.path).finish_non_exhaustive()
+        f.debug_struct("MetadataDb")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
     }
 }
 
@@ -89,7 +91,10 @@ impl MetadataDb {
         }
         let manager = SqliteConnectionManager::file(&path).with_init(Self::configure);
         let pool = Pool::builder().max_size(8).build(manager)?;
-        let db = Self { pool, path: Some(path) };
+        let db = Self {
+            pool,
+            path: Some(path),
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -138,7 +143,10 @@ impl MetadataDb {
 
     /// The schema revision of the open database.
     pub fn schema_version(&self) -> Result<u32> {
-        migrations::current_version(&self.connection()?)
+        // Bound to a local so the pooled handle derefs to `&Connection`; inlining the
+        // `?` leaves the compiler trying to coerce the pooled type itself.
+        let conn = self.connection()?;
+        migrations::current_version(&conn)
     }
 
     /// The database file path, or `None` for an in-memory database.
@@ -169,7 +177,9 @@ pub struct Project {
 
 impl std::fmt::Debug for Project {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Project").field("root", &self.root).finish_non_exhaustive()
+        f.debug_struct("Project")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
     }
 }
 
@@ -186,7 +196,11 @@ impl Project {
         std::fs::create_dir_all(&root)?;
         let metadata = MetadataDb::open(root.join("project.db"))?;
         let blobs = FsBlobStore::open(root.join("blobs"))?;
-        Ok(Self { metadata, blobs: Box::new(blobs), root: Some(root) })
+        Ok(Self {
+            metadata,
+            blobs: Box::new(blobs),
+            root: Some(root),
+        })
     }
 
     /// Opens a project that persists nothing. Used by tests and `hexora replay`.
@@ -229,7 +243,9 @@ mod tests {
     fn foreign_keys_are_enforced_on_pooled_connections() {
         let db = MetadataDb::in_memory().unwrap();
         let conn = db.connection().unwrap();
-        let enabled: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+        let enabled: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(enabled, 1, "the schema's cascade rules depend on this");
     }
 
@@ -237,8 +253,11 @@ mod tests {
     fn a_file_database_uses_wal_so_capture_and_browsing_can_overlap() {
         let dir = tempfile::tempdir().unwrap();
         let db = MetadataDb::open(dir.path().join("project.db")).unwrap();
-        let mode: String =
-            db.connection().unwrap().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        let mode: String = db
+            .connection()
+            .unwrap()
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(mode.to_lowercase(), "wal");
     }
 
@@ -266,10 +285,15 @@ mod tests {
             .metadata()
             .connection()
             .unwrap()
-            .query_row("SELECT name FROM project WHERE id = 'prj_1'", [], |r| r.get(0))
+            .query_row("SELECT name FROM project WHERE id = 'prj_1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(name, "Acme engagement");
-        assert_eq!(reopened.blobs().get(&body).unwrap(), b"a captured response body");
+        assert_eq!(
+            reopened.blobs().get(&body).unwrap(),
+            b"a captured response body"
+        );
     }
 
     #[test]
@@ -303,7 +327,9 @@ mod tests {
             )
             .unwrap();
         let reader = db.connection().unwrap();
-        let count: i64 = reader.query_row("SELECT count(*) FROM targets", [], |r| r.get(0)).unwrap();
+        let count: i64 = reader
+            .query_row("SELECT count(*) FROM targets", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 1);
     }
 
