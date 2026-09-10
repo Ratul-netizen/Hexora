@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.1 — it answers the authorization question
+## Status: M12.2 — it answers the authorization question, and files the answer
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -28,9 +28,20 @@ Anonymous              anonymous      401     denied        0.00   ok
 
 1 candidate finding(s):
 
-  [High/Confirmed] Broken object-level authorization in GET /accounts/acct-1000
+  [high/confirmed] Broken object-level authorization in GET /accounts/acct-1000
   … was replayed as User B (ordinary user), an identity that should not be able to
   reach User A's object, and the application served it anyway.
+
+Recorded 1 finding(s) in the project.
+```
+
+The finding is in the project, not just the terminal — with the two request ids behind
+it, so the claim can be re-opened and re-run months later:
+
+```console
+$ hexora findings ./engagement
+ID                                     SEVERITY  CONFIDENCE STATUS   TITLE
+fnd_01a08c5140…                        high      confirmed  new      Broken object-level authorization in GET /accounts/acct-1000
 ```
 
 Unimplemented paths return `NotImplemented` naming the milestone that will provide
@@ -48,10 +59,11 @@ work.
 | Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |
 | Traffic history, Repeater with diffing and branch trees | **IMPLEMENTED** |
 | Identities, project scope, authorization matrix (`hexora authz`) | **IMPLEMENTED** |
+| Findings persisted with their evidence, triage (`hexora findings`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater | **IMPLEMENTED** |
-| Persisting findings, reports, attack chains | **PLANNED (rest of M12)** |
+| Reports, attack chains, findings in the desktop UI | **PLANNED (rest of M12)** |
 | Connection reuse | **DEFERRED (M1.4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
 

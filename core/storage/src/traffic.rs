@@ -490,6 +490,28 @@ impl TrafficStore {
         Ok((status as u16, reason, version, headers))
     }
 
+    /// Which target a stored request was sent to.
+    ///
+    /// A finding has to name the target it is about, and the honest source of that is
+    /// the request it was derived from — not a fresh id minted at report time, which
+    /// would point at a target the project has never heard of.
+    pub fn target_of(&self, id: RequestId) -> Result<TargetId> {
+        let conn = self.db.connection()?;
+        let target: Option<String> = conn
+            .query_row(
+                "SELECT target_id FROM requests WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let target = target.ok_or_else(|| StorageError::NotFound {
+            entity: "request",
+            id: id.to_string(),
+        })?;
+        Ok(target.parse()?)
+    }
+
     /// Every request derived from `parent`, oldest first.
     ///
     /// Oldest first because a branch is read as a sequence of edits: what was tried,
@@ -662,6 +684,20 @@ mod tests {
             Some("User B"),
             "history shows the label, because history is read by people"
         );
+    }
+
+    #[test]
+    fn a_request_names_the_target_it_was_sent_to() {
+        let (store, _project) = store();
+        let id = store.record(&exchange("/a", 200, b"x")).unwrap();
+        let target = store.upsert_target("example.com", 443, true).unwrap();
+        assert_eq!(store.target_of(id).unwrap(), target);
+    }
+
+    #[test]
+    fn asking_for_the_target_of_an_unknown_request_is_an_error() {
+        let (store, _project) = store();
+        assert!(store.target_of(RequestId::new()).is_err());
     }
 
     #[test]

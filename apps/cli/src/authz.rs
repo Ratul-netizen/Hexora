@@ -13,6 +13,7 @@ use hexora_authz::{analysis, AuthzTester, Cell, Matrix, Plan, Verdict};
 use hexora_engine::guard::ScopeGuard;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_repeater::Repeater;
+use hexora_storage::{FindingStore, Recorded};
 use hexora_types::finding::Finding;
 use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
@@ -35,6 +36,8 @@ pub struct AuthzArgs<'a> {
     pub yes: bool,
     /// Do not verify the target's TLS certificate.
     pub insecure: bool,
+    /// Report the findings without writing them into the project.
+    pub no_save: bool,
     pub json: bool,
 }
 
@@ -64,7 +67,7 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     // traffic, and the guard refuses automated traffic to undeclared hosts.
     let scope = Arc::new(project.settings().scope()?);
     let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone());
-    let tester = AuthzTester::new(repeater, store, identities_store);
+    let tester = AuthzTester::new(repeater, store.clone(), identities_store);
 
     let method = tester.method_of(base)?;
     if Plan::is_state_changing(&method) && !args.yes {
@@ -88,15 +91,33 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
         .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
     let matrix = runtime.block_on(tester.run(&plan))?;
 
-    let target = target_of(&matrix);
+    // The target the base request was actually sent to. A finding that named a
+    // freshly minted id would cite a target the project has never heard of, and the
+    // foreign key would refuse it — correctly.
+    let target = store.target_of(base)?;
     let findings = analysis::findings(&matrix, target);
 
-    if args.json {
-        print_json(&matrix, &findings);
+    let saved = if args.no_save || findings.is_empty() {
+        Vec::new()
     } else {
-        print_human(&matrix, &findings);
+        save(&project.findings(), &findings)?
+    };
+
+    if args.json {
+        print_json(&matrix, &findings, &saved);
+    } else {
+        print_human(&matrix, &findings, &saved, args.no_save);
     }
     Ok(())
+}
+
+/// Writes the run's findings into the project.
+///
+/// Uses `record` rather than `save`, so running the same matrix again after a fix
+/// updates the claim instead of adding a second copy of it — and leaves whatever
+/// triage decision a human already made about it alone.
+fn save(store: &FindingStore, findings: &[Finding]) -> Result<Vec<Recorded>> {
+    findings.iter().map(|f| Ok(store.record(f)?)).collect()
 }
 
 /// The identities to replay as: those named, or everybody except the owner.
@@ -119,17 +140,7 @@ fn choose(
         .collect()
 }
 
-/// A placeholder target id for findings that are printed rather than stored.
-///
-/// Findings are not persisted yet — `hexora authz` reports, it does not file. The id
-/// is generated per run rather than looked up, and nothing downstream reads it,
-/// because writing findings into the project is its own piece of work (the schema is
-/// there; the store is not).
-fn target_of(_matrix: &Matrix) -> hexora_types::ids::TargetId {
-    hexora_types::ids::TargetId::new()
-}
-
-fn print_human(matrix: &Matrix, findings: &[Finding]) {
+fn print_human(matrix: &Matrix, findings: &[Finding], saved: &[Recorded], no_save: bool) {
     println!("{} {}", matrix.method, matrix.url);
     println!(
         "Baseline: {} → {}",
@@ -181,25 +192,40 @@ fn print_human(matrix: &Matrix, findings: &[Finding]) {
     println!("{} candidate finding(s):", findings.len());
     for finding in findings {
         println!();
-        println!(
-            "  [{:?}/{:?}] {}",
-            finding.severity, finding.confidence, finding.title
-        );
+        // Rendered by the same helper the findings list uses: a finding that reads
+        // one way when it is produced and another when it is read back is a finding
+        // somebody has to translate.
+        println!("  {}", crate::findings::one_line(finding));
         println!("  {}", finding.description);
         if !finding.confidence.is_actionable() {
             println!(
-                "  Not yet actionable at {:?} confidence — re-run with --verify to \
+                "  Not yet actionable at {} confidence — re-run with --verify to \
                  attempt reproduction.",
-                finding.confidence
+                crate::findings::confidence_word(finding.confidence)
             );
         }
         for line in finding.reproduction.lines() {
             println!("  {line}");
         }
     }
+
+    println!();
+    if no_save {
+        println!("Nothing was written to the project (--no-save).");
+        return;
+    }
+    let new = saved.iter().filter(|r| r.is_new()).count();
+    let updated = saved.len() - new;
+    match (new, updated) {
+        (0, 0) => {}
+        (n, 0) => println!("Recorded {n} finding(s) in the project."),
+        (0, u) => println!("Refreshed {u} finding(s) already recorded; triage decisions kept."),
+        (n, u) => println!("Recorded {n} new finding(s) and refreshed {u} already recorded."),
+    }
+    println!("Read them back with `hexora findings <project>`.");
 }
 
-fn print_json(matrix: &Matrix, findings: &[Finding]) {
+fn print_json(matrix: &Matrix, findings: &[Finding], saved: &[Recorded]) {
     let cells: Vec<_> = matrix
         .cells
         .iter()
@@ -234,6 +260,15 @@ fn print_json(matrix: &Matrix, findings: &[Finding]) {
         "appears_public": matrix.appears_public,
         "cells": cells,
         "findings": findings,
+        "recorded": saved
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id().to_string(),
+                    "new": r.is_new(),
+                })
+            })
+            .collect::<Vec<_>>(),
     });
     println!("{payload}");
 }

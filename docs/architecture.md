@@ -26,7 +26,7 @@ influenced part of the process.
 | Crate | Role | Status |
 | ----- | ---- | ------ |
 | `core/types` | Domain model: HTTP messages, IDs, scope, identities, findings, limits, secrets, errors | **Implemented** |
-| `core/storage` | SQLite metadata database, migrations, content-addressed blob store, traffic, identities, project settings | **Implemented** (findings store still pending) |
+| `core/storage` | SQLite metadata database, migrations, content-addressed blob store, traffic, identities, findings, project settings | **Implemented** |
 | `core/engine` | Transport boundary, scope enforcement, extension permissions, AI tool gate | **Implemented** |
 | `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |

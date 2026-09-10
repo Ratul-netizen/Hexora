@@ -38,18 +38,23 @@
 //! Everything here is synchronous, because SQLite is. The async engine calls it via
 //! `tokio::task::spawn_blocking`.
 //!
-//! ## Status at M3
+//! ## Status at M12
 //!
-//! Implemented and tested: connection management, pragmas, migrations, the blob store
-//! and [`TrafficStore`] — captured exchanges, both body forms, and keyset-paginated
-//! history. The remaining traits in [`repository`] (findings, scope, sessions) still
-//! have no implementation; nothing here pretends otherwise.
+//! Implemented and tested: connection management, pragmas, migrations, the blob store,
+//! [`TrafficStore`] (captured exchanges, both body forms, keyset-paginated history),
+//! [`IdentityStore`], [`Settings`] (the project scope) and [`FindingStore`] — findings
+//! with their evidence, filtered and paged, refusing anything
+//! [`Finding::validate`](hexora_types::finding::Finding::validate) rejects.
+//!
+//! Still unimplemented: the session and search traits in [`repository`]. Nothing here
+//! pretends otherwise.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
 pub mod blob;
 pub mod error;
+pub mod findings;
 pub mod identities;
 pub mod migrations;
 pub mod repository;
@@ -69,6 +74,7 @@ pub use rusqlite;
 
 pub use crate::blob::{BlobRef, BlobStore, FsBlobStore, MemoryBlobStore};
 pub use crate::error::{Result, StorageError};
+pub use crate::findings::{FindingFilter, FindingStore, Recorded};
 pub use crate::identities::IdentityStore;
 pub use crate::settings::Settings;
 pub use crate::traffic::{CapturedExchange, StoredRequest, StoredTraffic, TrafficStore};
@@ -243,6 +249,11 @@ impl Project {
     /// The identities this project tests as.
     pub fn identities(&self) -> IdentityStore {
         IdentityStore::new(self.metadata.clone())
+    }
+
+    /// The findings recorded against this project.
+    pub fn findings(&self) -> FindingStore {
+        FindingStore::new(self.metadata.clone())
     }
 
     /// The project's settings, including the scope every automated subsystem is held

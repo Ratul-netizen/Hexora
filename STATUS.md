@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.1 (authorization testing)
+- **Last updated:** M12.2 (the findings store)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -28,23 +28,23 @@ milestone.
 | **M2.5** — Trust and first run | `hexora setup` gets a machine ready in one command. The CA installs into the *user* trust store (no admin), is verified by asking the platform rather than trusting an exit code, and removes cleanly. Firefox is detected and called out because it ignores the system store |
 | **M5** — Desktop UI | The Tauri window does the whole loop: open a project, install the CA, run the proxy, watch traffic arrive live, inspect an exchange, send it to the repeater, edit, resend, diff. Same crates as the CLI — there is no second engine |
 | **M12.1** — Authorization testing | Replay one captured request as every identity and say what the differences prove. Structural comparison, an unauthenticated control that stops a public page becoming six findings, declared object ids that both convict and exonerate, confidence that has to be earned by reproduction. Identities and scope now persist in the project |
+| **M12.2** — The findings store | A run's conclusions are written into the project, with their evidence. Storage refuses a claim that fails its own validation. Re-running updates the claim rather than duplicating it, keeps triage decisions, and lets confidence fall when the evidence no longer supports it. `hexora findings` lists, shows and triages |
 
 ## Next
 
-**Hexora can now answer the question testers actually get paid for.** Capture a request
-once, and `hexora authz` will replay it as everyone else and tell you whether the
-application checks *who* is asking or only that somebody is — with the evidence
-attached, in the project, citable months later.
+**A run's conclusions now live in the project.** Capture a request, replay it as
+everyone else, and what comes out is a finding with its evidence attached, in a file
+somebody else can open — filtered, paged, and triageable without losing the decision
+when the test runs again.
 
 What that leaves open, in the order it matters:
 
-- **File the findings.** `hexora authz` prints its findings; nothing writes them to the
-  `findings` table, which has been in the schema since M0. Until that lands a run's
-  conclusions live in a terminal, and the project holds only the traffic behind them.
-  Small, well-defined, and the prerequisite for everything below.
-- **The report.** The gap nobody fills well: a document that cites the exact exchange
-  behind every claim. The evidence model was built for this and now has real findings
-  to carry.
+- **The report.** Everything needed is now in the project: claims, confidence, and the
+  exact exchanges behind each one. Nothing renders it into a document a client can be
+  handed, and that is the gap this whole line of work was aimed at.
+- **The desktop UI.** It shows traffic and the repeater; it shows neither the
+  authorization matrix nor the findings list, so half of what the engine can do is
+  reachable only from a terminal.
 - **Construct the attempts, do not only replay them.** The matrix replays a request as
   written. Substituting one identity's object identifiers into another's request —
   "can User B reach *User A's* invoice id?" — is the other half of M12 and finds bugs
@@ -64,9 +64,10 @@ reads correctly". Treat the layout as unreviewed.
 
 The authorization matrix has been exercised end to end against a local application
 with a deliberate IDOR: it found the bug at High/Confirmed, correctly cleared a
-per-identity endpoint that scores 1.00 on similarity, and correctly reduced a public
-page to a single finding. It has not been run against a large real application, where
-response noise is worse than any fixture.
+per-identity endpoint that scores 1.00 on similarity, correctly reduced a public page
+to a single finding, filed the result, kept a `false_positive` decision across a
+re-run, and let the reproduction steps in the finding be run verbatim. It has not been
+run against a large real application, where response noise is worse than any fixture.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -174,6 +175,12 @@ cargo run -p hexora-cli -- identity list ./scratch/demo
 cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User A"
 cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User A" --verify
 
+# What a run concluded, and what to do about it.
+cargo run -p hexora-cli -- findings ./scratch/demo
+cargo run -p hexora-cli -- findings ./scratch/demo --actionable
+cargo run -p hexora-cli -- findings ./scratch/demo --show fnd_01a08c…
+cargo run -p hexora-cli -- findings ./scratch/demo     --triage fnd_01a08c… --status false-positive
+
 # The desktop window. Same engine, no terminal.
 pnpm -C frontend build && cargo run -p hexora-desktop
 ```
@@ -237,3 +244,11 @@ Written down because they were learned the hard way and are easy to undo by acci
   are automated traffic, and the guard refuses automated traffic to undeclared hosts.
   The run asks once, before sending, so a misconfigured scope is one sentence rather
   than one failure per identity.
+- **A findings list that un-dismisses things is a list nobody reads.** Re-running a
+  test refreshes the claim and leaves the triage decision alone, on purpose. The
+  inverse rule is just as deliberate: confidence follows the evidence *currently*
+  attached, so a re-run without `--verify` takes a `Confirmed` finding back down to
+  what the stored comparison actually supports.
+- **"Identical" is an answer, not an empty result.** `hexora repeat --diff` used to
+  print nothing for two matching responses. For an authorization comparison that case
+  is the finding, and printing nothing reads as a broken command.

@@ -197,12 +197,13 @@ Full CLI parity with the desktop client on the same engine, plus a server mode t
 run on a VPS with a thin local client — Caido's architecture, and better than Burp's
 desktop-only model. CI/CD integration.
 
-**M12 — Authorization testing and attack chains** · PARTIAL (M12.1 IMPLEMENTED)
+**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.2 IMPLEMENTED)
 
 **This is the flagship feature.** Neither competitor does it properly, and it automates
 the highest-value manual work in most engagements.
 
-Done (M12.1), in `core/authz` and `hexora authz`:
+Done (M12.1–M12.2), in `core/authz`, `core/storage` and the `authz` / `findings`
+commands:
 
 - Multiple identities, persisted in the project with their privilege ordering and the
   object identifiers they own (`core/storage/src/identities.rs`).
@@ -215,16 +216,22 @@ Done (M12.1), in `core/authz` and `hexora authz`:
   identifier appearing where it should not, Confirmed only after `--verify` reproduces
   it.
 - Project scope persisted and enforced, since a matrix is automated traffic.
+- Findings written into the project with their evidence, refused by storage if they
+  fail their own validation, keyed on what they claim so a re-run updates rather than
+  duplicates — keeping triage decisions and letting confidence fall when the evidence
+  no longer supports it.
+- `hexora findings`: list worst-first, show one in full, triage, filter to what is
+  actually actionable.
 
 Not done:
 
-- **Filing findings.** They are printed; the `findings` table is still unwritten.
-- **Reports.** The document that cites the exact exchange behind every claim.
+- **Reports.** The document that cites the exact exchange behind every claim. Everything
+  it needs is now in the project.
 - **Constructed attempts.** The matrix replays a request as written; substituting one
   identity's object identifiers into another's request is the other half of this
   milestone.
 - **Attack chains** that retain evidence at every step.
-- **A desktop UI** for any of it.
+- **A desktop UI** for the matrix or the findings list.
 
 ---
 

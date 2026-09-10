@@ -333,16 +333,53 @@ since a typed URL is a human decision.
   declined to test destructive endpoints would be hiding the worst authorization bugs
   there are.
 
+### Added — M12.2, the findings store
+
+- **Findings are written into the project.** `hexora authz` files what it finds; the
+  `findings` and `finding_evidence` tables have been in the schema since M0 with
+  nothing writing to them. A conclusion that lives only in a terminal cannot be cited
+  six months later, which is the entire point of keeping a project file.
+- **Storage enforces invariant 6.** `FindingStore::save` refuses anything
+  `Finding::validate` rejects, so a claim above `Reported` with no evidence cannot
+  reach a report by taking the storage route around the verification engine. A detector
+  with a bug gets an error, not a row.
+- **Re-running a test updates the claim instead of duplicating it.** Findings are keyed
+  on what they claim — target, title and location — not on a generated id. Two
+  consequences are deliberate: triage survives, so a finding marked `false_positive`
+  stays marked; and confidence follows the evidence currently attached in *both*
+  directions, so a re-run without `--verify` brings a `Confirmed` finding back down to
+  what the stored comparison actually supports.
+- **`hexora findings`** lists them worst first — severity, then how firmly established,
+  which is the order they get worked through rather than the order they were found.
+  `--show` prints one in full with its evidence, `--triage … --status` records a human
+  judgement, and `--actionable` hides what is still only a lead. Listing is keyset-paged
+  on the same ordering, so a page boundary never repeats or skips a row.
+- **`hexora authz --no-save`** reports without writing, for a run somebody wants to look
+  at before committing to.
+- Findings name the target the base request was actually sent to (`TrafficStore::target_of`),
+  rather than a fresh id that would point at a target the project has never heard of.
+
+### Fixed
+
+- **`hexora repeat --diff` printed nothing when the two responses matched.** It reads
+  as a command that failed, and "identical" is the whole answer for an authorization
+  comparison — two principals served byte-for-byte the same response *is* the finding.
+  The headline is now always printed. M12's reproduction steps tell a reader to run
+  exactly this command, which is how it surfaced.
+- **The finding store deadlocked on a single-connection pool.** Reading a finding held
+  a pooled connection while asking for a second one to load its evidence, which is a
+  deadlock rather than a slow query on every in-memory project. Evidence now loads on
+  the caller's connection.
+
 ### Not implemented
 
-Authorization findings are printed, not filed: the `findings` table exists and the
-model validates, but nothing writes to it yet, so `hexora authz` reports and the
-project keeps only the traffic. There is no reporting or export, no desktop UI for the
-matrix, and no attack chains. The matrix replays a request verbatim — substituting one
-identity's object identifiers into another's request, to *construct* cross-identity
-attempts rather than only replaying captured ones, is not implemented. Credentials are
-stored in cleartext; encryption under a project passphrase is still only in the threat
-model.
+There is still no report: findings are stored, filtered and readable, but nothing
+renders them into a document a client can be handed. The desktop UI shows neither the
+authorization matrix nor the findings list. There are no attack chains. The matrix
+replays a request verbatim — substituting one identity's object identifiers into
+another's request, to *construct* cross-identity attempts rather than only replaying
+captured ones, is not implemented. Credentials are stored in cleartext; encryption
+under a project passphrase is still only in the threat model.
 
 The macOS and Linux trust-store paths are written, unit-tested and type-checked but
 have not been run on those platforms; only Windows has been verified end to end. The

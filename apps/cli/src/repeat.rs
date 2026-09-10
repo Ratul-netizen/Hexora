@@ -280,31 +280,64 @@ fn print_human(
     if let Some(diff) = diff {
         println!();
         println!("vs the request it came from: {}", diff.summary());
+        // Details only when there is something worth reading: after a resend the
+        // headline is the point, and listing two noise headers under every send
+        // trains people to skip the section that sometimes matters.
         if diff.is_interesting() {
-            print_diff(diff);
+            print_diff_details(diff);
         }
     }
 }
 
+/// Prints a comparison, headline first.
+///
+/// The headline is always printed, including when it is "identical". `hexora repeat
+/// --diff` used to print nothing at all for two identical responses, which reads as a
+/// command that failed rather than one with an answer — and "identical" is the whole
+/// answer for an authorization comparison, where two principals receiving byte-for-byte
+/// the same response *is* the finding.
 fn print_diff(diff: &ResponseDiff) {
+    println!("{}", diff.summary());
+    for line in diff_details(diff) {
+        println!("{line}");
+    }
+}
+
+/// Prints the detail under a headline somebody else already wrote.
+fn print_diff_details(diff: &ResponseDiff) {
+    for line in diff_details(diff) {
+        println!("{line}");
+    }
+}
+
+/// The line-by-line detail under a comparison's headline.
+///
+/// Built as strings rather than printed directly so the rendering can be tested; the
+/// bug this replaced was a comparison that rendered as nothing at all.
+fn diff_details(diff: &ResponseDiff) -> Vec<String> {
+    let mut lines = Vec::new();
     for change in &diff.changed_headers {
-        println!("  ~ {}: {} → {}", change.name, change.before, change.after);
+        lines.push(format!(
+            "  ~ {}: {} → {}",
+            change.name, change.before, change.after
+        ));
     }
     for name in &diff.added_headers {
-        println!("  + {name}");
+        lines.push(format!("  + {name}"));
     }
     for name in &diff.removed_headers {
-        println!("  - {name}");
+        lines.push(format!("  - {name}"));
     }
     if let Some(offset) = diff.first_difference_at {
-        println!("  body first differs at byte {offset}");
+        lines.push(format!("  body first differs at byte {offset}"));
     }
     if diff.timing_is_significant() {
-        println!(
+        lines.push(format!(
             "  timing moved {:+}ms — worth checking against a time-based payload",
             diff.timing_delta_ms()
-        );
+        ));
     }
+    lines
 }
 
 fn diff_json(diff: &ResponseDiff) -> serde_json::Value {
@@ -361,6 +394,45 @@ fn open(path: &Path) -> Result<hexora_storage::Project> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn response(status: u16, body: &'static [u8]) -> hexora_types::http::HttpResponse {
+        hexora_types::http::HttpResponse {
+            status,
+            reason: None,
+            version: hexora_types::http::HttpVersion::Http11,
+            headers: hexora_types::http::Headers::new(),
+            body: bytes::Bytes::from_static(body),
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn two_identical_responses_still_produce_an_answer() {
+        // The regression this guards: `--diff` printed nothing at all when the two
+        // responses matched, which reads as a broken command. It is also the exact
+        // case an authorization comparison cares about — two principals served the
+        // same bytes is the finding, not the absence of one.
+        let diff = ResponseDiff::compare(&response(200, b"same"), &response(200, b"same"), (1, 1));
+        assert_eq!(diff.summary(), "identical");
+        assert!(diff.is_identical());
+    }
+
+    #[test]
+    fn a_changed_status_is_listed_in_the_detail() {
+        let diff = ResponseDiff::compare(&response(200, b"a"), &response(403, b"b"), (1, 1));
+        let detail = diff_details(&diff).join(" | ");
+        assert!(detail.contains("body first differs"), "{detail}");
+        assert!(diff.summary().contains("403"), "{}", diff.summary());
+    }
+
+    #[test]
+    fn an_identical_comparison_has_no_detail_lines_to_show() {
+        let diff = ResponseDiff::compare(&response(200, b"same"), &response(200, b"same"), (1, 1));
+        assert!(
+            diff_details(&diff).is_empty(),
+            "the headline carries it; there is nothing underneath"
+        );
+    }
 
     fn project_with_one_exchange() -> (tempfile::TempDir, PathBuf, RequestId) {
         let dir = tempfile::tempdir().unwrap();

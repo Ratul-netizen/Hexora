@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
 mod authz;
+mod findings;
 mod history;
 mod identity;
 mod project;
@@ -311,6 +312,50 @@ enum Command {
         /// Do not verify the target's TLS certificate.
         #[arg(short = 'k', long)]
         insecure: bool,
+
+        /// Report the findings without writing them into the project.
+        ///
+        /// The default is to write them: a conclusion that lives only in a terminal
+        /// cannot be cited, and the traffic behind it is already saved.
+        #[arg(long)]
+        no_save: bool,
+    },
+
+    /// Read and triage the findings recorded in a project.
+    ///
+    /// Ordered worst first, and within a severity the established ones before the
+    /// leads — the order they get worked through, not the order they were found.
+    Findings {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Show one finding in full, evidence included.
+        #[arg(long, value_name = "ID")]
+        show: Option<String>,
+
+        /// Set a finding's triage state. Use with --status.
+        #[arg(long, value_name = "ID", conflicts_with = "show")]
+        triage: Option<String>,
+
+        /// With --triage, the state to set. Otherwise, only show this state.
+        #[arg(long, value_name = "STATE")]
+        status: Option<String>,
+
+        /// Only findings at or above this severity.
+        #[arg(long, value_name = "LEVEL", conflicts_with_all = ["show", "triage"])]
+        severity: Option<String>,
+
+        /// Hide anything still only a lead, leaving what can be reported.
+        #[arg(long, conflicts_with_all = ["show", "triage"])]
+        actionable: bool,
+
+        /// Maximum findings to list.
+        #[arg(short, long, default_value_t = 50)]
+        limit: u32,
+
+        /// Continue from the cursor printed by a previous page.
+        #[arg(long, value_name = "CURSOR")]
+        after: Option<String>,
     },
 
     /// Print version and build information.
@@ -487,6 +532,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             verify,
             yes,
             insecure,
+            no_save,
         } => authz::run(authz::AuthzArgs {
             project: path,
             id,
@@ -496,8 +542,39 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             verify: *verify,
             yes: *yes,
             insecure: *insecure,
+            no_save: *no_save,
             json: cli.json,
         }),
+        Command::Findings {
+            path,
+            show,
+            triage,
+            status,
+            severity,
+            actionable,
+            limit,
+            after,
+        } => match (show, triage) {
+            (Some(id), _) => findings::show(path, id, cli.json),
+            (_, Some(id)) => {
+                let status = status.as_deref().ok_or_else(|| {
+                    hexora_types::HexoraError::invalid_input(
+                        "--status",
+                        "--triage needs the state to set, e.g. --status false-positive",
+                    )
+                })?;
+                findings::triage(path, id, status, cli.json)
+            }
+            (None, None) => findings::list(findings::ListArgs {
+                project: path,
+                severity: severity.as_deref(),
+                status: status.as_deref(),
+                actionable: *actionable,
+                limit: *limit,
+                after: after.as_deref(),
+                json: cli.json,
+            }),
+        },
         Command::Project(ProjectCommand::Init { path, name }) => {
             project::init(path, name.as_deref(), cli.json)
         }
