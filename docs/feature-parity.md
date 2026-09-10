@@ -83,9 +83,9 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Passive checks | ✅ | ❌ | PLANNED M13 | |
-| Active scanner | ✅ | ❌ | PLANNED M14 | |
-| Crawler | ✅ | ❌ | PLANNED M13 | |
+| Passive checks | ✅ | ❌ | PLANNED M13.2 | |
+| Active scanner | ✅ | ❌ | PLANNED M13.3–M13.7 | |
+| Crawler | ✅ | ❌ | PLANNED M13.2 | |
 | **Caido ships no active scanner at all** | — | — | — | Strong evidence the market adopts on manual quality first |
 | Custom scan checks | BChecks | ❌ | PLANNED M15 | |
 | Evidence-verified findings | ⚠️ | ⚠️ | **designed M0** | Hexora's main differentiator |
@@ -156,7 +156,7 @@ below are mostly cheap, and several are things we would have had to invent anywa
 | **Contexts** | medium | M9 | ZAP groups URLs + auth + session + technology into one object. A distinctly better model than Burp's scattered scope / session-rule / macro configuration, and session handling is the thing everyone hates |
 | **Browser-driven crawling** | high | M13+M18 | In July 2026 ZAP made its **Client Spider the recommended crawler**, replacing the AJAX Spider. This independently confirms the "drive a real browser over CDP" decision — and means the crawler and browser-integration milestones should merge rather than be built twice |
 | **OpenAPI / GraphQL / SOAP importers** | low | M5 | Cheap, high value for API work |
-| **Alert filters** | low | M14 | False-positive suppression. Consultancies need it; Caido lacks it |
+| **Alert filters** | low | M13.2 | False-positive suppression. Consultancies need it; Caido lacks it |
 
 ### What we will not take from ZAP
 

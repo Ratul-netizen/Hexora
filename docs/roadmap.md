@@ -46,6 +46,45 @@ CLI shell, Tauri shell, CI, threat model, security invariants.
 
 ---
 
+## The order, frozen at M12.6
+
+Everything below still moves, but the *next several milestones* are fixed, and the
+reason is worth stating once because it decides what gets built and what does not:
+
+> **Hexora does not win by having more scanners. It wins by making every automated
+> result explainable, reproducible and safe.**
+
+A scanner that finds one more bug class than a competitor is a feature. A scanner whose
+every claim can be re-run by the person reading the report is a different product. The
+evidence model, the findings store, the report and the constructed-attempt machinery
+built through M12 exist to make the second one possible, and the scanner is built on
+top of them rather than beside them.
+
+```text
+M12.7  Identifier suggestions        candidates a human confirms, never assertions
+M12.8  Engagement snapshots          what changed since the last assessment
+M13.1  Verification framework        detector ≠ finding, enforced by the type system
+M13.2  Passive scanner               observations over captured traffic, no new requests
+M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
+M13.4  Reflected-input verification  context-aware, not "the string came back"
+M13.5  Redirect verification         a controlled destination, never blindly followed
+M13.6  Auth/session verification     the identity model, applied differentially
+M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
+```
+
+Then, in this order and keeping their existing numbers: the extension platform (M17,
+M19), Burp compatibility (M20), and the other protocols (M5.1 — HTTP/2, WebSockets,
+HTTP/3). The numbers are not renumbered to match the order, because `CHANGELOG.md`,
+`STATUS.md` and several `NotImplemented` messages in the code name milestones by
+number, and silently reusing one would make a year of history ambiguous.
+
+**Not before the above, however tempting:** HTTP/2 or HTTP/3 fuzzing, WebSocket
+fuzzing, large payload generators, autonomous AI exploitation, hundreds of
+vulnerability signatures, or Burp extension compatibility. Each of them multiplies the
+surface area that has to be trustworthy before any of it is.
+
+---
+
 ## Phase 1 — A usable proxy
 
 The goal of this phase is a tool a pentester would actually open.
@@ -256,15 +295,133 @@ forms, and requests can be sent byte for byte through
 model. Raw mode is HTTP/1.x requests only; HTTP/2 and HTTP/3 want wire models of their
 own.
 
+**M12.7 — Identifier suggestions** · PLANNED
+
+Every object identifier is declared by hand today, so constructed testing is exactly as
+broad as what somebody typed. Hexora can do better than that without pretending to know
+more than it does: it can *point at* the values in captured traffic that look like
+identifiers, and let a human say yes.
+
+```text
+/api/accounts/1000/invoices/20001      ?user_id=1000      {"accountId":1000}
+                  │                          │                     │
+                  └──────────────┬───────────┴─────────────────────┘
+                                 ▼
+                    "1000 appears in 17 requests, in three
+                     places. Possible object identifier."
+                                 │
+                          [Confirm] [Ignore]
+                                 │
+                                 ▼
+                        ObjectDeclaration (M12.5)
+```
+
+The rule that makes this safe is the same one that made M12.5 defensible: **a candidate
+never becomes an ownership assertion on its own.** A suggestion carries where the value
+was seen and how often; ownership is still something a person asserts, because the tool
+cannot know whose account `1000` is and a guess dressed as a fact would poison every
+finding downstream. Nothing is sent as a result of a suggestion.
+
+**M12.8 — Engagement snapshots** · PLANNED
+
+An engagement is not one moment. A consultant tests, the client fixes, the consultant
+re-tests — and the question that matters on the second visit is *what changed*.
+
+```text
+snapshot = scope + identities + configuration + traffic + declared objects
+         + findings + detector versions + when
+```
+
+With two of those, Hexora can answer "this finding existed in the previous assessment
+and is now fixed", "this one is new", and "this one is unchanged". The findings store
+already keys a claim on what it claims and keeps triage across re-runs, which is half
+of it; the other half is being able to say which run a claim belonged to.
+
+Detector versions are in the list deliberately. A finding that disappeared because the
+application was fixed and one that disappeared because a check was changed are not the
+same event, and a regression report that cannot tell them apart is worse than none.
+
 ---
 
 ## Phase 4 — Scanning
 
-**M13 — Crawler and passive scanner** · PLANNED
-**M14 — Active scanner and verification engine** · PLANNED
+The scanner is the thing buyers compare on and the thing most likely to waste a
+tester's day. It is built as a verification framework with detectors plugged into it,
+not as a pile of checks, and the ordering below is the frozen one.
+
+**M13.1 — Verification framework** · PLANNED
+
+The universal shape, before a single detector exists:
+
+```text
+request → preconditions → test generator → candidate → send → observation
+        → differential comparison → hypothesis → verification → finding
+```
+
+Two traits and one rule. A `Detector` says *"this looks suspicious"* and produces a
+[`Hypothesis`](../core/types/src/finding.rs). A `Verifier` performs a controlled
+experiment and says whether the behaviour reproduces. **Only a verifier's output may
+reach the findings store**, which is security invariant 6 made structural: the type a
+detector produces cannot be persisted as a finding, so a noisy check cannot become a
+noisy report by taking a shortcut.
+
+Every generated request goes through the same `ScopeGuard` as everything else. That is
+an architectural invariant, not a scanner setting.
+
+**M13.2 — Passive scanner** · PLANNED
+
+Observations over traffic that has already been captured. No new requests, which makes
+it safe to run on any engagement and easy to benchmark.
+
+| Detector | Risk | Value |
+| --- | --- | --- |
+| Missing security headers | Low | High |
+| Cookie security attributes | Low | High |
+| CORS configuration | Low/Medium | High |
+| Information-disclosure headers | Low | High |
+| TLS configuration observations | Low | High |
+| Cache-control problems | Low/Medium | High |
+| Mixed content | Low | Medium |
+| Sensitive data in responses | Medium | High |
+| Authentication and session observations | Medium | High |
+| Technology fingerprinting | Low | Medium |
+
+**Most of these are observations, not vulnerabilities, and are labelled as such.**
+`Server: nginx/1.24.0` is a fact about the response; whether it matters depends on the
+engagement. A scanner that files it as a finding teaches people to ignore the findings
+list, which is the only thing a findings list must never become.
+
+**M13.3 — Active test scheduler** · PLANNED
+
+One queue, bounded concurrency, per-host rate limits, and every request through the
+guard. The scheduler is what makes active testing safe to point at a production system,
+so it lands before the detectors that use it.
+
+**M13.4 — Reflected-input verification** · PLANNED — a marker goes in, and the
+*context* it comes back in decides what it means: HTML text, an attribute, JavaScript,
+JSON, a URL, CSS. Reporting because a string came back is how scanners earn their
+reputation.
+
+**M13.5 — Redirect verification** · PLANNED — a controlled destination, and the
+`Location` header inspected rather than followed.
+
+**M13.6 — Authentication and session verification** · PLANNED — where Hexora's identity
+model pays off: the same request as User A, User B and Anonymous, compared
+differentially. This is potentially the strongest area of the scanner, because it is
+built on machinery that already produces evidence rather than scores.
+
+**M13.7 — IDOR/BOLA automation** · PLANNED — M12.5 becomes a scanner primitive:
+identifier → ownership → cross-identity substitution → control → constructed request →
+differential → verification.
+
 **M15 — Custom scan checks** · PLANNED (a check DSL, in the spirit of BChecks)
+
 **M16 — OAST** · PLANNED — self-hostable, DNS/HTTP/HTTPS/SMTP, correlated to the
 originating request. Self-hosting is a selling point over Burp Collaborator.
+
+> **M14 is retired.** It read "Active scanner and verification engine", which is now
+> M13.1 and M13.4–M13.7. The number is not reused: `CHANGELOG.md` and the code name
+> milestones by number, and quietly reassigning one would make the history ambiguous.
 
 ---
 
@@ -280,8 +437,20 @@ rather than shipping Chromium; DOM XSS testing.
 ## Phase 6 — Later
 
 **M20 — Burp Montoya compatibility** · PLANNED — separate subproject, out-of-process
-JVM, independently versioned, public compatibility matrix. Deliberately last among
-extension work.
+JVM, independently versioned. Deliberately last among extension work.
+
+**No blanket compatibility claim, ever.** The deliverable is a matrix, published with
+the layer and kept honest by a test suite:
+
+```text
+Montoya API surface        implemented / partial / unsupported / behaviourally incompatible
+Extension compatibility    per extension, with what was actually run
+```
+
+Which licenses the sentence *"Hexora supports Burp extensions through a compatibility
+layer, with tested compatibility documented per API"* — and not the shorter, more
+appealing, unverifiable one. The ground rules are in
+[`compatibility/burp-montoya/README.md`](../compatibility/burp-montoya/README.md).
 
 **M21 — AI subsystem** · PLANNED — after the scanner and verification engine, never
 before. An AI layer over an unreliable core produces confident nonsense. The tool gate

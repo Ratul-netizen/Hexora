@@ -1,6 +1,6 @@
 # Burp Montoya compatibility layer
 
-**Status: PLANNED (M12). Nothing here is implemented.**
+**Status: PLANNED (M20). Nothing here is implemented.**
 
 This directory is reserved for the compatibility layer that will let Java extensions
 written against PortSwigger's public Montoya API run under Hexora.

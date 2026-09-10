@@ -41,20 +41,43 @@ kept as it arrived *and* as it decodes; a request can be sent exactly as written
 matters most for what comes next: a scanner generating traffic on top of a layer that
 quietly rewrote bytes would produce findings about requests nobody made.
 
-What that leaves open, in the order it matters:
+**The order is frozen** as of M12.6, and the reason is worth repeating here because it
+decides what gets built: *Hexora does not win by having more scanners — it wins by
+making every automated result explainable, reproducible and safe.* Full detail in
+[`docs/roadmap.md`](docs/roadmap.md).
 
-- **Suggesting object identifiers.** Every one is declared by hand today. Hexora could
-  point at the values in a request that *look* like identifiers — and it has to stay a
-  suggestion a human accepts, because the moment a guess about what a string means
-  becomes an assumption, the evidence model that makes this tool worth using is gone.
-- **M13 — the scanner.** Still the thing buyers compare on, and still the thing most
-  likely to waste a tester's day if it is wrong. Build the verification framework first
-  and let detectors produce hypotheses into it: the evidence ladder, the findings store
-  and the report already exist to be that framework. Passive checks over captured
-  traffic first — no new requests, easy to benchmark, immediately useful — then
-  authentication and authorization detectors, then an active mutation engine, then the
-  UI.
-- **Attack chains** that retain evidence at every step.
+```text
+M12.7  Identifier suggestions        candidates a human confirms, never assertions
+M12.8  Engagement snapshots          what changed since the last assessment
+M13.1  Verification framework        detector ≠ finding, enforced by the type system
+M13.2  Passive scanner               observations over captured traffic, no new requests
+M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
+M13.4  Reflected-input verification  context-aware, not "the string came back"
+M13.5  Redirect verification         a controlled destination, never blindly followed
+M13.6  Auth/session verification     the identity model, applied differentially
+M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
+```
+
+The two immediately next, in more detail:
+
+- **M12.7 — identifier suggestions.** Every object identifier is declared by hand
+  today, so constructed testing is exactly as broad as what somebody typed. Hexora can
+  point at values in captured traffic that *look* like identifiers, with where they
+  were seen and how often — and a candidate never becomes an ownership assertion on its
+  own. The moment a guess about what a string means becomes an assumption, the evidence
+  model that makes this tool worth using is gone.
+- **M12.8 — engagement snapshots.** A consultant tests, the client fixes, the
+  consultant re-tests, and the question on the second visit is *what changed*. Scope,
+  identities, traffic, declared objects, findings and detector versions, captured as a
+  point in time, so Hexora can say "this existed last time and is fixed" rather than
+  producing a second report nobody can diff against the first.
+
+- **Attack chains** that retain evidence at every step, later in M12.
+
+**Not before those, however tempting:** HTTP/2 or HTTP/3 fuzzing, WebSocket fuzzing,
+large payload generators, autonomous AI exploitation, hundreds of vulnerability
+signatures, or Burp extension compatibility. Each multiplies the surface area that has
+to be trustworthy before any of it is.
 
 **Two honesty notes carried forward:**
 
