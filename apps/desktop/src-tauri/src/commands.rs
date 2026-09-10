@@ -21,6 +21,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use hexora_authz::{analysis, AuthzTester, Cell, Plan, Verdict};
 use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_proxy::{
@@ -28,12 +29,16 @@ use hexora_proxy::{
     ProxyServer, TrustState,
 };
 use hexora_repeater::{Repeater, Warning};
+use hexora_report::{Format, Report, ReportOptions};
 use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::Project;
+use hexora_storage::{FindingFilter, Project, Recorded};
+use hexora_types::finding::{Confidence, Evidence, FindingStatus, Severity};
+use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
 use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
-use hexora_types::scope::Scope;
-use serde::Serialize;
+use hexora_types::redact::Secret;
+use hexora_types::scope::{PathMatch, SchemeMatch, Scope, ScopeRule};
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 
 use crate::preview::{header_block, BodyPreview};
@@ -77,7 +82,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M5",
+        milestone: "M12.4",
     }
 }
 
@@ -528,6 +533,556 @@ pub fn ca_untrust() -> CommandResult<CaStatus> {
 }
 
 // ---------------------------------------------------------------------------
+// Scope
+// ---------------------------------------------------------------------------
+
+/// The project's scope, as two lists of readable rules.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScopeView {
+    pub included: Vec<String>,
+    pub excluded: Vec<String>,
+}
+
+/// Reads the project's scope.
+#[tauri::command]
+pub fn scope_list(state: State<'_, AppState>) -> CommandResult<ScopeView> {
+    let project = open(&state)?;
+    Ok(scope_view(&project.settings().scope().map_err(fail)?))
+}
+
+/// Declares a host as authorized, or as excluded.
+///
+/// Returns the whole scope rather than an acknowledgement: widening scope is a
+/// decision a tester may have to justify later, so the window shows what it now is
+/// rather than what was just added to it.
+#[tauri::command]
+pub fn scope_add(
+    state: State<'_, AppState>,
+    host: String,
+    path_prefix: Option<String>,
+    exclude: bool,
+) -> CommandResult<ScopeView> {
+    let host = host.trim().to_string();
+    if host.is_empty() {
+        return Err("a scope rule needs a host".to_string());
+    }
+
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut scope = settings.scope().map_err(fail)?;
+
+    let rule = ScopeRule {
+        host,
+        ports: Vec::new(),
+        scheme: SchemeMatch::Any,
+        path: match path_prefix
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            None => PathMatch::Any,
+            Some(prefix) => PathMatch::Prefix {
+                value: prefix.to_string(),
+            },
+        },
+    };
+
+    let target = if exclude {
+        &mut scope.exclude
+    } else {
+        &mut scope.include
+    };
+    if target.contains(&rule) {
+        return Err(format!("{} is already in the project scope", rule.host));
+    }
+    target.push(rule);
+
+    settings.set_scope(&scope).map_err(fail)?;
+    Ok(scope_view(&scope))
+}
+
+/// Removes every rule for a host, from both lists.
+#[tauri::command]
+pub fn scope_remove(state: State<'_, AppState>, host: String) -> CommandResult<ScopeView> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut scope = settings.scope().map_err(fail)?;
+
+    let before = scope.include.len() + scope.exclude.len();
+    scope.include.retain(|rule| rule.host != host);
+    scope.exclude.retain(|rule| rule.host != host);
+    if before == scope.include.len() + scope.exclude.len() {
+        return Err(format!("no scope rule for {host}"));
+    }
+
+    settings.set_scope(&scope).map_err(fail)?;
+    Ok(scope_view(&scope))
+}
+
+// ---------------------------------------------------------------------------
+// Identities
+// ---------------------------------------------------------------------------
+
+/// An identity, as the window may show it.
+///
+/// There is no credential field, in any variant. This is the type that reaches the
+/// frontend, and a credential that reaches the frontend is a credential in a devtools
+/// console, a screenshot and a crash report.
+#[derive(Debug, Clone, Serialize)]
+pub struct IdentityView {
+    pub id: String,
+    pub label: String,
+    pub privilege: String,
+    /// The *kind* of credential — `bearer`, `cookie`, `none` — never its value.
+    pub credential: String,
+    pub owns: Vec<String>,
+}
+
+/// Lists the identities a project can test as.
+#[tauri::command]
+pub fn identities_list(state: State<'_, AppState>) -> CommandResult<Vec<IdentityView>> {
+    let project = open(&state)?;
+    Ok(project
+        .identities()
+        .list()
+        .map_err(fail)?
+        .iter()
+        .map(identity_view)
+        .collect())
+}
+
+/// Adds an identity.
+///
+/// The credential comes either from an environment variable this process can read, or
+/// from a value the tester typed. The environment route is offered first and is the
+/// one the CLI allows at all: a value typed here crosses the IPC boundary, which is a
+/// smaller exposure than a command line that `ps` and shell history can read, but not
+/// no exposure. The UI says so at the point of entry rather than here.
+#[tauri::command]
+pub fn identity_add(
+    state: State<'_, AppState>,
+    label: String,
+    privilege: String,
+    kind: String,
+    secret: Option<String>,
+    from_env: Option<String>,
+    owns: Vec<String>,
+) -> CommandResult<IdentityView> {
+    let label = label.trim().to_string();
+    if label.is_empty() {
+        return Err("an identity needs a label".to_string());
+    }
+    let privilege = parse_privilege(&privilege)?;
+
+    let value = match (from_env.as_deref(), secret.as_deref()) {
+        (Some(name), _) if !name.trim().is_empty() => Some(
+            std::env::var(name.trim())
+                .map_err(|_| format!("environment variable {} is not set", name.trim()))?,
+        ),
+        (_, Some(value)) if !value.is_empty() => Some(value.to_string()),
+        _ => None,
+    };
+
+    let credential = match value {
+        None if privilege == PrivilegeLevel::Anonymous => Credential::None,
+        None => {
+            return Err(
+                "give a credential, either by naming an environment variable or by \
+                 entering the value"
+                    .to_string(),
+            )
+        }
+        Some(value) => build_credential(&kind, value)?,
+    };
+
+    let identity = Identity {
+        id: hexora_types::ids::IdentityId::new(),
+        label,
+        privilege,
+        credential,
+        extra_headers: Vec::new(),
+        owned_object_ids: owns
+            .into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect(),
+    };
+
+    let project = open(&state)?;
+    project.identities().put(&identity).map_err(fail)?;
+    Ok(identity_view(&identity))
+}
+
+/// Removes an identity. Traffic already sent as it is kept, and still names it.
+#[tauri::command]
+pub fn identity_remove(state: State<'_, AppState>, id: String) -> CommandResult<()> {
+    let project = open(&state)?;
+    let identity_id: hexora_types::ids::IdentityId = id.parse().map_err(fail)?;
+    if !project.identities().delete(identity_id).map_err(fail)? {
+        return Err(format!("no identity {id}"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Authorization matrix
+// ---------------------------------------------------------------------------
+
+/// One identity's row in the matrix.
+#[derive(Debug, Clone, Serialize)]
+pub struct CellView {
+    pub identity: String,
+    pub label: String,
+    pub privilege: String,
+    pub request: Option<String>,
+    pub status: Option<u16>,
+    pub similarity: f32,
+    pub outcome: String,
+    pub verdict: String,
+    pub violation: bool,
+    pub leaked_object_ids: Vec<String>,
+    pub own_object_ids: Vec<String>,
+    pub reproduced: bool,
+    pub error: Option<String>,
+    /// Why a violation was demoted, when it was.
+    pub note: Option<String>,
+}
+
+/// A finished matrix and what it concluded.
+#[derive(Debug, Clone, Serialize)]
+pub struct MatrixView {
+    pub base: String,
+    pub method: String,
+    pub url: String,
+    pub owner: CellView,
+    pub cells: Vec<CellView>,
+    /// Whether an unauthenticated request received the same resource, which demotes
+    /// every per-identity verdict on the endpoint.
+    pub appears_public: bool,
+    /// The candidate findings the run supports, worst first.
+    pub findings: Vec<FindingRow>,
+    /// How many of those were written into the project, and how many were updates of
+    /// a claim it already held.
+    pub saved: usize,
+    pub updated: usize,
+}
+
+/// What to run, as one argument.
+///
+/// A struct rather than eight parameters: the run has eight knobs and every one of
+/// them changes what the traffic will be, so they are named at the call site in the
+/// frontend as well as here.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthzRequest {
+    /// The captured request to replay.
+    pub id: String,
+    /// The identity that request belongs to, by label or id.
+    pub owner: String,
+    /// Who to replay it as. Empty means every other identity in the project.
+    pub identities: Vec<String>,
+    /// Whether to add an unauthenticated control.
+    pub anonymous: bool,
+    /// Whether to replay each violation once more before reporting it.
+    pub verify: bool,
+    /// Whether to skip verifying the target's TLS certificate.
+    pub insecure: bool,
+    /// Set by the UI once the tester has confirmed a state-changing replay.
+    pub confirm_state_changing: bool,
+    /// Whether to write the findings into the project.
+    pub save: bool,
+}
+
+/// Replays a captured request as several identities.
+#[tauri::command]
+pub async fn authz_run(
+    state: State<'_, AppState>,
+    request: AuthzRequest,
+) -> CommandResult<MatrixView> {
+    let AuthzRequest {
+        id,
+        owner,
+        identities,
+        anonymous,
+        verify,
+        insecure,
+        confirm_state_changing,
+        save,
+    } = request;
+    let project = open(&state)?;
+    let base: RequestId = id.parse().map_err(fail)?;
+    let identity_store = project.identities();
+    let store = Arc::new(project.traffic());
+
+    let owner = resolve_identity(&identity_store, &owner)?;
+    let others = if identities.is_empty() {
+        identity_store
+            .list()
+            .map_err(fail)?
+            .into_iter()
+            .filter(|identity| identity.id != owner.id)
+            .collect()
+    } else {
+        identities
+            .iter()
+            .map(|who| resolve_identity(&identity_store, who))
+            .collect::<CommandResult<Vec<_>>>()?
+    };
+    if others.is_empty() {
+        return Err("there is nobody to compare against: add a second identity first".to_string());
+    }
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    // The project's own scope, not an empty one. A matrix is automated traffic, and
+    // the guard refuses automated traffic to hosts nobody has declared.
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone());
+    let tester = AuthzTester::new(repeater, store.clone(), identity_store);
+
+    let method = tester.method_of(base).map_err(fail)?;
+    if Plan::is_state_changing(&method) && !confirm_state_changing {
+        return Err(format!(
+            "{method} may change data on the target, and this run would send it {} \
+             times. Confirm before running it.",
+            others.len() + 1
+        ));
+    }
+
+    let mut plan = Plan::new(base, owner, others);
+    plan.anonymous_control = anonymous;
+    plan.verify = verify;
+
+    let matrix = tester.run(&plan).await.map_err(fail)?;
+    let target = store.target_of(base).map_err(fail)?;
+    let findings = analysis::findings(&matrix, target);
+
+    let mut saved = 0;
+    let mut updated = 0;
+    if save {
+        let store = project.findings();
+        for finding in &findings {
+            match store.record(finding).map_err(fail)? {
+                Recorded::Created(_) => saved += 1,
+                Recorded::Updated(_) => updated += 1,
+            }
+        }
+    }
+
+    Ok(MatrixView {
+        base: matrix.base.to_string(),
+        method: matrix.method.clone(),
+        url: matrix.url.clone(),
+        owner: cell_view(&matrix.owner),
+        cells: matrix.cells.iter().map(cell_view).collect(),
+        appears_public: matrix.appears_public,
+        findings: findings.iter().map(finding_row).collect(),
+        saved,
+        updated,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Findings
+// ---------------------------------------------------------------------------
+
+/// One row of the findings list.
+#[derive(Debug, Clone, Serialize)]
+pub struct FindingRow {
+    pub id: String,
+    pub title: String,
+    pub severity: String,
+    pub confidence: String,
+    pub status: String,
+    /// Whether this may be presented as an issue rather than a lead.
+    pub actionable: bool,
+    pub evidence_count: usize,
+    pub updated_at: String,
+}
+
+/// A page of findings.
+#[derive(Debug, Clone, Serialize)]
+pub struct FindingsPage {
+    pub rows: Vec<FindingRow>,
+    pub next: Option<String>,
+    pub total: u64,
+}
+
+/// Lists findings, worst first.
+#[tauri::command]
+pub fn findings_list(
+    state: State<'_, AppState>,
+    severity: Option<String>,
+    status: Option<String>,
+    actionable: bool,
+    after: Option<String>,
+    limit: u32,
+) -> CommandResult<FindingsPage> {
+    let project = open(&state)?;
+    let store = project.findings();
+
+    let filter = FindingFilter {
+        min_severity: severity.as_deref().map(parse_severity).transpose()?,
+        status: status.as_deref().map(parse_status).transpose()?,
+        target: None,
+        actionable_only: actionable,
+    };
+    let page = store
+        .list(&filter, after.map(Cursor).as_ref(), Limit::new(limit))
+        .map_err(fail)?;
+
+    Ok(FindingsPage {
+        rows: page.items.iter().map(finding_row).collect(),
+        next: page.next.map(|c| c.0),
+        total: store.count().map_err(fail)?,
+    })
+}
+
+/// A finding in full, with its evidence resolved against the project's traffic.
+#[derive(Debug, Clone, Serialize)]
+pub struct FindingDetail {
+    pub row: FindingRow,
+    pub description: String,
+    pub impact: String,
+    pub remediation: String,
+    pub reproduction: String,
+    pub location: Option<String>,
+    pub cwe: Option<String>,
+    pub owasp: Option<String>,
+    pub cvss: Option<String>,
+    pub created_at: String,
+    /// Each piece of evidence as a sentence, with the request ids it rests on so the
+    /// window can open them in history.
+    pub evidence: Vec<EvidenceView>,
+}
+
+/// One piece of evidence, and the exchanges behind it.
+#[derive(Debug, Clone, Serialize)]
+pub struct EvidenceView {
+    pub summary: String,
+    /// Request ids this evidence cites, in the order they should be read.
+    pub requests: Vec<String>,
+}
+
+/// Reads one finding in full.
+#[tauri::command]
+pub fn findings_detail(state: State<'_, AppState>, id: String) -> CommandResult<FindingDetail> {
+    let project = open(&state)?;
+    let finding = project
+        .findings()
+        .get(id.parse().map_err(fail)?)
+        .map_err(fail)?;
+
+    Ok(FindingDetail {
+        row: finding_row(&finding),
+        description: finding.description.clone(),
+        impact: finding.impact.clone(),
+        remediation: finding.remediation.clone(),
+        reproduction: finding.reproduction.clone(),
+        location: finding
+            .location
+            .as_ref()
+            .map(|l| format!("{:?} {}", l.part, l.name)),
+        cwe: finding.cwe.clone(),
+        owasp: finding.owasp.clone(),
+        cvss: finding.cvss.clone(),
+        created_at: finding.created_at.to_rfc3339(),
+        evidence: finding.evidence.iter().map(evidence_view).collect(),
+    })
+}
+
+/// Records a human judgement about a finding.
+#[tauri::command]
+pub fn findings_triage(
+    state: State<'_, AppState>,
+    id: String,
+    status: String,
+) -> CommandResult<FindingRow> {
+    let project = open(&state)?;
+    let store = project.findings();
+    let finding_id = id.parse().map_err(fail)?;
+    store
+        .set_status(finding_id, parse_status(&status)?)
+        .map_err(fail)?;
+    Ok(finding_row(&store.get(finding_id).map_err(fail)?))
+}
+
+// ---------------------------------------------------------------------------
+// Report
+// ---------------------------------------------------------------------------
+
+/// A rendered report, and what it concluded.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReportView {
+    pub format: String,
+    pub headline: String,
+    pub content: String,
+    pub findings: usize,
+    pub leads: usize,
+    pub caveats: Vec<String>,
+    /// Where it was written, when it was written anywhere.
+    pub path: Option<String>,
+    pub bytes: usize,
+}
+
+/// Renders the open project as a report, optionally writing it to disk.
+///
+/// A render sends no traffic and changes no triage state, which is why the window can
+/// offer a live preview of it without asking first.
+#[tauri::command]
+pub fn report_render(
+    state: State<'_, AppState>,
+    format: String,
+    title: Option<String>,
+    severity: Option<String>,
+    actionable: bool,
+    show_secrets: bool,
+    save_to: Option<String>,
+) -> CommandResult<ReportView> {
+    let project = open(&state)?;
+    let requested = parse_format(&format)?;
+
+    let report = Report::build(
+        &project,
+        &ReportOptions {
+            title: title.filter(|t| !t.trim().is_empty()),
+            min_severity: severity.as_deref().map(parse_severity).transpose()?,
+            actionable_only: actionable,
+            body_excerpt_bytes: 2048,
+            redaction: if show_secrets {
+                hexora_types::redact::RedactionPolicy::Disabled
+            } else {
+                hexora_types::redact::RedactionPolicy::SensitiveHeaders
+            },
+            generated_at: chrono::Utc::now(),
+        },
+    )
+    .map_err(fail)?;
+
+    let content = report.render(requested);
+    let path = match save_to.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        None => None,
+        Some(path) => {
+            std::fs::write(path, &content).map_err(|e| format!("{path}: {e}"))?;
+            Some(path.to_string())
+        }
+    };
+
+    Ok(ReportView {
+        format: format.to_ascii_lowercase(),
+        headline: report.headline(),
+        bytes: content.len(),
+        findings: report.findings.len(),
+        leads: report.leads.len(),
+        caveats: report.caveats.clone(),
+        content,
+        path,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Support
 // ---------------------------------------------------------------------------
 
@@ -671,6 +1226,294 @@ fn default_ca_dir() -> CommandResult<PathBuf> {
     Ok(PathBuf::from(base).join(".hexora").join("ca"))
 }
 
+/// Opens the project the window is working in.
+///
+/// A fresh handle each time rather than one held open in [`AppState`]: SQLite
+/// connections are pooled underneath, and a command that borrowed a long-lived
+/// project would have to decide what happens when the tester opens another one.
+fn open(state: &State<'_, AppState>) -> CommandResult<Project> {
+    let path = state.project_path().map_err(fail)?;
+    Project::open(&path).map_err(fail)
+}
+
+fn scope_view(scope: &Scope) -> ScopeView {
+    ScopeView {
+        included: scope.include.iter().map(rule_line).collect(),
+        excluded: scope.exclude.iter().map(rule_line).collect(),
+    }
+}
+
+/// One scope rule, as a line a tester can read back and recognise.
+fn rule_line(rule: &ScopeRule) -> String {
+    let scheme = match rule.scheme {
+        SchemeMatch::Any => "",
+        SchemeMatch::HttpOnly => "http://",
+        SchemeMatch::HttpsOnly => "https://",
+    };
+    let path = match &rule.path {
+        PathMatch::Any => String::new(),
+        PathMatch::Prefix { value } => format!("{value}*"),
+        PathMatch::Exact { value } => value.clone(),
+    };
+    format!("{scheme}{}{path}", rule.host)
+}
+
+fn identity_view(identity: &Identity) -> IdentityView {
+    IdentityView {
+        id: identity.id.to_string(),
+        label: identity.label.clone(),
+        privilege: privilege_name(identity.privilege).to_string(),
+        credential: credential_kind(&identity.credential).to_string(),
+        owns: identity.owned_object_ids.clone(),
+    }
+}
+
+fn privilege_name(privilege: PrivilegeLevel) -> &'static str {
+    match privilege {
+        PrivilegeLevel::Anonymous => "anonymous",
+        PrivilegeLevel::User => "user",
+        PrivilegeLevel::Elevated => "elevated",
+        PrivilegeLevel::Administrator => "administrator",
+    }
+}
+
+/// The kind of credential, never its value.
+fn credential_kind(credential: &Credential) -> &'static str {
+    match credential {
+        Credential::None => "none",
+        Credential::Bearer { .. } => "bearer",
+        Credential::Basic { .. } => "basic",
+        Credential::Cookie { .. } => "cookie",
+        Credential::Header { name, .. } => {
+            // Named rather than described: an API key in `X-Api-Key` and one in
+            // `Authorization` behave differently, and the list is read to check that
+            // the identity was set up the way the application expects.
+            let _ = name;
+            "header"
+        }
+    }
+}
+
+fn parse_privilege(value: &str) -> CommandResult<PrivilegeLevel> {
+    match value.to_ascii_lowercase().as_str() {
+        "anonymous" | "anon" => Ok(PrivilegeLevel::Anonymous),
+        "user" => Ok(PrivilegeLevel::User),
+        "elevated" => Ok(PrivilegeLevel::Elevated),
+        "administrator" | "admin" => Ok(PrivilegeLevel::Administrator),
+        other => Err(format!(
+            "{other:?} is not one of anonymous, user, elevated, administrator"
+        )),
+    }
+}
+
+/// Builds a credential from the kind the UI offered and the value it collected.
+///
+/// Anything not recognised is taken as a header name, which is how API keys arrive.
+/// The name is used as typed: Hexora sends header names as written, and an
+/// application that accepts only one casing is a finding rather than something to
+/// paper over.
+fn build_credential(kind: &str, value: String) -> CommandResult<Credential> {
+    match kind.to_ascii_lowercase().as_str() {
+        "bearer" => Ok(Credential::Bearer {
+            token: Secret::new(value),
+        }),
+        "cookie" => Ok(Credential::Cookie {
+            value: Secret::new(value),
+        }),
+        "basic" => {
+            let (username, password) = value
+                .split_once(':')
+                .ok_or_else(|| "basic credentials are given as username:password".to_string())?;
+            Ok(Credential::Basic {
+                username: username.to_string(),
+                password: Secret::new(password.to_string()),
+            })
+        }
+        "none" => Ok(Credential::None),
+        _ => Ok(Credential::Header {
+            name: kind.to_string(),
+            value: Secret::new(value),
+        }),
+    }
+}
+
+/// Finds an identity by id first, then by label.
+///
+/// Id first because it is unambiguous: a project with two identities labelled "Admin"
+/// can still be driven precisely.
+fn resolve_identity(store: &hexora_storage::IdentityStore, who: &str) -> CommandResult<Identity> {
+    if let Ok(id) = who.parse() {
+        if let Ok(identity) = store.get(id) {
+            return Ok(identity);
+        }
+    }
+    store.by_label(who).map_err(fail)
+}
+
+fn cell_view(cell: &Cell) -> CellView {
+    CellView {
+        identity: cell.identity.to_string(),
+        label: cell.label.clone(),
+        privilege: privilege_name(cell.privilege).to_string(),
+        request: cell.request.map(|r| r.to_string()),
+        status: cell.status,
+        similarity: cell.similarity,
+        outcome: cell.outcome.as_str().to_string(),
+        verdict: verdict_word(cell.verdict).to_string(),
+        violation: cell.verdict == Verdict::Violation,
+        leaked_object_ids: cell.leaked_object_ids.clone(),
+        own_object_ids: cell.own_object_ids.clone(),
+        reproduced: cell.reproduced,
+        error: cell.error.clone(),
+        note: cell.note.clone(),
+    }
+}
+
+fn verdict_word(verdict: Verdict) -> &'static str {
+    match verdict {
+        Verdict::Expected => "expected",
+        Verdict::Violation => "violation",
+        Verdict::Inconclusive => "inconclusive",
+    }
+}
+
+fn finding_row(finding: &hexora_types::finding::Finding) -> FindingRow {
+    FindingRow {
+        id: finding.id.to_string(),
+        title: finding.title.clone(),
+        severity: severity_word(finding.severity).to_string(),
+        confidence: confidence_word(finding.confidence).to_string(),
+        status: status_word(finding.status).to_string(),
+        actionable: finding.confidence.is_actionable(),
+        evidence_count: finding.evidence.len(),
+        updated_at: finding.updated_at.to_rfc3339(),
+    }
+}
+
+/// One piece of evidence as a sentence, plus the requests it rests on.
+///
+/// The ids travel separately from the prose so the window can offer them as links
+/// into history. A claim whose evidence cannot be opened is a claim nobody can check.
+fn evidence_view(evidence: &Evidence) -> EvidenceView {
+    match evidence {
+        Evidence::Exchange {
+            request,
+            response,
+            note,
+        } => EvidenceView {
+            summary: match response {
+                Some(response) => format!("{note} (response {response})"),
+                None => note.clone(),
+            },
+            requests: vec![request.to_string()],
+        },
+        Evidence::Comparison {
+            baseline,
+            variant,
+            difference,
+        } => EvidenceView {
+            summary: difference.clone(),
+            requests: vec![baseline.to_string(), variant.to_string()],
+        },
+        Evidence::ResponseExcerpt {
+            response,
+            offset,
+            excerpt,
+        } => EvidenceView {
+            summary: format!("from response {response} at byte {offset}: {excerpt}"),
+            requests: Vec::new(),
+        },
+        Evidence::OutOfBand {
+            request,
+            interaction,
+            protocol,
+        } => EvidenceView {
+            summary: format!("{protocol} interaction {interaction} attributed to this request"),
+            requests: vec![request.to_string()],
+        },
+        Evidence::Timing {
+            request,
+            baseline_ms,
+            variant_ms,
+        } => EvidenceView {
+            summary: format!("timing: baseline {baseline_ms:?} ms, variant {variant_ms:?} ms"),
+            requests: vec![request.to_string()],
+        },
+    }
+}
+
+fn severity_word(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Info => "info",
+        Severity::Low => "low",
+        Severity::Medium => "medium",
+        Severity::High => "high",
+        Severity::Critical => "critical",
+    }
+}
+
+fn confidence_word(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::Reported => "reported",
+        Confidence::Tentative => "tentative",
+        Confidence::Firm => "firm",
+        Confidence::Confirmed => "confirmed",
+    }
+}
+
+fn status_word(status: FindingStatus) -> &'static str {
+    match status {
+        FindingStatus::New => "new",
+        FindingStatus::Triaged => "triaged",
+        FindingStatus::Confirmed => "confirmed",
+        FindingStatus::FalsePositive => "false-positive",
+        FindingStatus::Duplicate => "duplicate",
+        FindingStatus::Reported => "reported",
+        FindingStatus::Fixed => "fixed",
+        FindingStatus::Accepted => "accepted",
+    }
+}
+
+fn parse_severity(value: &str) -> CommandResult<Severity> {
+    match value.to_ascii_lowercase().as_str() {
+        "info" => Ok(Severity::Info),
+        "low" => Ok(Severity::Low),
+        "medium" | "med" => Ok(Severity::Medium),
+        "high" => Ok(Severity::High),
+        "critical" | "crit" => Ok(Severity::Critical),
+        other => Err(format!(
+            "{other:?} is not one of info, low, medium, high, critical"
+        )),
+    }
+}
+
+/// Accepts the hyphenated form the UI shows as well as the stored form.
+fn parse_status(value: &str) -> CommandResult<FindingStatus> {
+    match value.to_ascii_lowercase().replace('-', "_").as_str() {
+        "new" => Ok(FindingStatus::New),
+        "triaged" => Ok(FindingStatus::Triaged),
+        "confirmed" => Ok(FindingStatus::Confirmed),
+        "false_positive" => Ok(FindingStatus::FalsePositive),
+        "duplicate" => Ok(FindingStatus::Duplicate),
+        "reported" => Ok(FindingStatus::Reported),
+        "fixed" => Ok(FindingStatus::Fixed),
+        "accepted" => Ok(FindingStatus::Accepted),
+        other => Err(format!(
+            "{other:?} is not one of new, triaged, confirmed, false-positive, \
+             duplicate, reported, fixed, accepted"
+        )),
+    }
+}
+
+fn parse_format(value: &str) -> CommandResult<Format> {
+    match value.to_ascii_lowercase().as_str() {
+        "markdown" | "md" => Ok(Format::Markdown),
+        "html" => Ok(Format::Html),
+        "json" => Ok(Format::Json),
+        other => Err(format!("{other:?} is not one of markdown, html, json")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,6 +1588,170 @@ mod tests {
 
         std::fs::write(dir.path().join("notes.txt"), "unrelated").unwrap();
         assert!(!is_empty_dir(dir.path()));
+    }
+
+    #[test]
+    fn an_identity_view_never_carries_the_credential() {
+        // This is the type that reaches the frontend. A credential here is a
+        // credential in a devtools console and in every screenshot of the window.
+        let identity = Identity::bearer("User B", "sk-live-not-a-real-token");
+        let json = serde_json::to_string(&identity_view(&identity)).unwrap();
+
+        assert!(!json.contains("sk-live-not-a-real-token"), "{json}");
+        assert!(json.contains("\"credential\":\"bearer\""), "{json}");
+        assert!(json.contains("User B"), "{json}");
+    }
+
+    #[test]
+    fn a_scope_rule_reads_back_as_the_line_a_tester_typed() {
+        assert_eq!(
+            rule_line(&ScopeRule::host("api.example.com")),
+            "api.example.com"
+        );
+        assert_eq!(
+            rule_line(&ScopeRule::host("api.example.com").with_prefix("/v1")),
+            "api.example.com/v1*"
+        );
+    }
+
+    #[test]
+    fn adding_a_scope_rule_returns_the_whole_scope_not_an_acknowledgement() {
+        // Widening scope is a decision a tester may have to justify later, so the
+        // window is given what the scope now is rather than what was just added.
+        let scope = Scope::new()
+            .include(ScopeRule::host("api.example.com"))
+            .exclude(ScopeRule::host("admin.example.com"));
+        let view = scope_view(&scope);
+
+        assert_eq!(view.included, vec!["api.example.com"]);
+        assert_eq!(view.excluded, vec!["admin.example.com"]);
+    }
+
+    #[test]
+    fn a_comparison_keeps_both_request_ids_so_the_window_can_open_them() {
+        let baseline = RequestId::new();
+        let variant = RequestId::new();
+        let view = evidence_view(&Evidence::Comparison {
+            baseline,
+            variant,
+            difference: "User B received acct-1000".into(),
+        });
+
+        assert_eq!(
+            view.requests,
+            vec![baseline.to_string(), variant.to_string()]
+        );
+        assert!(view.summary.contains("acct-1000"));
+    }
+
+    #[test]
+    fn an_excerpt_cites_no_request_rather_than_a_made_up_one() {
+        let view = evidence_view(&Evidence::ResponseExcerpt {
+            response: hexora_types::ids::ResponseId::new(),
+            offset: 412,
+            excerpt: "acct-1000".into(),
+        });
+        assert!(view.requests.is_empty());
+        assert!(view.summary.contains("412"), "{}", view.summary);
+    }
+
+    #[test]
+    fn a_finding_row_says_whether_the_claim_may_be_reported() {
+        let mut finding = a_finding();
+        finding.confidence = Confidence::Tentative;
+        assert!(
+            !finding_row(&finding).actionable,
+            "a similarity match is a lead, and the list has to say so"
+        );
+
+        finding.confidence = Confidence::Firm;
+        assert!(finding_row(&finding).actionable);
+    }
+
+    #[test]
+    fn triage_states_are_accepted_in_the_form_the_window_shows_them() {
+        assert_eq!(
+            parse_status("false-positive").unwrap(),
+            FindingStatus::FalsePositive
+        );
+        assert_eq!(status_word(FindingStatus::FalsePositive), "false-positive");
+        assert!(parse_status("wontfix")
+            .unwrap_err()
+            .contains("false-positive"));
+    }
+
+    #[test]
+    fn an_unknown_report_format_lists_the_ones_that_exist() {
+        assert_eq!(parse_format("MD").unwrap(), Format::Markdown);
+        let error = parse_format("pdf").unwrap_err();
+        assert!(error.contains("markdown"), "{error}");
+    }
+
+    #[test]
+    fn a_matrix_cell_carries_the_request_id_a_finding_would_cite() {
+        let request = RequestId::new();
+        let cell = Cell {
+            identity: hexora_types::ids::IdentityId::new(),
+            label: "User B".into(),
+            privilege: PrivilegeLevel::User,
+            request: Some(request),
+            status: Some(200),
+            similarity: 1.0,
+            outcome: hexora_authz::Outcome::Allowed,
+            verdict: Verdict::Violation,
+            leaked_object_ids: vec!["acct-1000".into()],
+            own_object_ids: Vec::new(),
+            reproduced: true,
+            error: None,
+            note: None,
+        };
+
+        let view = cell_view(&cell);
+        assert_eq!(view.request.as_deref(), Some(request.to_string().as_str()));
+        assert!(view.violation);
+        assert_eq!(view.verdict, "violation");
+        assert_eq!(view.leaked_object_ids, vec!["acct-1000"]);
+    }
+
+    #[test]
+    fn an_anonymous_identity_may_be_added_with_no_credential_at_all() {
+        // Every other privilege level needs one: an identity that was supposed to
+        // carry a session and does not would score as "denied" everywhere and look
+        // like an application doing its job.
+        assert!(matches!(
+            build_credential("none", String::new()).unwrap(),
+            Credential::None
+        ));
+        assert!(build_credential("basic", "no-colon".into()).is_err());
+    }
+
+    /// A finding shaped like the ones the authorization subsystem produces.
+    fn a_finding() -> hexora_types::finding::Finding {
+        let now = chrono::Utc::now();
+        hexora_types::finding::Finding {
+            id: hexora_types::ids::FindingId::new(),
+            target: hexora_types::ids::TargetId::new(),
+            title: "Broken object-level authorization in GET /accounts/{id}".into(),
+            severity: Severity::High,
+            confidence: Confidence::Firm,
+            location: None,
+            description: String::new(),
+            impact: String::new(),
+            remediation: String::new(),
+            reproduction: "Send it as somebody else.".into(),
+            evidence: vec![Evidence::Comparison {
+                baseline: RequestId::new(),
+                variant: RequestId::new(),
+                difference: "User B received acct-1000".into(),
+            }],
+            cwe: None,
+            owasp: None,
+            cvss: None,
+            source: hexora_types::finding::FindingSource::AuthorizationTest,
+            created_at: now,
+            updated_at: now,
+            status: FindingStatus::New,
+        }
     }
 
     #[test]

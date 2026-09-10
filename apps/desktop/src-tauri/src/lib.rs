@@ -13,9 +13,10 @@
 //! ```
 //!
 //! Commands are added only as the milestone that implements them lands, so the
-//! surface never advertises capability that does not exist. At M5 it covers projects,
-//! the proxy, history, the repeater and the certificate authority — everything the
-//! CLI can do, calling exactly the same crates.
+//! surface never advertises capability that does not exist. At M12.4 it covers
+//! projects, the proxy, history, the repeater, the certificate authority, project
+//! scope, identities, the authorization matrix, findings and the report — everything
+//! the CLI can do, calling exactly the same crates.
 //!
 //! # State lives in Rust
 //!
@@ -57,6 +58,17 @@ pub fn run() {
             commands::ca_status,
             commands::ca_install,
             commands::ca_untrust,
+            commands::scope_list,
+            commands::scope_add,
+            commands::scope_remove,
+            commands::identities_list,
+            commands::identity_add,
+            commands::identity_remove,
+            commands::authz_run,
+            commands::findings_list,
+            commands::findings_detail,
+            commands::findings_triage,
+            commands::report_render,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the Hexora desktop shell");

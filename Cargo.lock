@@ -1545,10 +1545,12 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "hexora-authz",
  "hexora-engine",
  "hexora-http",
  "hexora-proxy",
  "hexora-repeater",
+ "hexora-report",
  "hexora-storage",
  "hexora-types",
  "serde",

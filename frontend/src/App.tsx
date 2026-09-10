@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { AuthzView } from "./views/AuthzView";
+import { FindingsView } from "./views/FindingsView";
 import { HistoryView } from "./views/HistoryView";
 import { RepeaterView } from "./views/RepeaterView";
+import { ReportView } from "./views/ReportView";
 import { SetupView } from "./views/SetupView";
 import {
   currentProject,
@@ -21,7 +24,17 @@ type Boot =
   | { status: "incompatible"; info: EngineInfo }
   | { status: "error"; message: string };
 
-type Tab = "setup" | "history" | "repeater";
+type Tab = "setup" | "history" | "repeater" | "authz" | "findings" | "report";
+
+/** The tab strip, in the order the work happens in. */
+const TABS: { id: Tab; label: string }[] = [
+  { id: "setup", label: "Setup" },
+  { id: "history", label: "History" },
+  { id: "repeater", label: "Repeater" },
+  { id: "authz", label: "Authorization" },
+  { id: "findings", label: "Findings" },
+  { id: "report", label: "Report" },
+];
 
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ status: "loading" });
@@ -32,6 +45,12 @@ export default function App() {
     address: null,
   });
   const [repeating, setRepeating] = useState<string | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [openExchange, setOpenExchange] = useState<string | null>(null);
+
+  // Bumped when a run files something, which is what tells the findings list to
+  // re-read. The engine remains the source of truth for what the project holds.
+  const [findingCount, setFindingCount] = useState(0);
 
   // Bumped whenever something new is captured, which is what tells the history view
   // to re-read. A counter rather than the traffic itself: the engine is the source
@@ -69,6 +88,19 @@ export default function App() {
     setTab("repeater");
   }, []);
 
+  const openAuthz = useCallback((id: string) => {
+    setTesting(id);
+    setTab("authz");
+  }, []);
+
+  // Following a citation out of a finding, or out of a matrix cell, lands in
+  // History with that exchange selected. A claim whose evidence cannot be opened is
+  // a claim nobody can check.
+  const showExchange = useCallback((id: string) => {
+    setOpenExchange(id);
+    setTab("history");
+  }, []);
+
   if (boot.status !== "ready") {
     return <Blocked boot={boot} />;
   }
@@ -84,17 +116,13 @@ export default function App() {
         </div>
 
         <nav>
-          {(["setup", "history", "repeater"] as const).map((name) => (
+          {TABS.map(({ id, label }) => (
             <button
-              key={name}
-              className={tab === name ? "tab active" : "tab"}
-              onClick={() => setTab(name)}
+              key={id}
+              className={tab === id ? "tab active" : "tab"}
+              onClick={() => setTab(id)}
             >
-              {name === "setup"
-                ? "Setup"
-                : name === "history"
-                  ? "History"
-                  : "Repeater"}
+              {label}
             </button>
           ))}
         </nav>
@@ -121,6 +149,8 @@ export default function App() {
             hasProject={project !== null}
             refreshToken={captureCount}
             onRepeat={openRepeater}
+            onTestAuthorization={openAuthz}
+            select={openExchange}
           />
         )}
         {tab === "repeater" && (
@@ -129,6 +159,24 @@ export default function App() {
             onCaptured={() => setCaptureCount((n) => n + 1)}
           />
         )}
+        {tab === "authz" && (
+          <AuthzView
+            requestId={testing}
+            onFindings={() => {
+              setFindingCount((n) => n + 1);
+              setCaptureCount((n) => n + 1);
+            }}
+            onOpenExchange={showExchange}
+          />
+        )}
+        {tab === "findings" && (
+          <FindingsView
+            hasProject={project !== null}
+            refreshToken={findingCount}
+            onOpenExchange={showExchange}
+          />
+        )}
+        {tab === "report" && <ReportView hasProject={project !== null} />}
       </main>
 
       <footer>

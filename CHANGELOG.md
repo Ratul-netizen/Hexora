@@ -412,21 +412,63 @@ since a typed URL is a human decision.
   comparison, keeps the public endpoint as a separate unverified lead, and carries no
   credential.
 
+### Added — M12.4, the desktop workflow
+
+- **The window does the whole loop.** Six tabs — Setup, History, Repeater,
+  Authorization, Findings, Report — over the same crates the CLI calls. Until now
+  three of the four things the engine does best were reachable only from a terminal,
+  which made the desktop client look like a proxy with a repeater bolted on.
+- **Scope and identities are declared in Setup.** An empty scope is why an
+  authorization matrix refuses to run, so the card says that rather than leaving a
+  run to fail. Adding a rule shows the whole scope back: widening it is a decision
+  somebody may have to justify later.
+- **The authorization matrix runs from the window.** Pick a request in History, press
+  *Test authorization*, choose whose request it is, and every other identity is
+  replayed against it. The anonymous control, verification, saving and the
+  state-changing confirmation are all switches with their consequences written next to
+  them. Clicking a cell opens that replay in History.
+- **The findings list answers "why is this a finding?".** Worst first, leads visibly
+  apart from established issues, and one finding opens in full: impact, remediation,
+  reproduction, and every piece of evidence as a button that opens the exact exchange
+  it rests on. Triage is one click and survives the test being re-run.
+- **The report is previewed before it is written.** Format, severity floor, leads,
+  credentials and title, then the document itself — byte-for-byte what lands on disk.
+  Even the HTML is shown as text: rendering it would mean executing markup that came
+  from the application under test.
+- **Twelve IPC commands** (`scope_*`, `identities_list`, `identity_*`, `authz_run`,
+  `findings_*`, `report_render`), the contract version bumped to 3 so an old interface
+  and a new engine refuse each other rather than misreading messages.
+- **`IdentityView` has no field that could carry a credential.** The frontend gets the
+  *kind* — bearer, cookie, none — because a value that reaches a renderer process
+  reaches a devtools console, a screenshot and a crash report. A test asserts it.
+  Adding an identity prefers an environment variable read in-process; the typed-value
+  route says at the point of entry that it crosses the IPC boundary.
+
+### Fixed
+
+- **The window has been looked at.** Every tab, on Windows, with a real project open —
+  which is how these were found: a bare `.toolbar input { width: 320px }` was
+  stretching the findings filter checkbox across a third of the screen, and a `select`
+  in a card ran the full 1600px width of the window.
+- **The documented way to run the desktop shell did not work.** A debug Tauri build
+  loads `devUrl`, not `frontendDist`, so `pnpm build && cargo run -p hexora-desktop`
+  opened a window showing `ERR_CONNECTION_REFUSED` — indistinguishable, to anyone
+  trying Hexora for the first time, from a broken application. `STATUS.md` and
+  `docs/development.md` now say to run the dev server alongside it, and why.
+
 ### Not implemented
 
-The desktop UI shows neither the authorization matrix, the findings list nor the
-report — half of what the engine can do is reachable only from a terminal. There are
-no attack chains. The matrix replays a request verbatim — substituting one identity's object identifiers into
+There are no attack chains. The matrix replays a request verbatim — substituting one identity's object identifiers into
 another's request, to *construct* cross-identity attempts rather than only replaying
 captured ones, is not implemented. Credentials are stored in cleartext; encryption
 under a project passphrase is still only in the threat model.
 
 The macOS and Linux trust-store paths are written, unit-tested and type-checked but
 have not been run on those platforms; only Windows has been verified end to end. The
-desktop UI compiles, launches and its logic is unit-tested, but its visual result has
-not been inspected — treat the layout as unreviewed. The same applies to the HTML
-report: its structure is tested and its escaping is tested, but nobody has opened the
-page in a browser and said it reads correctly. Connection reuse and
+desktop UI has been inspected on Windows at one window size, with a real project open;
+it has not been seen on macOS, on Linux, at a small window, or on a high-density
+display. The HTML report is shown in the window as text rather than rendered, and
+nobody has opened one in a browser and said it reads correctly. Connection reuse and
 redirects return `NotImplemented` naming the milestone that will provide them. The traffic store keeps both body forms, but the transport still returns
 only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
 the M1.5 gap. A repeater request edited to bare-LF line endings is re-serialized with

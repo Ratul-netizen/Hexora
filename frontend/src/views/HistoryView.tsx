@@ -22,11 +22,16 @@ export function HistoryView({
   hasProject,
   refreshToken,
   onRepeat,
+  onTestAuthorization,
+  select,
 }: {
   hasProject: boolean;
   /** Changes whenever the proxy captures something, prompting a reload. */
   refreshToken: number;
   onRepeat: (id: string) => void;
+  onTestAuthorization: (id: string) => void;
+  /** An exchange to open, set when arriving from a finding or a matrix cell. */
+  select: string | null;
 }) {
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -50,6 +55,12 @@ export function HistoryView({
   useEffect(() => {
     void reload();
   }, [reload, refreshToken]);
+
+  // Arriving from a citation elsewhere in the window. The row may not be on the
+  // page that is loaded, so the detail is fetched by id regardless of the table.
+  useEffect(() => {
+    if (select !== null) setSelected(select);
+  }, [select]);
 
   useEffect(() => {
     if (selected === null) {
@@ -170,6 +181,9 @@ export function HistoryView({
               {detail.origin} · {detail.sent_at}
             </span>
             <button onClick={() => onRepeat(detail.id)}>Send to repeater</button>
+            <button onClick={() => onTestAuthorization(detail.id)}>
+              Test authorization
+            </button>
           </header>
           <div className="panes">
             <MessagePane

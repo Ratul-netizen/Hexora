@@ -197,13 +197,13 @@ Full CLI parity with the desktop client on the same engine, plus a server mode t
 run on a VPS with a thin local client — Caido's architecture, and better than Burp's
 desktop-only model. CI/CD integration.
 
-**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.3 IMPLEMENTED)
+**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.4 IMPLEMENTED)
 
 **This is the flagship feature.** Neither competitor does it properly, and it automates
 the highest-value manual work in most engagements.
 
-Done (M12.1–M12.3), in `core/authz`, `core/storage`, `core/report` and the `authz` /
-`findings` / `report` commands:
+Done (M12.1–M12.4), in `core/authz`, `core/storage`, `core/report`, the `authz` /
+`findings` / `report` commands and the desktop window:
 
 - Multiple identities, persisted in the project with their privilege ordering and the
   object identifiers they own (`core/storage/src/identities.rs`).
@@ -229,6 +229,11 @@ Done (M12.1–M12.3), in `core/authz`, `core/storage`, `core/report` and the `au
   what was tested, not as a clean bill of health. Leads stay in their own section,
   triaged-away findings are counted rather than hidden, and credentials are redacted
   with the length of what was removed.
+- A desktop workflow (M12.4): scope and identities in Setup, the matrix run from a
+  captured request, the findings list with every claim's evidence one click from the
+  exchange it rests on, and the report previewed before it is written. Twelve IPC
+  commands, contract version 3, and an identity view with no field that could carry a
+  credential.
 
 Not done:
 
@@ -236,7 +241,6 @@ Not done:
   identity's object identifiers into another's request is the other half of this
   milestone.
 - **Attack chains** that retain evidence at every step.
-- **A desktop UI** for the matrix, the findings list or the report.
 
 ---
 

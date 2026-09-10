@@ -342,8 +342,16 @@ input[type="text"]:focus {
   flex: 0 0 auto;
 }
 
-.toolbar input {
+/* Text inputs only. A bare `input` selector here also caught the checkbox in the
+ * findings toolbar and stretched it to 320px, leaving the box marooned an inch from
+ * its own label. */
+.toolbar input[type="text"] {
   width: 320px;
+}
+
+.toolbar .checkbox {
+  margin: 0;
+  white-space: nowrap;
 }
 
 .table-wrap {
@@ -642,4 +650,196 @@ textarea.editor:focus {
 .panel h2 {
   margin-top: 0;
   font-size: 14px;
+}
+
+/* ------------------------------------------------- authorization, findings, report
+ *
+ * Severity is a badge and confidence is plain text, deliberately. They answer
+ * different questions — "how bad if true" and "how sure are we" — and giving both the
+ * same visual weight is how a lead ends up being read as a finding.
+ */
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  min-width: 0;
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+input[type="password"] {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  min-width: 0;
+}
+
+input[type="password"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+button.link:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: transparent;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--text-bright);
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.authz,
+.findings,
+.report {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.authz .card,
+.report .card {
+  margin-bottom: 16px;
+}
+
+/* Severity, as a badge. The palette runs from the accent through to muted, so a
+ * critical finding is the only thing on the page competing for attention. */
+.badge {
+  display: inline-block;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge.sev-critical,
+.badge.sev-high {
+  color: var(--danger);
+}
+
+.badge.sev-medium {
+  color: var(--warn);
+}
+
+.badge.sev-low {
+  color: var(--redirect);
+}
+
+.badge.sev-info {
+  color: var(--text-muted);
+}
+
+/* A row whose verdict is a violation. Marked on the row rather than only in the
+ * verdict column: it is the reason the table exists. */
+tr.violation td {
+  background: rgba(217, 95, 95, 0.07);
+}
+
+.rules {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.rules li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.findings-brief,
+.caveats {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.findings-brief li,
+.caveats li {
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.evidence {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.evidence li {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.evidence li p {
+  margin: 0;
+}
+
+.evidence .row {
+  margin: 4px 0 0;
+}
+
+.findings .detail {
+  border-top: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.findings .detail h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 18px 0 6px;
+}
+
+/* The report, shown as text even when it is HTML: rendering it would mean executing
+ * markup that came from the application under test. */
+.report-preview {
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notice.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* A control in a card is as wide as it needs to be, not as wide as the card. A
+ * select stretched across 1600px of window reads as a layout accident. */
+.card .field > input,
+.card .field > select {
+  max-width: 420px;
+}
+
+.findings-brief .badge {
+  margin-right: 6px;
 }

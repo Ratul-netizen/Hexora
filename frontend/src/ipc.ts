@@ -141,7 +141,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 2;
+export const EXPECTED_RPC_CONTRACT_VERSION = 3;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -218,3 +218,196 @@ export function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
+
+/* ------------------------------------------------------------------ *
+ * Scope
+ * ------------------------------------------------------------------ */
+
+/** The project's scope, as two lists of readable rules. */
+export interface ScopeView {
+  included: string[];
+  excluded: string[];
+}
+
+export const listScope = (): Promise<ScopeView> => invoke<ScopeView>("scope_list");
+
+export const addScope = (
+  host: string,
+  pathPrefix: string | null,
+  exclude: boolean,
+): Promise<ScopeView> =>
+  invoke<ScopeView>("scope_add", { host, pathPrefix, exclude });
+
+export const removeScope = (host: string): Promise<ScopeView> =>
+  invoke<ScopeView>("scope_remove", { host });
+
+/* ------------------------------------------------------------------ *
+ * Identities
+ * ------------------------------------------------------------------ */
+
+/**
+ * An identity, as the window shows it.
+ *
+ * There is no credential field, deliberately. `credential` is the *kind* — bearer,
+ * cookie, none — because the value has no business in a renderer process, a devtools
+ * console or a screenshot of the window.
+ */
+export interface IdentityView {
+  id: string;
+  label: string;
+  privilege: string;
+  credential: string;
+  owns: string[];
+}
+
+export const listIdentities = (): Promise<IdentityView[]> =>
+  invoke<IdentityView[]>("identities_list");
+
+export const addIdentity = (identity: {
+  label: string;
+  privilege: string;
+  kind: string;
+  secret: string | null;
+  fromEnv: string | null;
+  owns: string[];
+}): Promise<IdentityView> => invoke<IdentityView>("identity_add", identity);
+
+export const removeIdentity = (id: string): Promise<void> =>
+  invoke<void>("identity_remove", { id });
+
+/* ------------------------------------------------------------------ *
+ * Authorization matrix
+ * ------------------------------------------------------------------ */
+
+/** One identity's row in the matrix. */
+export interface CellView {
+  identity: string;
+  label: string;
+  privilege: string;
+  request: string | null;
+  status: number | null;
+  similarity: number;
+  outcome: string;
+  verdict: string;
+  violation: boolean;
+  leaked_object_ids: string[];
+  own_object_ids: string[];
+  reproduced: boolean;
+  error: string | null;
+  note: string | null;
+}
+
+export interface MatrixView {
+  base: string;
+  method: string;
+  url: string;
+  owner: CellView;
+  cells: CellView[];
+  appears_public: boolean;
+  findings: FindingRow[];
+  saved: number;
+  updated: number;
+}
+
+/**
+ * Everything one run needs, named at the call site.
+ *
+ * Field names are snake_case because this object is deserialized as a single command
+ * argument: Tauri's camelCase conversion applies to a command's own parameters, not
+ * to the fields inside one.
+ */
+export interface AuthzRequest {
+  id: string;
+  owner: string;
+  identities: string[];
+  anonymous: boolean;
+  verify: boolean;
+  insecure: boolean;
+  confirm_state_changing: boolean;
+  save: boolean;
+}
+
+export const runAuthz = (request: AuthzRequest): Promise<MatrixView> =>
+  invoke<MatrixView>("authz_run", { request });
+
+/* ------------------------------------------------------------------ *
+ * Findings
+ * ------------------------------------------------------------------ */
+
+export interface FindingRow {
+  id: string;
+  title: string;
+  severity: string;
+  confidence: string;
+  status: string;
+  /** Whether this may be presented as an issue rather than a lead. */
+  actionable: boolean;
+  evidence_count: number;
+  updated_at: string;
+}
+
+export interface FindingsPage {
+  rows: FindingRow[];
+  next: string | null;
+  total: number;
+}
+
+/** One piece of evidence, and the exchanges behind it. */
+export interface EvidenceView {
+  summary: string;
+  requests: string[];
+}
+
+export interface FindingDetail {
+  row: FindingRow;
+  description: string;
+  impact: string;
+  remediation: string;
+  reproduction: string;
+  location: string | null;
+  cwe: string | null;
+  owasp: string | null;
+  cvss: string | null;
+  created_at: string;
+  evidence: EvidenceView[];
+}
+
+export const listFindings = (query: {
+  severity: string | null;
+  status: string | null;
+  actionable: boolean;
+  after: string | null;
+  limit: number;
+}): Promise<FindingsPage> => invoke<FindingsPage>("findings_list", query);
+
+export const findingDetail = (id: string): Promise<FindingDetail> =>
+  invoke<FindingDetail>("findings_detail", { id });
+
+export const triageFinding = (
+  id: string,
+  status: string,
+): Promise<FindingRow> => invoke<FindingRow>("findings_triage", { id, status });
+
+/* ------------------------------------------------------------------ *
+ * Report
+ * ------------------------------------------------------------------ */
+
+export interface ReportView {
+  format: string;
+  headline: string;
+  content: string;
+  findings: number;
+  leads: number;
+  caveats: string[];
+  path: string | null;
+  bytes: number;
+}
+
+export const renderReport = (options: {
+  format: string;
+  title: string | null;
+  severity: string | null;
+  actionable: boolean;
+  showSecrets: boolean;
+  saveTo: string | null;
+}): Promise<ReportView> => invoke<ReportView>("report_render", options);

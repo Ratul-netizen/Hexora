@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.3 (the report)
+- **Last updated:** M12.4 (the desktop workflow)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -30,49 +30,48 @@ milestone.
 | **M12.1** — Authorization testing | Replay one captured request as every identity and say what the differences prove. Structural comparison, an unauthenticated control that stops a public page becoming six findings, declared object ids that both convict and exonerate, confidence that has to be earned by reproduction. Identities and scope now persist in the project |
 | **M12.2** — The findings store | A run's conclusions are written into the project, with their evidence. Storage refuses a claim that fails its own validation. Re-running updates the claim rather than duplicating it, keeps triage decisions, and lets confidence fall when the evidence no longer supports it. `hexora findings` lists, shows and triages |
 | **M12.3** — The report | `hexora report` turns a project into a document: Markdown for a ticket, a self-contained HTML page for a client, JSON for whatever reads it next. Every claim quotes the request and the response behind it; a citation the project cannot resolve is printed as missing rather than as a dead id. Scope, identities and coverage come first, so a clean run reads as a record of what was tested rather than a clean bill of health. Leads stay in their own section, dismissed findings are counted rather than hidden, and credentials are redacted with the length of what was removed |
+| **M12.4** — The desktop workflow | The window does the whole loop without a terminal: declare scope and identities, pick a captured request, replay it as everybody, read the matrix, open any cell's exchange, work the findings list, follow a citation back into history, triage, and render the report. Same commands, same crates, same engine as the CLI. The interface has now been *looked at* on Windows, which is how two layout defects and a wrong run instruction in the docs were found |
 
 ## Next
 
-**An engagement now produces a document.** Capture a request, replay it as everybody
-else, file what that proves, and render the project into something a client can be
-handed — with the request and the response quoted under every claim, credentials
-redacted, and the unverified work kept visibly apart from the established work.
+**The core workflow no longer needs a terminal.** Capture, replay as everybody, file
+what it proves, triage it, and hand over a document — all of it in the window, on the
+same crates the CLI calls.
 
 What that leaves open, in the order it matters:
 
-- **The desktop UI.** It shows traffic and the repeater; it shows neither the
-  authorization matrix, the findings list nor the report. That is now the widest gap
-  in the product: three of the four things the engine does best are reachable only
-  from a terminal.
 - **Construct the attempts, do not only replay them.** The matrix replays a request as
   written. Substituting one identity's object identifiers into another's request —
   "can User B reach *User A's* invoice id?" — is the other half of M12 and finds bugs
-  a replay cannot.
+  a replay cannot. This is now the most valuable thing left in the authorization line.
+- **The two pieces of traffic debt** below: `encoded_body` is written as NULL, and a
+  raw request edited to bare-LF is re-serialized with CRLF. Both are small, both are
+  the kind of thing a security tool should not get wrong, and both are easier to fix
+  now than after a scanner is generating traffic through the same paths.
 - **M13 — the scanner.** Still the thing buyers compare on, and still the thing most
-  likely to waste a tester's day if it is wrong.
+  likely to waste a tester's day if it is wrong. Build the verification framework
+  first and let the detectors produce hypotheses into it: the evidence ladder and the
+  findings store already exist to be that framework.
 
-**Three honesty notes carried forward:**
+**Two honesty notes carried forward:**
 
 The macOS and Linux trust paths in `core/proxy/src/trust.rs` are written, unit-tested
 and type-checked, but have never been *run* on those platforms. Only Windows is
 verified end to end.
 
-The desktop UI compiles, launches and its logic is unit-tested, but its visual result
-has not been inspected on any platform — nobody has looked at the window and said "that
-reads correctly". Treat the layout as unreviewed. The same caveat applies to the HTML
-report: its structure and its escaping are tested, but nobody has opened the page in a
-browser and said it reads correctly.
+The authorization matrix and the report have been exercised end to end against a local
+application with a deliberate IDOR — from the CLI and, at M12.4, from the window: the
+run found the bug at High, correctly cleared a per-identity endpoint that scores 1.00
+on similarity, correctly reduced a public page to a single finding, updated the
+existing claim rather than duplicating it, and let its confidence fall from Confirmed
+to Firm because that run did not reproduce it. Neither has been run against a large
+real application, where response noise is worse than any fixture.
 
-The authorization matrix has been exercised end to end against a local application
-with a deliberate IDOR: it found the bug at High/Confirmed, correctly cleared a
-per-identity endpoint that scores 1.00 on similarity, correctly reduced a public page
-to a single finding, filed the result, kept a `false_positive` decision across a
-re-run, and let the reproduction steps in the finding be run verbatim. The report was
-exercised on that same project — proxy capture, `authz --verify`, `findings`, then
-Markdown and HTML — and the document names the leaked account id, quotes both sides of
-the comparison, keeps the public endpoint as a lead rather than a finding, and carries
-no credential. Neither has been run against a large real application, where response
-noise is worse than any fixture.
+**The window has now been inspected**, on Windows, at 1454x882 — every tab, with a
+real project open. That closes the "nobody has looked at it" caveat that stood from M5
+to M12.3. It has not been seen on macOS or Linux, at a small window size, or on a
+high-density display, and the HTML report is still shown as text rather than rendered,
+so nobody has viewed *that* in a browser either.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -193,7 +192,8 @@ cargo run -p hexora-cli -- report ./scratch/demo --actionable --severity high
 cargo run -p hexora-cli -- report ./scratch/demo --format json
 
 # The desktop window. Same engine, no terminal.
-pnpm -C frontend build && cargo run -p hexora-desktop
+pnpm -C frontend dev            # leave running: a debug build loads the dev server
+cargo run -p hexora-desktop     # in a second terminal
 ```
 
 ---
@@ -278,3 +278,15 @@ Written down because they were learned the hard way and are easy to undo by acci
 - **A redacted header prints the length of what was removed.** Otherwise a reader
   cannot tell a credential that was hidden from one that was never sent, and the
   request in front of them will not reproduce either way.
+- **A bare `input` selector catches checkboxes too.** `.toolbar input { width: 320px }`
+  stretched the findings filter's checkbox to a third of the screen and left the box
+  marooned from its own label. It was in the stylesheet for one milestone before
+  anybody opened the window.
+- **A debug Tauri build loads `devUrl`, not `frontendDist`.** The documented command
+  (`pnpm build && cargo run -p hexora-desktop`) opened a window reading
+  `ERR_CONNECTION_REFUSED` — which looks like a broken application rather than a
+  missing dev server. Written up in `docs/development.md`.
+- **Credential kinds go to the frontend; credential values never do.** `IdentityView`
+  has no field that could carry one, so a token cannot reach a devtools console, a
+  screenshot or a crash report by accident. The typed IPC edge is where that is
+  enforced, and there is a test asserting it.

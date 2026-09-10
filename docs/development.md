@@ -115,8 +115,16 @@ Running the desktop shell (needs Tauri prerequisites):
 
 ```bash
 pnpm -C frontend install
-cargo run -p hexora-desktop
+pnpm -C frontend dev            # leave this running
+cargo run -p hexora-desktop     # in a second terminal
 ```
+
+**A debug build loads the dev server, not `frontend/dist`.** `tauri.conf.json` sets
+both `devUrl` and `frontendDist`, and a debug binary uses the first — so
+`pnpm build && cargo run -p hexora-desktop` opens a window showing
+`ERR_CONNECTION_REFUSED`, which looks like a broken application rather than a missing
+dev server. Either run the dev server alongside it, as above, or build in release
+(`cargo tauri build`), which embeds `dist`.
 
 ## Platform-gated code is only checked by CI
 

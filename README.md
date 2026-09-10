@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.3 — it answers the authorization question, files the answer, and writes it up
+## Status: M12.4 — the whole workflow, with or without a terminal
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -54,6 +54,11 @@ Wrote acme.html (10875 bytes): 1 established issue across 13 exchanges, plus 1 u
 1 unverified lead is listed separately. Re-run the test with --verify before presenting it as an issue.
 ```
 
+All of that is in the desktop window too, on the same crates: declare scope and
+identities, pick a captured request, replay it as everybody, read the matrix, open any
+cell's exchange, work the findings list, follow a claim back to the traffic behind it,
+triage, and preview the report before writing it.
+
 Unimplemented paths return `NotImplemented` naming the milestone that will provide
 them, rather than empty results, and `hexora --help` lists only commands that genuinely
 work.
@@ -72,9 +77,9 @@ work.
 | Findings persisted with their evidence, triage (`hexora findings`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
-| Desktop UI: project, CA, proxy, history, repeater | **IMPLEMENTED** |
+| Desktop UI: project, CA, proxy, history, repeater, scope, identities, the authorization matrix, findings and the report | **IMPLEMENTED** |
 | Reports: Markdown / HTML / JSON, every claim citing its exchange (`hexora report`) | **IMPLEMENTED** |
-| Attack chains, constructed cross-identity attempts, findings in the desktop UI | **PLANNED (rest of M12)** |
+| Attack chains, constructed cross-identity attempts | **PLANNED (rest of M12)** |
 | Connection reuse | **DEFERRED (M1.4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
 
