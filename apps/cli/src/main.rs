@@ -21,6 +21,7 @@ mod identity;
 mod project;
 mod proxy;
 mod repeat;
+mod report;
 mod scope;
 mod send;
 mod setup;
@@ -33,9 +34,9 @@ mod setup;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M4. The intercepting proxy, HTTP/1.x engine \
-                  with TLS, project management, traffic capture and the repeater \
-                  all work. The scanner and fuzzer are not implemented yet."
+                  Development status: M12.3. The proxy, HTTP/1.x engine \
+                  with TLS, projects, traffic capture, the repeater, authorization \
+                  testing, findings and reports all work. The scanner and fuzzer do not."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -358,6 +359,50 @@ enum Command {
         after: Option<String>,
     },
 
+    /// Turn a project's findings into a document somebody can be handed.
+    ///
+    /// A render, not a run: it sends no traffic and changes nothing. Every claim
+    /// carries the exact exchange behind it, credentials redacted, and unverified
+    /// leads are kept in their own section rather than dressed up as findings.
+    Report {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Output format: markdown, html or json.
+        #[arg(short, long, value_name = "FORMAT")]
+        format: Option<String>,
+
+        /// Write the report here instead of to stdout.
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+
+        /// Document title. Defaults to the project name.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+
+        /// Omit findings below this severity.
+        #[arg(long, value_name = "LEVEL")]
+        severity: Option<String>,
+
+        /// Leave the unverified leads out, keeping only established issues.
+        ///
+        /// They are still counted, under "what this report leaves out": a document
+        /// that silently dropped them would hide the size of the unfinished work.
+        #[arg(long)]
+        actionable: bool,
+
+        /// Include real credentials in the quoted traffic.
+        ///
+        /// The resulting file is a secret, not a deliverable. Only use it for a
+        /// report that stays on your own machine.
+        #[arg(long)]
+        show_secrets: bool,
+
+        /// How much of each body to quote, in bytes.
+        #[arg(long, value_name = "BYTES", default_value_t = 2048)]
+        excerpt_bytes: usize,
+    },
+
     /// Print version and build information.
     Version,
 }
@@ -575,6 +620,26 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 json: cli.json,
             }),
         },
+        Command::Report {
+            path,
+            format,
+            output,
+            title,
+            severity,
+            actionable,
+            show_secrets,
+            excerpt_bytes,
+        } => report::run(report::ReportArgs {
+            project: path,
+            format: format.as_deref(),
+            output: output.as_deref(),
+            title: title.as_deref(),
+            severity: severity.as_deref(),
+            actionable: *actionable,
+            show_secrets: *show_secrets,
+            excerpt_bytes: *excerpt_bytes,
+            json: cli.json,
+        }),
         Command::Project(ProjectCommand::Init { path, name }) => {
             project::init(path, name.as_deref(), cli.json)
         }
@@ -712,14 +777,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M4",
+            "milestone": "M12.3",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M4 (repeater)");
+        println!("  milestone:               M12.3 (reports)");
     }
 }
 
@@ -778,7 +843,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M4"),
+            help.contains("M12.3"),
             "users must not mistake this for a finished tool"
         );
     }

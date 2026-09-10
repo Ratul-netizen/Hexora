@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.2 (the findings store)
+- **Last updated:** M12.3 (the report)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -29,22 +29,21 @@ milestone.
 | **M5** — Desktop UI | The Tauri window does the whole loop: open a project, install the CA, run the proxy, watch traffic arrive live, inspect an exchange, send it to the repeater, edit, resend, diff. Same crates as the CLI — there is no second engine |
 | **M12.1** — Authorization testing | Replay one captured request as every identity and say what the differences prove. Structural comparison, an unauthenticated control that stops a public page becoming six findings, declared object ids that both convict and exonerate, confidence that has to be earned by reproduction. Identities and scope now persist in the project |
 | **M12.2** — The findings store | A run's conclusions are written into the project, with their evidence. Storage refuses a claim that fails its own validation. Re-running updates the claim rather than duplicating it, keeps triage decisions, and lets confidence fall when the evidence no longer supports it. `hexora findings` lists, shows and triages |
+| **M12.3** — The report | `hexora report` turns a project into a document: Markdown for a ticket, a self-contained HTML page for a client, JSON for whatever reads it next. Every claim quotes the request and the response behind it; a citation the project cannot resolve is printed as missing rather than as a dead id. Scope, identities and coverage come first, so a clean run reads as a record of what was tested rather than a clean bill of health. Leads stay in their own section, dismissed findings are counted rather than hidden, and credentials are redacted with the length of what was removed |
 
 ## Next
 
-**A run's conclusions now live in the project.** Capture a request, replay it as
-everyone else, and what comes out is a finding with its evidence attached, in a file
-somebody else can open — filtered, paged, and triageable without losing the decision
-when the test runs again.
+**An engagement now produces a document.** Capture a request, replay it as everybody
+else, file what that proves, and render the project into something a client can be
+handed — with the request and the response quoted under every claim, credentials
+redacted, and the unverified work kept visibly apart from the established work.
 
 What that leaves open, in the order it matters:
 
-- **The report.** Everything needed is now in the project: claims, confidence, and the
-  exact exchanges behind each one. Nothing renders it into a document a client can be
-  handed, and that is the gap this whole line of work was aimed at.
 - **The desktop UI.** It shows traffic and the repeater; it shows neither the
-  authorization matrix nor the findings list, so half of what the engine can do is
-  reachable only from a terminal.
+  authorization matrix, the findings list nor the report. That is now the widest gap
+  in the product: three of the four things the engine does best are reachable only
+  from a terminal.
 - **Construct the attempts, do not only replay them.** The matrix replays a request as
   written. Substituting one identity's object identifiers into another's request —
   "can User B reach *User A's* invoice id?" — is the other half of M12 and finds bugs
@@ -52,7 +51,7 @@ What that leaves open, in the order it matters:
 - **M13 — the scanner.** Still the thing buyers compare on, and still the thing most
   likely to waste a tester's day if it is wrong.
 
-**Two honesty notes carried forward:**
+**Three honesty notes carried forward:**
 
 The macOS and Linux trust paths in `core/proxy/src/trust.rs` are written, unit-tested
 and type-checked, but have never been *run* on those platforms. Only Windows is
@@ -60,14 +59,20 @@ verified end to end.
 
 The desktop UI compiles, launches and its logic is unit-tested, but its visual result
 has not been inspected on any platform — nobody has looked at the window and said "that
-reads correctly". Treat the layout as unreviewed.
+reads correctly". Treat the layout as unreviewed. The same caveat applies to the HTML
+report: its structure and its escaping are tested, but nobody has opened the page in a
+browser and said it reads correctly.
 
 The authorization matrix has been exercised end to end against a local application
 with a deliberate IDOR: it found the bug at High/Confirmed, correctly cleared a
 per-identity endpoint that scores 1.00 on similarity, correctly reduced a public page
 to a single finding, filed the result, kept a `false_positive` decision across a
-re-run, and let the reproduction steps in the finding be run verbatim. It has not been
-run against a large real application, where response noise is worse than any fixture.
+re-run, and let the reproduction steps in the finding be run verbatim. The report was
+exercised on that same project — proxy capture, `authz --verify`, `findings`, then
+Markdown and HTML — and the document names the leaked account id, quotes both sides of
+the comparison, keeps the public endpoint as a lead rather than a finding, and carries
+no credential. Neither has been run against a large real application, where response
+noise is worse than any fixture.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -181,6 +186,12 @@ cargo run -p hexora-cli -- findings ./scratch/demo --actionable
 cargo run -p hexora-cli -- findings ./scratch/demo --show fnd_01a08c…
 cargo run -p hexora-cli -- findings ./scratch/demo     --triage fnd_01a08c… --status false-positive
 
+# The write-up, with the traffic behind every claim quoted in place.
+cargo run -p hexora-cli -- report ./scratch/demo
+cargo run -p hexora-cli -- report ./scratch/demo --format html --output acme.html
+cargo run -p hexora-cli -- report ./scratch/demo --actionable --severity high
+cargo run -p hexora-cli -- report ./scratch/demo --format json
+
 # The desktop window. Same engine, no terminal.
 pnpm -C frontend build && cargo run -p hexora-desktop
 ```
@@ -252,3 +263,18 @@ Written down because they were learned the hard way and are easy to undo by acci
 - **"Identical" is an answer, not an empty result.** `hexora repeat --diff` used to
   print nothing for two matching responses. For an authorization comparison that case
   is the finding, and printing nothing reads as a broken command.
+- **A report that lists nothing must not read as "nothing is wrong".** An empty
+  findings section is a statement about what was tested, and the coverage, scope and
+  identities are printed above it so a reader can see the limits of the claim.
+- **The HTML report escapes everything and loads nothing.** It quotes bodies from the
+  application that was just attacked, and some findings exist *because* that
+  application reflects input — an unescaped report would deliver the payload it
+  documents, on the client's machine. For the same reason there is no script, no
+  external stylesheet and no font from a CDN: a document that phoned home on open
+  would leak when and where it was read.
+- **A citation that resolves to nothing is worse than no citation.** It leaves the
+  reader believing the claim was checkable. A cited exchange the project no longer
+  holds is printed as missing, with the reason, and counted in the report's caveats.
+- **A redacted header prints the length of what was removed.** Otherwise a reader
+  cannot tell a credential that was hidden from one that was never sent, and the
+  request in front of them will not reproduce either way.

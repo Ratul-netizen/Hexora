@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.2 — it answers the authorization question, and files the answer
+## Status: M12.3 — it answers the authorization question, files the answer, and writes it up
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -44,6 +44,16 @@ ID                                     SEVERITY  CONFIDENCE STATUS   TITLE
 fnd_01a08c5140…                        high      confirmed  new      Broken object-level authorization in GET /accounts/acct-1000
 ```
 
+And it renders into a document somebody can be handed, with the request and the
+response quoted under every claim, credentials redacted, and unverified leads kept in
+their own section rather than dressed up as findings:
+
+```console
+$ hexora report ./engagement --format html --output acme.html
+Wrote acme.html (10875 bytes): 1 established issue across 13 exchanges, plus 1 unverified lead.
+1 unverified lead is listed separately. Re-run the test with --verify before presenting it as an issue.
+```
+
 Unimplemented paths return `NotImplemented` naming the milestone that will provide
 them, rather than empty results, and `hexora --help` lists only commands that genuinely
 work.
@@ -63,7 +73,8 @@ work.
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater | **IMPLEMENTED** |
-| Reports, attack chains, findings in the desktop UI | **PLANNED (rest of M12)** |
+| Reports: Markdown / HTML / JSON, every claim citing its exchange (`hexora report`) | **IMPLEMENTED** |
+| Attack chains, constructed cross-identity attempts, findings in the desktop UI | **PLANNED (rest of M12)** |
 | Connection reuse | **DEFERRED (M1.4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
 

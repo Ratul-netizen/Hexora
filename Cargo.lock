@@ -1529,6 +1529,7 @@ dependencies = [
  "hexora-http",
  "hexora-proxy",
  "hexora-repeater",
+ "hexora-report",
  "hexora-storage",
  "hexora-types",
  "serde_json",
@@ -1629,6 +1630,19 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "hexora-report"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "hexora-storage",
+ "hexora-types",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

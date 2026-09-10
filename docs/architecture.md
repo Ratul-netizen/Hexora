@@ -32,6 +32,7 @@ influenced part of the process.
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
 | `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings | **Implemented** (M12.1) |
+| `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic | **Implemented** (M12.3) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** (layout unreviewed) |
 | `frontend` | React + TypeScript UI | **Implemented** (layout unreviewed) |
@@ -46,8 +47,14 @@ types ← storage ← http ← proxy
            ↑                │
        repeater ← authz ────┤
            ↑                │
+        report ─────────────┤
+           ↑                │
         cli · desktop ──────┘
 ```
+
+`core/report` depends on `core/storage` and `core/types` and on nothing else: a report
+is a read of a finished project, so it has no reason to reach the network and no way
+to. That is why `hexora report` can be trusted to change nothing.
 
 `core/authz` deliberately owns no send path of its own: it drives `core/repeater`,
 because loading a stored request, applying a credential, sending it and recording the
@@ -59,7 +66,7 @@ a second set of bugs.
 An earlier draft of this workspace had eleven core crates, nine of them empty. Empty
 crates are not architecture — they are a promise the compiler cannot check. Crates are
 split out of `core/engine` when the milestone that needs them lands and there is real
-code to separate. `core/http`, `core/proxy`, `core/repeater` and `core/authz` were each
+code to separate. `core/http`, `core/proxy`, `core/repeater`, `core/authz` and `core/report` were each
 split out that way, when their contents existed; `core/scanner` is expected and does not
 exist yet, because its contents do not.
 

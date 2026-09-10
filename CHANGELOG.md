@@ -371,12 +371,52 @@ since a typed URL is a human decision.
   deadlock rather than a slow query on every in-memory project. Evidence now loads on
   the caller's connection.
 
+### Added — M12.3, the report
+
+- **`hexora report`** turns a project into a document somebody can be handed: Markdown
+  for a ticket or a repository, a self-contained HTML page for a client, JSON for
+  whatever consumes it next. All three render the same model, so the page and the file
+  cannot claim different things.
+- **Every claim carries its exchange.** Evidence is resolved against the project's
+  traffic and the request and response are quoted in full — not an id the reader would
+  have to go and look up. A citation the project can no longer resolve is printed as
+  *missing*, with the reason, because a reference that silently resolves to nothing
+  leaves a reader believing the claim was checkable.
+- **A report says what was tested, not only what was found.** Scope, identities,
+  exchange and target counts sit above the findings, and a clean run says so in those
+  terms rather than implying a clean bill of health.
+- **Leads never mix with established issues.** Anything below `Firm` goes in its own
+  section after the findings, labelled unverified. `--actionable` drops them entirely,
+  and the count still appears under "what this report leaves out" — as do findings
+  triaged as false positives or duplicates. Each of those is a human decision a
+  reviewer is entitled to ask about, so it is counted rather than hidden.
+- **Credentials do not travel.** Sensitive headers are redacted by default and the
+  report says so, printing the length of what was removed so a redacted header cannot
+  be mistaken for an absent one. `--show-secrets` opts out and warns that the file is
+  now a secret rather than a deliverable.
+- **The HTML page escapes everything and loads nothing.** A report quotes bodies from
+  the application that was being attacked; some findings exist precisely because that
+  application reflects input. No script, no external stylesheet, no font from a CDN —
+  a document that phoned home on open would leak when and where it was read.
+- **The Markdown fence outgrows the body it quotes.** A response containing three
+  backticks would otherwise close the block early and lay out the rest of the document.
+- A render changes nothing: no traffic is sent, no triage state is touched, and running
+  it twice on an unchanged project produces the same bytes, so a draft and a retest can
+  be diffed.
+
+### Changed
+
+- `hexora report` was exercised end to end against a local application with a
+  deliberate IDOR: proxy capture → `hexora authz --verify` → `hexora findings` →
+  Markdown and HTML. The document names the leaked account id, quotes both sides of the
+  comparison, keeps the public endpoint as a separate unverified lead, and carries no
+  credential.
+
 ### Not implemented
 
-There is still no report: findings are stored, filtered and readable, but nothing
-renders them into a document a client can be handed. The desktop UI shows neither the
-authorization matrix nor the findings list. There are no attack chains. The matrix
-replays a request verbatim — substituting one identity's object identifiers into
+The desktop UI shows neither the authorization matrix, the findings list nor the
+report — half of what the engine can do is reachable only from a terminal. There are
+no attack chains. The matrix replays a request verbatim — substituting one identity's object identifiers into
 another's request, to *construct* cross-identity attempts rather than only replaying
 captured ones, is not implemented. Credentials are stored in cleartext; encryption
 under a project passphrase is still only in the threat model.
@@ -384,7 +424,9 @@ under a project passphrase is still only in the threat model.
 The macOS and Linux trust-store paths are written, unit-tested and type-checked but
 have not been run on those platforms; only Windows has been verified end to end. The
 desktop UI compiles, launches and its logic is unit-tested, but its visual result has
-not been inspected — treat the layout as unreviewed. Connection reuse and
+not been inspected — treat the layout as unreviewed. The same applies to the HTML
+report: its structure is tested and its escaping is tested, but nobody has opened the
+page in a browser and said it reads correctly. Connection reuse and
 redirects return `NotImplemented` naming the milestone that will provide them. The traffic store keeps both body forms, but the transport still returns
 only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
 the M1.5 gap. A repeater request edited to bare-LF line endings is re-serialized with

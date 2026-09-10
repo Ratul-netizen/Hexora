@@ -1,0 +1,19 @@
+[package]
+name = "hexora-report"
+description = "Hexora's reporting: turn a project's findings into a document that cites the exact exchange behind every claim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-storage.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+tempfile.workspace = true

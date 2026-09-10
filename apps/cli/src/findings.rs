@@ -265,7 +265,8 @@ pub fn status_word(status: FindingStatus) -> &'static str {
     }
 }
 
-fn parse_severity(value: &str) -> Result<Severity> {
+/// Shared with `hexora report`, so both commands accept the same words for a level.
+pub fn parse_severity(value: &str) -> Result<Severity> {
     match value.to_ascii_lowercase().as_str() {
         "info" => Ok(Severity::Info),
         "low" => Ok(Severity::Low),
