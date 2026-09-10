@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M1.1 — the engine sends real requests
+## Status: M1.5 — the engine works against real sites
 
 Hexora **is not a proxy yet**, but it is no longer only a foundation. It can issue real
 HTTP requests over real sockets:
@@ -44,8 +44,9 @@ work.
 | AI tool-permission gate | **IMPLEMENTED** |
 | CLI (`project init`, `project info`, `version`) | **IMPLEMENTED** |
 | Desktop shell (status window) | **IMPLEMENTED** |
-| TLS / HTTPS | **PLANNED (M1.2)** |
-| Chunked encoding, compression, connection reuse | **PLANNED (M1.3–M1.5)** |
+| TLS / HTTPS with certificate policy fit for testing | **IMPLEMENTED** |
+| Chunked transfer decoding, gzip / deflate / brotli | **IMPLEMENTED** |
+| Streaming bodies, connection reuse | **PLANNED (M1.3–M1.4)** |
 | Proxy, TLS interception | **PLANNED (M2)** |
 | Traffic history, Repeater | **PLANNED (M3–M4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |

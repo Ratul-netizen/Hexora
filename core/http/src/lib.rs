@@ -31,6 +31,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod chunked;
+pub mod decode;
 pub mod parse;
 pub mod tls;
 pub mod transport;

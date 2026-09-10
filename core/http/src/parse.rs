@@ -58,6 +58,24 @@ pub enum Quirk {
     BodyNotAllowedButFramed,
     /// A header name contained characters outside the RFC 9110 token grammar.
     NonTokenHeaderName,
+
+    // --- chunked framing (see `crate::chunked`) ---
+    /// A chunk-size line carried an extension after `;`.
+    ChunkExtension,
+    /// Whitespace surrounded a chunk size, which RFC 9112 forbids.
+    WhitespaceInChunkSize,
+    /// A chunk size carried a `+` or `-` sign.
+    SignedChunkSize,
+    /// A chunk size used an `0x` prefix.
+    PrefixedChunkSize,
+    /// A chunk size had redundant leading zeros.
+    LeadingZeroChunkSize,
+    /// Chunk data was not followed by CRLF.
+    MissingChunkTerminator,
+    /// Trailer fields followed the terminating chunk.
+    TrailerFields,
+    /// Bytes followed the terminating chunk that belong to no requested response.
+    DataAfterFinalChunk,
 }
 
 impl Quirk {
@@ -76,6 +94,14 @@ impl Quirk {
             Self::HeaderWithoutColon => "header line had no colon and was ignored",
             Self::BodyNotAllowedButFramed => "framing headers on a status that cannot have a body",
             Self::NonTokenHeaderName => "header name contained non-token characters",
+            Self::ChunkExtension => "chunk size carried an extension",
+            Self::WhitespaceInChunkSize => "whitespace around a chunk size",
+            Self::SignedChunkSize => "chunk size carried a sign",
+            Self::PrefixedChunkSize => "chunk size used an 0x prefix",
+            Self::LeadingZeroChunkSize => "chunk size had redundant leading zeros",
+            Self::MissingChunkTerminator => "chunk data was not followed by CRLF",
+            Self::TrailerFields => "trailer fields followed the final chunk",
+            Self::DataAfterFinalChunk => "unrequested data followed the final chunk",
         }
     }
 
@@ -90,6 +116,14 @@ impl Quirk {
                 | Self::SpaceBeforeColon
                 | Self::ContentLengthAndTransferEncoding
                 | Self::DuplicateContentLength
+                // Every one of these is a place two parsers can disagree about where
+                // a message ends, which is the definition of a desync primitive.
+                | Self::WhitespaceInChunkSize
+                | Self::SignedChunkSize
+                | Self::PrefixedChunkSize
+                | Self::LeadingZeroChunkSize
+                | Self::MissingChunkTerminator
+                | Self::DataAfterFinalChunk
         )
     }
 }

@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M1.2 (TLS)
+- **Last updated:** M1.5 (chunked + compression)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -17,17 +17,22 @@ milestone.
 | **M0** — Architecture foundation | Domain model, SQLite storage + content-addressed blob store, migrations, scope enforcement at the transport chokepoint, extension permission model, AI tool gate, CLI + Tauri shells, CI, threat model, security invariants |
 | **M1.1** — HTTP/1.x over TCP | Wire-preserving parser (permissive but loud, records smuggling quirks), RFC 9112 §6.3 framing, per-phase timeouts, incremental limits, `hexora send` |
 | **M1.2** — TLS | rustls with SNI/ALPN, platform trust store, per-transport verification opt-out, mTLS client certs, TLS observations recorded on the exchange |
+| **M1.5** — Chunked + compression | Chunked decoding with desync quirks, trailers, gzip/deflate/brotli with bomb protection enforced while expanding |
 
 ## Next
 
-**M1.5 — chunked + gzip/brotli.** After M1.2 you can *reach* real targets, but many
-still bounce off `NotImplemented`, because chunked responses are everywhere. This is
-the milestone that makes Hexora practical against real sites.
+**M1.3 — streaming bodies.** Responses are currently buffered whole before being
+returned. Fine for `hexora send`, wrong for a proxy that has to forward bytes as they
+arrive, so this is the last engine piece the proxy actually needs.
 
-Then, in order: M1.3 streaming (needed before the proxy), M1.4 pooling (needed before
-the fuzzer), M1.6 redirects, M1.7 fuzz targets, M1.8 benchmarks. Then **M2 — proxy**,
-which is the hardest thing in Phase 1 because of the interception CA and per-platform
-trust installation.
+Then M1.4 pooling (needed before the fuzzer, not before), M1.6 redirects (scope-checked
+per hop), M1.7 fuzz targets for the parsers, M1.8 benchmarks. Then **M2 — proxy**, the
+hardest thing in Phase 1 because of the interception CA and per-platform trust
+installation.
+
+**Known gap to close in M3:** compressed responses are decoded in place, so the
+original wire bytes are not retained. That is at odds with "preserve the wire" and is
+only acceptable until the traffic store keeps both forms.
 
 Full plan: [`docs/roadmap.md`](docs/roadmap.md).
 

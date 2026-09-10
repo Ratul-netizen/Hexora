@@ -30,6 +30,7 @@ use tokio::net::TcpStream;
 use crate::parse::{find_head_end, parse_response_head, BodyFraming, Quirk, ResponseHead};
 use crate::tls::TlsConfig;
 use crate::write::serialize_request;
+use crate::{chunked, decode};
 
 /// Reads from the socket in chunks of this size.
 const READ_CHUNK: usize = 16 * 1024;
@@ -69,6 +70,8 @@ struct RawExchange {
     head: ResponseHead,
     body: Bytes,
     truncated: bool,
+    /// Quirks found while decoding the body, on top of those from the head.
+    body_quirks: Vec<Quirk>,
 }
 
 #[async_trait]
@@ -102,14 +105,15 @@ impl HttpTransport for TcpTransport {
             truncated: raw.truncated,
         };
 
-        if raw.head.has_smuggling_signal() {
-            let signals: Vec<&str> = raw
-                .head
-                .quirks
-                .iter()
-                .filter(|q| q.is_smuggling_signal())
-                .map(Quirk::explanation)
-                .collect();
+        let signals: Vec<&str> = raw
+            .head
+            .quirks
+            .iter()
+            .chain(raw.body_quirks.iter())
+            .filter(|q| q.is_smuggling_signal())
+            .map(Quirk::explanation)
+            .collect();
+        if !signals.is_empty() {
             // Warn, not debug: this is a finding waiting to be raised, not noise.
             tracing::warn!(
                 url = %request.url(),
@@ -188,9 +192,10 @@ async fn read_response<S: AsyncRead + Unpin>(
     request_method: &str,
     limits: &Limits,
 ) -> Result<RawExchange> {
-    let (head, mut body) = read_head(stream, request_method, limits).await?;
+    let (mut head, mut body) = read_head(stream, request_method, limits).await?;
 
     let mut truncated = false;
+    let mut body_quirks: Vec<Quirk> = Vec::new();
     match head.framing {
         BodyFraming::None => body.clear(),
 
@@ -215,9 +220,26 @@ async fn read_response<S: AsyncRead + Unpin>(
         }
 
         BodyFraming::Chunked => {
-            return Err(HexoraError::NotImplemented(
-                "chunked transfer decoding (M1.5)",
-            ));
+            let decoded = read_chunked(stream, &mut body, limits).await?;
+            truncated = decoded.truncated;
+            body_quirks.extend(decoded.quirks);
+            // Trailers are appended to the header list so nothing downstream has to
+            // know whether a field arrived before or after the body.
+            for trailer in decoded.trailers.iter() {
+                head.headers.append(trailer.clone());
+            }
+            body = BytesMut::from(&decoded.body[..]);
+        }
+    }
+
+    // Content coding is reversed last: transfer coding describes how the bytes were
+    // framed, content coding describes what they are.
+    if !matches!(head.framing, BodyFraming::None) && !truncated {
+        if let Some(encoding) = head.headers.get("Content-Encoding") {
+            let value = encoding.value_lossy().into_owned();
+            let decoded = decode::decode_body(&value, &body, limits)?;
+            truncated |= decoded.truncated;
+            body = BytesMut::from(&decoded.body[..]);
         }
     }
 
@@ -225,7 +247,39 @@ async fn read_response<S: AsyncRead + Unpin>(
         head,
         body: body.freeze(),
         truncated,
+        body_quirks,
     })
+}
+
+/// Reads chunks until the terminating chunk arrives.
+async fn read_chunked<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    buf: &mut BytesMut,
+    limits: &Limits,
+) -> Result<chunked::DecodedChunks> {
+    let deadline = tokio::time::Instant::now() + limits.total_timeout;
+
+    loop {
+        if let Some(decoded) = chunked::decode(buf, limits)? {
+            return Ok(decoded);
+        }
+
+        let read = tokio::time::timeout_at(deadline, read_more(stream, buf))
+            .await
+            .map_err(|_| {
+                HexoraError::Network(NetworkError::Timeout {
+                    phase: TimeoutPhase::ReadResponseBody,
+                    elapsed: limits.total_timeout,
+                })
+            })??;
+        if read == 0 {
+            return Err(HexoraError::Protocol(
+                hexora_types::error::ProtocolError::InvalidChunkedEncoding(
+                    "connection closed before the terminating chunk".to_string(),
+                ),
+            ));
+        }
+    }
 }
 
 /// Reads until the head terminator, returning the head and any body bytes that
@@ -621,14 +675,74 @@ mod tests {
 
     // ------------------------------------------------------- honest boundaries
 
+    // --------------------------------------------------------- chunked bodies
+
     #[tokio::test]
-    async fn chunked_responses_fail_loudly_instead_of_returning_a_wrong_body() {
+    async fn a_chunked_response_is_decoded() {
+        let (port, _server) = serve(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n",
+        )
+        .await;
+        let exchange = send(port, "/").await.unwrap();
+        assert_eq!(exchange.response.status, 200);
+        assert_eq!(exchange.response.body.as_ref(), b"hello world");
+        assert!(!exchange.response.truncated);
+    }
+
+    #[tokio::test]
+    async fn chunked_trailers_join_the_header_list() {
+        // Downstream code should not have to care whether a field arrived before or
+        // after the body.
+        let (port, _server) = serve(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\nX-Checksum: deadbeef\r\n\r\n",
+        )
+        .await;
+        let exchange = send(port, "/").await.unwrap();
+        assert_eq!(exchange.response.body.as_ref(), b"abc");
+        assert_eq!(
+            exchange
+                .response
+                .headers
+                .get("X-Checksum")
+                .unwrap()
+                .value_lossy(),
+            "deadbeef"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chunked_response_that_never_terminates_is_refused() {
         let (port, _server) =
-            serve(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
-                .await;
+            serve(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n").await;
         let err = send(port, "/").await.unwrap_err();
-        assert_eq!(err.code(), "not_implemented");
-        assert!(err.to_string().contains("M1.5"), "{err}");
+        assert_eq!(err.code(), "protocol", "{err}");
+        assert!(err.to_string().contains("terminating chunk"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_gzip_encoded_body_is_decoded() {
+        use std::io::Write as _;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(b"compressed payload").unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut scratch = vec![0u8; 4096];
+            let _ = socket.read(&mut scratch).await;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
+                compressed.len()
+            );
+            let _ = socket.write_all(head.as_bytes()).await;
+            let _ = socket.write_all(&compressed).await;
+            let _ = socket.shutdown().await;
+        });
+
+        let exchange = send(port, "/").await.unwrap();
+        assert_eq!(exchange.response.body.as_ref(), b"compressed payload");
     }
 
     // ------------------------------------------------------------------- TLS

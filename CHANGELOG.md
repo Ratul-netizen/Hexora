@@ -100,7 +100,40 @@ Sensitive response headers are redacted in `hexora send` output unless
 `--show-secrets` is passed, and out-of-scope targets are flagged rather than blocked,
 since a typed URL is a human decision.
 
+### Added — M1.2, TLS
+
+- rustls with SNI, ALPN and mTLS client certificates; roots from the **platform**
+  trust store, so a corporate inspecting proxy's CA is honoured automatically.
+- Certificate verification is per-transport, recorded on the exchange and logged every
+  time it is relaxed — not a global "ignore TLS errors" switch.
+- TLS observations (deprecated protocol versions, expired or self-signed leaves)
+  surfaced as observations, never as findings.
+- `TlsInfo`, `CertificateSummary` and `Verification` live in `hexora-types`: domain
+  vocabulary that storage and the UI both need, kept free of `rustls` so the record
+  outlives the implementation.
+
+### Added — M1.5, chunked transfer and content decoding
+
+- Chunked decoding that treats the chunk-size line as the desync surface it is:
+  extensions, whitespace, signs, `0x` prefixes, leading zeros, missing terminators and
+  data after the final chunk are each recorded as a `Quirk`, and six of them are
+  flagged as smuggling signals.
+- Trailer fields are captured and merged into the header list.
+- gzip, deflate (zlib-wrapped or raw) and brotli, with `Limits::check_decompression`
+  finally carrying real traffic — enforced in 64 KB steps while output expands, so a
+  bomb is stopped mid-expansion rather than after.
+- An unrecognised `Content-Encoding` is an error, not a silent pass-through: returning
+  still-encoded bytes as a body would make every downstream match wrong.
+
+### Fixed
+
+- **Scope normalization decoded only once**, leaving a real bypass:
+  `/%2541dmin` → `/%41dmin` → `/admin`. Any gateway that decodes and forwards to a
+  back-end that decodes again would route past an exclusion. Decoding now runs to a
+  fixed point. Found by the `normalization_is_idempotent` property test.
+
 ### Not implemented
 
-TLS, chunked decoding, connection reuse, streaming and redirects all return
-`NotImplemented` naming the milestone that will provide them. See `docs/roadmap.md`.
+Streaming bodies, connection reuse and redirects return `NotImplemented` naming the
+milestone that will provide them. Compressed bodies are decoded in place and the
+original wire bytes are not yet retained — closed in M3. See `docs/roadmap.md`.
