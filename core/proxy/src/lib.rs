@@ -22,9 +22,14 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod ca;
+pub mod hook;
 pub mod intercept;
 pub mod server;
 
 pub use ca::{CertificateAuthority, LeafCertificate};
+pub use hook::{
+    InterceptDirections, InterceptHandle, Interceptor, ManualInterceptor, PassThrough,
+    RequestVerdict, ResponseVerdict,
+};
 pub use intercept::{InterceptionPolicy, TunnelOutcome};
 pub use server::{ExchangeObserver, NoObserver, ProxyConfig, ProxyServer};

@@ -98,8 +98,8 @@ returning a wrong body.
 | M2.1 | Interception certificate authority | **DONE** |
 | M2.2 | Plain HTTP proxy, absolute-form requests | **DONE** |
 | M2.3 | `CONNECT` tunnelling and TLS interception | **DONE** |
-| M2.4 | Intercept / forward / drop / modify hooks | PLANNED · **next** |
-| M2.5 | Trust installation and first-run experience | PLANNED |
+| M2.4 | Intercept / forward / drop / modify hooks | **DONE** |
+| M2.5 | Trust installation and first-run experience | PLANNED · **next** |
 
 HTTP proxy, `CONNECT` tunnelling, per-install interception CA with generated leaf
 certificates, intercept/forward/drop/modify, certificate export and browser trust

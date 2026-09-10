@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M2.3 (TLS interception)
+- **Last updated:** M2.4 (interception hooks)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -22,15 +22,17 @@ milestone.
 | **M2.1** — Interception CA | Per-installation CA, per-host leaf minting, RFC 1123 host validation, easy removal |
 | **M2.2** — HTTP proxy | Absolute-form forwarding, hop-by-hop stripping, capture via an observer, loopback by default |
 | **M2.3** — TLS interception | `CONNECT` tunnelling, double handshake, selective interception with exempt and only-mode |
+| **M2.4** — Interception hooks | Forward / replace / drop / respond on requests, forward / replace / drop on responses, with a queue that cannot wedge the browser |
 
 ## Next
 
-**M2.4 — interception hooks.** The proxy forwards everything today. Intercept, forward,
-drop and modify are what make it a *tool* rather than a recorder, and they need a
-decision point the UI can drive.
+**M3 — traffic storage.** Captured exchanges currently scroll past in the console and
+are then gone. M3 connects them to the SQLite metadata store and content-addressed blob
+store built in M0, which have been sitting unused since — and closes the M1.5 gap where
+compressed bodies are decoded in place without the original wire bytes being kept.
 
-Then M2.5 (trust installation and first-run), M3 (traffic storage — where captured
-exchanges finally reach the database rather than the console), and M4 (repeater).
+M2.5 (trust installation and first-run) can follow; the CLI already prints per-platform
+instructions, so what remains there is desktop UX rather than mechanism.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -133,6 +135,13 @@ Written down because they were learned the hard way and are easy to undo by acci
   scheme. Forwarding one naively replays it upstream over plaintext and silently
   downgrades a connection the user believes is encrypted. The scheme comes from the
   CONNECT authority, and a test asserts the captured URL stays `https://`.
+- **Interception records what the server said, never what the tester substituted.**
+  A replaced or dropped response is still observed as it arrived. Recording a
+  substitution as the server's own behaviour would put a fabricated response into the
+  evidence behind a finding.
+- **"Interception enabled" and "interception watched" are different states.** With no
+  consumer attached nothing pauses, because a queue nobody reads would hang every
+  request while looking like a crashed proxy.
 
 ## Documentation map
 

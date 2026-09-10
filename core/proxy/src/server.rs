@@ -38,6 +38,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::ca::CertificateAuthority;
+use crate::hook::{Interceptor, PassThrough, RequestVerdict, ResponseVerdict};
 use crate::intercept::{self, InterceptionPolicy, TunnelOutcome};
 
 /// Bytes read from a client per call.
@@ -107,6 +108,7 @@ pub struct ProxyServer {
     limits: Limits,
     interception: InterceptionPolicy,
     ca: Arc<CertificateAuthority>,
+    interceptor: Arc<dyn Interceptor>,
 }
 
 impl std::fmt::Debug for ProxyServer {
@@ -147,7 +149,15 @@ impl ProxyServer {
             limits: config.limits,
             interception: config.interception,
             ca,
+            // Forwarding everything until a tester turns interception on.
+            interceptor: Arc::new(PassThrough),
         })
+    }
+
+    /// Installs an interceptor, replacing the pass-through default.
+    pub fn with_interceptor(mut self, interceptor: Arc<dyn Interceptor>) -> Self {
+        self.interceptor = interceptor;
+        self
     }
 
     /// The address actually bound, useful when port 0 was requested.
@@ -176,6 +186,7 @@ impl ProxyServer {
                 limits: self.limits.clone(),
                 interception: self.interception.clone(),
                 ca: self.ca.clone(),
+                interceptor: self.interceptor.clone(),
             };
             tokio::spawn(async move {
                 if let Err(e) = handle_connection(socket, context).await {
@@ -194,6 +205,7 @@ struct ConnectionContext {
     limits: Limits,
     interception: InterceptionPolicy,
     ca: Arc<CertificateAuthority>,
+    interceptor: Arc<dyn Interceptor>,
 }
 
 /// Serves one client connection.
@@ -211,18 +223,69 @@ async fn handle_connection(mut client: TcpStream, context: ConnectionContext) ->
 }
 
 /// Forwards one request upstream and writes the response back to the client.
+///
+/// The interceptor is consulted twice: once before the request leaves, once before the
+/// response is returned.
 async fn forward<S: AsyncWrite + Unpin>(
     client: &mut S,
     request: HttpRequest,
     context: &ConnectionContext,
 ) -> Result<()> {
+    let request = match context.interceptor.on_request(&request).await {
+        RequestVerdict::Forward => request,
+
+        // An edited request is re-checked against scope on the way out, because the
+        // user may have changed the host. That check lives in the ScopeGuard below,
+        // so a replacement gets exactly the same treatment as any other request.
+        RequestVerdict::Replace(edited) => {
+            tracing::debug!(url = %edited.url(), "request replaced by the interceptor");
+            *edited
+        }
+
+        RequestVerdict::Drop => {
+            tracing::debug!(url = %request.url(), "request dropped by the interceptor");
+            return Ok(());
+        }
+
+        // Answered without going upstream, which is how a tester sees what a client
+        // does with a response the server never sent.
+        RequestVerdict::Respond(response) => {
+            tracing::debug!(url = %request.url(), "request answered by the interceptor");
+            return write_response(client, &response).await;
+        }
+    };
+
     let options = SendOptions::interactive(Origin::Proxy);
     let decision = context.transport.decide(&request, &options);
 
     match context.transport.send(request, options).await {
         Ok(exchange) => {
-            write_response(client, &exchange.response).await?;
+            let verdict = context
+                .interceptor
+                .on_response(&exchange.request, &exchange.response)
+                .await;
+
+            // The exchange is recorded exactly as the server answered it, whatever the
+            // client is subsequently shown. A tester's substitution is their own
+            // action, not the server's behaviour, and recording it as the latter would
+            // put a fabricated response into the evidence behind a finding.
+            let to_client = match verdict {
+                ResponseVerdict::Forward => Some(exchange.response.clone()),
+                ResponseVerdict::Replace(replacement) => {
+                    tracing::debug!("response replaced by the interceptor");
+                    Some(*replacement)
+                }
+                ResponseVerdict::Drop => {
+                    tracing::debug!("response dropped by the interceptor");
+                    None
+                }
+            };
+
             context.observer.observe(&exchange, decision);
+
+            if let Some(response) = to_client {
+                write_response(client, &response).await?;
+            }
             Ok(())
         }
         Err(e) => {
@@ -548,6 +611,16 @@ mod tests {
         interception: InterceptionPolicy,
         transport: Option<TcpTransport>,
     ) -> (u16, Arc<Recorder>, Arc<CertificateAuthority>) {
+        proxy_full(scope, interception, transport, None).await
+    }
+
+    /// The full form, including an optional interceptor.
+    async fn proxy_full(
+        scope: Scope,
+        interception: InterceptionPolicy,
+        transport: Option<TcpTransport>,
+        interceptor: Option<Arc<dyn Interceptor>>,
+    ) -> (u16, Arc<Recorder>, Arc<CertificateAuthority>) {
         let recorder = Arc::new(Recorder::default());
         let ca = Arc::new(CertificateAuthority::generate().unwrap());
         let config = ProxyConfig {
@@ -564,6 +637,10 @@ mod tests {
         )
         .await
         .unwrap();
+        let server = match interceptor {
+            Some(interceptor) => server.with_interceptor(interceptor),
+            None => server,
+        };
         let port = server.local_addr().unwrap().port();
         tokio::spawn(server.serve());
         (port, recorder, ca)
@@ -881,6 +958,279 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
     }
 
+    // ------------------------------------------------------- interception hooks
+
+    /// An interceptor that applies a fixed verdict, so a test can assert the effect
+    /// end to end rather than only on the hook in isolation.
+    struct Fixed {
+        request: Mutex<Option<RequestVerdict>>,
+        response: Mutex<Option<ResponseVerdict>>,
+    }
+
+    impl Fixed {
+        fn request(verdict: RequestVerdict) -> Arc<Self> {
+            Arc::new(Self {
+                request: Mutex::new(Some(verdict)),
+                response: Mutex::new(None),
+            })
+        }
+
+        fn response(verdict: ResponseVerdict) -> Arc<Self> {
+            Arc::new(Self {
+                request: Mutex::new(None),
+                response: Mutex::new(Some(verdict)),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Interceptor for Arc<Fixed> {
+        async fn on_request(&self, _request: &HttpRequest) -> RequestVerdict {
+            self.request
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(RequestVerdict::Forward)
+        }
+
+        async fn on_response(
+            &self,
+            _request: &HttpRequest,
+            _response: &HttpResponse,
+        ) -> ResponseVerdict {
+            self.response
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(ResponseVerdict::Forward)
+        }
+    }
+
+    #[tokio::test]
+    async fn an_intercepted_request_can_be_rewritten_before_it_leaves() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = listener.local_addr().unwrap().port();
+        let received = Arc::new(Mutex::new(String::new()));
+        let sink = received.clone();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut scratch = vec![0u8; 8192];
+            let n = socket.read(&mut scratch).await.unwrap_or(0);
+            *sink.lock().unwrap() = String::from_utf8_lossy(&scratch[..n]).into_owned();
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await;
+            let _ = socket.shutdown().await;
+        });
+
+        let mut edited =
+            HttpRequest::get(HttpService::new("127.0.0.1", target, false), "/rewritten");
+        edited.headers.set("X-Added-By-Hexora", "yes");
+        let interceptor = Fixed::request(RequestVerdict::Replace(Box::new(edited)));
+
+        let (port, _recorder, _ca) = proxy_full(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            None,
+            Some(Arc::new(interceptor)),
+        )
+        .await;
+
+        through_proxy(
+            port,
+            &format!("GET http://127.0.0.1:{target}/original HTTP/1.1\r\nHost: 127.0.0.1:{target}\r\n\r\n"),
+        )
+        .await;
+
+        let upstream_saw = received.lock().unwrap().clone();
+        assert!(
+            upstream_saw.starts_with("GET /rewritten "),
+            "the edit must reach the server: {upstream_saw}"
+        );
+        assert!(
+            upstream_saw.contains("X-Added-By-Hexora: yes"),
+            "{upstream_saw}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_request_never_reaches_the_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = listener.local_addr().unwrap().port();
+        let reached = Arc::new(Mutex::new(false));
+        let flag = reached.clone();
+        tokio::spawn(async move {
+            if listener.accept().await.is_ok() {
+                *flag.lock().unwrap() = true;
+            }
+        });
+
+        let (port, recorder, _ca) = proxy_full(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            None,
+            Some(Arc::new(Fixed::request(RequestVerdict::Drop))),
+        )
+        .await;
+
+        through_proxy(
+            port,
+            &format!("GET http://127.0.0.1:{target}/ HTTP/1.1\r\nHost: 127.0.0.1:{target}\r\n\r\n"),
+        )
+        .await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            !*reached.lock().unwrap(),
+            "a dropped request must not be sent"
+        );
+        assert!(
+            recorder.seen.lock().unwrap().is_empty(),
+            "and there is no exchange to record"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_can_be_answered_without_contacting_the_server() {
+        // How a tester sees what a client does with a response the server never gave.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = listener.local_addr().unwrap().port();
+        let reached = Arc::new(Mutex::new(false));
+        let flag = reached.clone();
+        tokio::spawn(async move {
+            if listener.accept().await.is_ok() {
+                *flag.lock().unwrap() = true;
+            }
+        });
+
+        let mut canned = HttpResponse {
+            status: 418,
+            reason: Some("I am a teapot".to_string()),
+            version: hexora_types::http::HttpVersion::Http11,
+            headers: hexora_types::http::Headers::new(),
+            body: bytes::Bytes::from_static(b"brewed locally"),
+            truncated: false,
+        };
+        canned.headers.set("X-Source", "hexora");
+
+        let (port, _recorder, _ca) = proxy_full(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            None,
+            Some(Arc::new(Fixed::request(RequestVerdict::Respond(Box::new(
+                canned,
+            ))))),
+        )
+        .await;
+
+        let response = through_proxy(
+            port,
+            &format!("GET http://127.0.0.1:{target}/ HTTP/1.1\r\nHost: 127.0.0.1:{target}\r\n\r\n"),
+        )
+        .await;
+
+        assert!(response.starts_with("HTTP/1.1 418"), "{response}");
+        assert!(response.ends_with("brewed locally"), "{response}");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            !*reached.lock().unwrap(),
+            "the server must not be contacted"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_response_can_be_replaced_on_the_way_back() {
+        let target = upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\noriginal").await;
+
+        let replacement = HttpResponse {
+            status: 500,
+            reason: Some("Replaced".to_string()),
+            version: hexora_types::http::HttpVersion::Http11,
+            headers: hexora_types::http::Headers::new(),
+            body: bytes::Bytes::from_static(b"substituted"),
+            truncated: false,
+        };
+
+        let (port, recorder, _ca) = proxy_full(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            None,
+            Some(Arc::new(Fixed::response(ResponseVerdict::Replace(
+                Box::new(replacement),
+            )))),
+        )
+        .await;
+
+        let response = through_proxy(
+            port,
+            &format!("GET http://127.0.0.1:{target}/ HTTP/1.1\r\nHost: 127.0.0.1:{target}\r\n\r\n"),
+        )
+        .await;
+
+        assert!(response.starts_with("HTTP/1.1 500"), "{response}");
+        assert!(response.ends_with("substituted"), "{response}");
+        assert_eq!(
+            recorder.seen.lock().unwrap()[0].1,
+            200,
+            "what the server actually said is still what gets recorded"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_response_is_still_recorded() {
+        // The client is denied the answer; the evidence is not.
+        let target = upstream(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n").await;
+
+        let (port, recorder, _ca) = proxy_full(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            None,
+            Some(Arc::new(Fixed::response(ResponseVerdict::Drop))),
+        )
+        .await;
+
+        through_proxy(
+            port,
+            &format!("GET http://127.0.0.1:{target}/ HTTP/1.1\r\nHost: 127.0.0.1:{target}\r\n\r\n"),
+        )
+        .await;
+
+        let seen = recorder.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "the exchange happened and must be evidence");
+        assert_eq!(seen[0].1, 403);
+    }
+
+    #[tokio::test]
+    async fn a_rewritten_request_is_still_scope_checked() {
+        // A user editing the Host must not be able to steer traffic past the guard.
+        // The check lives below the interceptor, so a replacement gets the same
+        // treatment as anything else.
+        let target = upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await;
+        let edited = HttpRequest::get(HttpService::new("127.0.0.1", target, false), "/edited");
+
+        let (port, recorder, _ca) = proxy_full(
+            Scope::new().include(ScopeRule::host("elsewhere.test")),
+            InterceptionPolicy::intercept_all(),
+            None,
+            Some(Arc::new(Fixed::request(RequestVerdict::Replace(Box::new(
+                edited,
+            ))))),
+        )
+        .await;
+
+        through_proxy(
+            port,
+            &format!("GET http://127.0.0.1:{target}/ HTTP/1.1\r\nHost: 127.0.0.1:{target}\r\n\r\n"),
+        )
+        .await;
+
+        let seen = recorder.seen.lock().unwrap();
+        assert_eq!(
+            seen[0].2,
+            ScopeDecision::AllowedOutOfScope,
+            "the edited destination must be judged, not the original"
+        );
+    }
     #[tokio::test]
     async fn the_default_bind_is_loopback() {
         // Defaults are what people actually run, and a proxy reachable from the
