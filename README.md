@@ -12,23 +12,40 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M0 — architecture foundation
+## Status: M1.1 — the engine sends real requests
 
-Hexora **cannot yet be used as a proxy.** This repository currently contains a tested
-foundation, not a usable tool. It is honest about that everywhere: unimplemented paths
-return `NotImplemented` rather than empty results, and `hexora --help` lists only
-commands that genuinely work.
+Hexora **is not a proxy yet**, but it is no longer only a foundation. It can issue real
+HTTP requests over real sockets:
+
+```console
+$ hexora send http://127.0.0.1:8080/api/users?id=1
+HTTP/1.1 200 OK
+Content-Type: application/json
+Set-Cookie: <redacted> (use --show-secrets)
+Content-Length: 46
+
+{"hexora":"it works","path":"/api/users?id=1"}
+
+46 bytes in 2 ms
+```
+
+Unimplemented paths return `NotImplemented` naming the milestone that will provide
+them, rather than empty results, and `hexora --help` lists only commands that genuinely
+work.
 
 | Area | Status |
 | ---- | ------ |
 | Domain model (HTTP messages, scope, identities, findings, limits, secrets) | **IMPLEMENTED** |
+| HTTP/1.x engine over TCP — wire-preserving parser, per-phase timeouts | **IMPLEMENTED** |
+| `hexora send` — single request, nothing rewritten on the way out | **IMPLEMENTED** |
 | Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model | **IMPLEMENTED** |
 | AI tool-permission gate | **IMPLEMENTED** |
 | CLI (`project init`, `project info`, `version`) | **IMPLEMENTED** |
 | Desktop shell (status window) | **IMPLEMENTED** |
-| HTTP engine — actually sending requests | **PLANNED (M1)** |
+| TLS / HTTPS | **PLANNED (M1.2)** |
+| Chunked encoding, compression, connection reuse | **PLANNED (M1.3–M1.5)** |
 | Proxy, TLS interception | **PLANNED (M2)** |
 | Traffic history, Repeater | **PLANNED (M3–M4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
@@ -84,12 +101,13 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Building
 
-Requires Rust 1.85+, Node 20+, pnpm 9+.
+Requires Rust 1.88+ (the toolchain is pinned in `rust-toolchain.toml`), Node 20+, pnpm 9+.
 
 ```bash
 # Core crates and CLI
 cargo test --workspace --exclude hexora-desktop
 cargo run -p hexora-cli -- --help
+cargo run -p hexora-cli -- send http://example.com/
 
 # Frontend
 pnpm -C frontend install
@@ -97,7 +115,12 @@ pnpm -C frontend build
 ```
 
 The desktop shell additionally needs [Tauri's system
-dependencies](https://tauri.app/start/prerequisites/). Full instructions:
+dependencies](https://tauri.app/start/prerequisites/), and on Windows the MSVC C++
+build tools.
+
+**On Windows, build from PowerShell rather than Git Bash.** Git for Windows ships a
+coreutils `link.exe` that shadows MSVC's linker and produces an error that looks
+nothing like a toolchain problem. Full instructions:
 [`docs/development.md`](docs/development.md).
 
 ---
@@ -112,6 +135,8 @@ dependencies](https://tauri.app/start/prerequisites/). Full instructions:
 | [`docs/storage.md`](docs/storage.md) | Why bodies are not in the database |
 | [`docs/development.md`](docs/development.md) | Building, testing, conventions |
 | [`docs/roadmap.md`](docs/roadmap.md) | What exists and what does not |
+| [`docs/feature-parity.md`](docs/feature-parity.md) | Burp / Caido / ZAP parity matrix and competitive position |
+| [`docs/dependencies.md`](docs/dependencies.md) | Dependency, audit and secret-scanning policy |
 
 **Read the threat model before trusting Hexora with a client's credentials.** It states
 plainly what is not protected — notably that project data is not encrypted at rest and

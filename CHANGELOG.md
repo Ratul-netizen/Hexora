@@ -79,6 +79,28 @@ every blob looked like a leftover. Now matches file names only.
   then silently auto-installed a different compiler from `rust-toolchain.toml`.
 - MSRV corrected from 1.85 to 1.88 — the floor imposed by Tauri's dependency graph.
 
+### Added — M1.1, HTTP/1.x over TCP
+
+**Hexora now sends real requests.**
+
+- New crate `core/http`: a wire-preserving HTTP/1.x parser and a TCP transport.
+- The parser is deliberately permissive but loud — it accepts what a strict parser
+  rejects and records every deviation as a `Quirk`, five of which are request-smuggling
+  signals (bare LF, obs-fold, space before colon, duplicate `Content-Length`, CL beside
+  TE). Written by hand rather than using `httparse` precisely because a good client
+  parser normalizes away what a security tool exists to find.
+- Framing per RFC 9112 §6.3. Conflicting `Content-Length` values are refused rather
+  than guessed.
+- Per-phase timeouts and incrementally-enforced limits.
+- `hexora send <url>` — like `curl`, except nothing you wrote is rewritten on the way
+  out: header order, casing and duplicates are all preserved, and a deliberately
+  ambiguous request stays ambiguous.
+
+Sensitive response headers are redacted in `hexora send` output unless
+`--show-secrets` is passed, and out-of-scope targets are flagged rather than blocked,
+since a typed URL is a human decision.
+
 ### Not implemented
 
-No HTTP request is sent by any code path in this release. See `docs/roadmap.md`.
+TLS, chunked decoding, connection reuse, streaming and redirects all return
+`NotImplemented` naming the milestone that will provide them. See `docs/roadmap.md`.

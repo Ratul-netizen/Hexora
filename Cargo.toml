@@ -2,7 +2,14 @@
 resolver = "2"
 # Only crates that exist and build are listed. New crates are split out of
 # `core/engine` as each milestone lands; see docs/architecture.md.
-members = ["core/types", "core/storage", "core/engine", "apps/cli", "apps/desktop/src-tauri"]
+members = [
+    "core/types",
+    "core/storage",
+    "core/engine",
+    "core/http",
+    "apps/cli",
+    "apps/desktop/src-tauri",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,9 +23,17 @@ authors = ["Hexora contributors"]
 hexora-types = { path = "core/types" }
 hexora-storage = { path = "core/storage" }
 hexora-engine = { path = "core/engine" }
+hexora-http = { path = "core/http" }
 
 # Async runtime. Needed at M0 only for the engine trait signatures.
-tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1.43", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "net",
+    "io-util",
+] }
 async-trait = "0.1"
 
 # Serialization

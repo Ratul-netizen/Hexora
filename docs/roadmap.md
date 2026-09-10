@@ -50,24 +50,46 @@ CLI shell, Tauri shell, CI, threat model, security invariants.
 
 The goal of this phase is a tool a pentester would actually open.
 
-**M1 — HTTP engine** · PLANNED · **next**
+**M1 — HTTP engine** · IN PROGRESS
 
 Split into small steps, because a single "HTTP engine" milestone is undebuggable:
 
-| | Scope |
-| --- | --- |
-| M1.1 | HTTP/1.1 over TCP: request writer, response head parser, `Content-Length` bodies, real `HttpTransport` |
-| M1.2 | TLS via rustls — SNI, ALPN, verification, client certificates |
-| M1.3 | Streaming bodies with **incremental** limit enforcement |
-| M1.4 | Connection pooling, keep-alive, per-host caps |
-| M1.5 | Chunked decoding, gzip/deflate/brotli, decompression-bomb protection |
-| M1.6 | Redirects — opt-in, **scope-checked at every hop** |
-| M1.7 | Hostile-server test suite, `cargo-fuzz` targets for the parser |
-| M1.8 | Benchmarks and hardening |
+| | Scope | Status |
+| --- | --- | --- |
+| M1.1 | HTTP/1.1 over TCP: request writer, response head parser, `Content-Length` bodies, real `HttpTransport` | **DONE** |
+| M1.2 | TLS via rustls — SNI, ALPN, verification, client certificates | PLANNED · **next** |
+| M1.3 | Streaming bodies with **incremental** limit enforcement | PLANNED |
+| M1.4 | Connection pooling, keep-alive, per-host caps | PLANNED |
+| M1.5 | Chunked decoding, gzip/deflate/brotli, decompression-bomb protection | PLANNED |
+| M1.6 | Redirects — opt-in, **scope-checked at every hop** | PLANNED |
+| M1.7 | Hostile-server test suite, `cargo-fuzz` targets for the parser | PLANNED |
+| M1.8 | Benchmarks and hardening | PLANNED |
 
-Done when the CLI can send a request to a local server, record the exchange, and
-survive a suite of malformed and hostile responses without panicking or exceeding its
-limits.
+### What M1.1 delivered
+
+`hexora send <url>` issues a real request over a real socket and prints the exchange.
+The engine lives in `core/http`:
+
+- A **wire-preserving parser** that is permissive but loud. It accepts input a strict
+  parser would reject — bare LF terminators, whitespace before the colon, obsolete line
+  folding, duplicate `Content-Length` — and records each as a `Quirk` rather than
+  silently normalizing it. Five of those quirks are flagged as request-smuggling
+  signals. This is the reason the parser is hand-written rather than `httparse`: a good
+  client parser hides exactly what a security tool needs to see.
+- Framing per RFC 9112 §6.3, including the cases that matter — `HEAD`, 1xx, 204 and 304
+  carry no body whatever the headers claim, and `Transfer-Encoding` beats
+  `Content-Length` while being reported as the CL.TE primitive it is.
+- Refusal where there is no defensible answer: two *different* `Content-Length` values
+  produce an error rather than a guess, because guessing corrupts every measurement
+  built on the body.
+- Per-phase timeouts, so a tester can tell an unreachable host from one that accepted
+  the connection and went silent.
+- Limits enforced **while bytes arrive**. A server that never sends a blank line is cut
+  off at the header cap rather than after exhausting memory.
+
+Bodies delimited by `Content-Length` or connection close. Chunked responses and HTTPS
+return `NotImplemented` naming the milestone that will handle them, rather than
+returning a wrong body.
 
 **M2 — Proxy** · PLANNED
 

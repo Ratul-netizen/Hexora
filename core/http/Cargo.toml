@@ -1,0 +1,19 @@
+[package]
+name = "hexora-http"
+description = "Hexora's HTTP/1.x engine: wire-preserving parser and TCP transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-engine.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }

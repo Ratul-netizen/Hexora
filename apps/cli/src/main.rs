@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
 mod project;
+mod send;
 
 /// Hexora — the modern offensive security workbench.
 #[derive(Debug, Parser)]
@@ -24,9 +25,9 @@ mod project;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M0 (architecture foundation). Project creation \
-                  and inspection work. The proxy, scanner and fuzzer are not \
-                  implemented yet and are therefore not offered as commands."
+                  Development status: M1.1. Project management and single-request \
+                  sending over plaintext HTTP/1.x work. TLS, the proxy, scanner and \
+                  fuzzer are not implemented yet and are therefore not offered."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -46,6 +47,31 @@ enum Command {
     /// Create, inspect and manage projects.
     #[command(subcommand)]
     Project(ProjectCommand),
+
+    /// Send a single HTTP request and print the response.
+    ///
+    /// Like `curl`, except nothing you wrote is rewritten on the way out: header
+    /// order, casing and duplicates are all sent exactly as given.
+    Send {
+        /// Absolute URL, e.g. http://example.com/path
+        url: String,
+
+        /// HTTP method.
+        #[arg(short = 'X', long, default_value = "GET")]
+        method: String,
+
+        /// Extra header, in 'Name: Value' form. Repeatable, and duplicates are kept.
+        #[arg(short = 'H', long = "header")]
+        headers: Vec<String>,
+
+        /// Request body. A Content-Length is added only if you did not frame it.
+        #[arg(short = 'd', long)]
+        data: Option<String>,
+
+        /// Print Authorization, Cookie and other sensitive headers in full.
+        #[arg(long)]
+        show_secrets: bool,
+    },
 
     /// Print version and build information.
     Version,
@@ -101,6 +127,20 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             project::init(path, name.as_deref(), cli.json)
         }
         Command::Project(ProjectCommand::Info { path }) => project::info(path, cli.json),
+        Command::Send {
+            url,
+            method,
+            headers,
+            data,
+            show_secrets,
+        } => send::run(send::SendArgs {
+            url,
+            method,
+            headers,
+            body: data.as_deref(),
+            json: cli.json,
+            show_secrets: *show_secrets,
+        }),
     }
 }
 
@@ -179,7 +219,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M0"),
+            help.contains("M1.1"),
             "users must not mistake this for a finished tool"
         );
     }
