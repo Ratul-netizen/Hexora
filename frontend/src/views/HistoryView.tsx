@@ -147,6 +147,14 @@ export function HistoryView({
                       {row.quirks.length === 1 ? "" : "s"}
                     </span>
                   )}
+                  {/* Sent byte for byte, so the method and path beside it are a
+                      reading of those bytes rather than a description of them. Worth
+                      seeing while scrolling, which is why it is in the index. */}
+                  {row.mode === "raw" && (
+                    <span className="tag raw" title="sent exactly as written">
+                      raw
+                    </span>
+                  )}
                   {/* Who the request was sent as, where somebody chose. A row an
                       authorization run produced only means something next to the
                       principal it was sent as. */}
@@ -180,6 +188,11 @@ export function HistoryView({
             <span className="muted">
               {detail.origin} · {detail.sent_at}
             </span>
+            {detail.mode === "raw" && (
+              <span className="tag raw" title="sent exactly as written">
+                raw
+              </span>
+            )}
             <button onClick={() => onRepeat(detail.id)}>Send to repeater</button>
             <button onClick={() => onTestAuthorization(detail.id)}>
               Test authorization

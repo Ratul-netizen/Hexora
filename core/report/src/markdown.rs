@@ -311,6 +311,14 @@ fn write_transcript(out: &mut String, t: &Transcript, label: &str) {
         "*{label} — `{}`, via {}{sent_as}, at {}*\n",
         t.request, t.origin, t.sent_at
     );
+    if t.mode == "raw" {
+        let _ = writeln!(
+            out,
+            "> Sent in **raw mode**: byte for byte, as written. What follows is a \
+             reading of those bytes with credentials removed, not the bytes \
+             themselves.\n"
+        );
+    }
 
     let mut block = String::new();
     let _ = writeln!(block, "{} {} {}", t.method, t.url, t.http_version);

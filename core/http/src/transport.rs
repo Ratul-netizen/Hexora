@@ -33,6 +33,7 @@ use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
 use hexora_types::error::{HexoraError, NetworkError, Result, TimeoutPhase};
 use hexora_types::http::{HttpRequest, HttpResponse};
 use hexora_types::limits::Limits;
+use hexora_types::raw::RawRequest;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -95,9 +96,48 @@ impl TcpTransport {
         request: HttpRequest,
         options: SendOptions,
     ) -> Result<StreamingExchange> {
+        let wire = serialize_request(&request);
+        let method = request.method.clone();
+        self.write_and_read(request, wire, method, None, options)
+            .await
+    }
+
+    /// Writes a raw request byte for byte and returns at the response head.
+    ///
+    /// The only difference from [`Self::send_streaming`] is which bytes are written,
+    /// and that is the whole point: nothing here builds them. The response is read
+    /// exactly as it would be for any other request, because a malformed request still
+    /// produces a real answer and that answer is the result the tester came for.
+    pub async fn send_raw_streaming(
+        &self,
+        raw: RawRequest,
+        options: SendOptions,
+    ) -> Result<StreamingExchange> {
+        // The method matters for *reading* the response, not for writing the request:
+        // RFC 9112 6.3 says a HEAD response has no body however it is framed. Read
+        // from the raw request line rather than assumed.
+        let method = raw.method();
+        let bytes = raw.bytes.clone();
+
+        // A structured view for the record. Best effort on purpose: a raw request may
+        // not parse, and failing to parse it must not stop it being sent. The faithful
+        // record is `Exchange::raw_request`, which is the bytes themselves.
+        let request = structured_view(&raw);
+        self.write_and_read(request, bytes.to_vec(), method, Some(bytes), options)
+            .await
+    }
+
+    /// Opens the connection, writes `wire`, and reads the response head.
+    async fn write_and_read(
+        &self,
+        request: HttpRequest,
+        wire: Vec<u8>,
+        method: String,
+        raw: Option<bytes::Bytes>,
+        options: SendOptions,
+    ) -> Result<StreamingExchange> {
         let started = Instant::now();
         let limits = &options.limits;
-        let wire = serialize_request(&request);
 
         let tcp = connect(&request.service.host, request.service.port, limits).await?;
 
@@ -111,7 +151,7 @@ impl TcpTransport {
         };
 
         write_all(&mut connection, &wire, limits).await?;
-        let (head, prefix) = read_head(&mut connection, &request.method, limits).await?;
+        let (head, prefix) = read_head(&mut connection, &method, limits).await?;
 
         // A declared length over the cap is refused before a byte of body is read.
         // Streaming still enforces the limit as bytes arrive, because the declared
@@ -128,10 +168,51 @@ impl TcpTransport {
             head,
             tls,
             body,
+            raw,
             started,
         })
     }
 }
+
+/// A message-model view of a raw request, for the history table and the interface.
+///
+/// Best effort, and never written to a socket. The request line is read the same way
+/// the scope guard reads it; header fields are taken as they split, and one that does
+/// not split is skipped rather than guessed at. What went out is
+/// `Exchange::raw_request`, which is exact.
+fn structured_view(raw: &RawRequest) -> HttpRequest {
+    let line = raw.request_line();
+    let mut request = HttpRequest::get(
+        raw.service.clone(),
+        line.as_ref()
+            .map(|l| l.target.clone())
+            .unwrap_or_else(|| "/".to_string()),
+    );
+    request.method = line.map(|l| l.method).unwrap_or_default();
+    request.body = raw.body();
+    // `HttpRequest::get` adds a Host from the service. These bytes may not have
+    // carried one — a missing Host is a routing test — and a view that invented it
+    // would show the tester a header they did not send.
+    request.headers = hexora_types::http::Headers::new();
+
+    let head = raw.head();
+    let text = String::from_utf8_lossy(&head);
+    for field in text.split(LF).skip(1) {
+        let field = field.trim_end_matches(CR);
+        if field.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = field.split_once(':') {
+            request
+                .headers
+                .append(hexora_types::http::Header::new(name.trim(), value.trim()));
+        }
+    }
+    request
+}
+
+const LF: char = '\n';
+const CR: char = '\r';
 
 /// Anything that can carry an HTTP conversation: a plain socket or a TLS stream.
 trait Connection: AsyncRead + AsyncWrite + Send + Unpin {}
@@ -144,6 +225,8 @@ impl<T: AsyncRead + AsyncWrite + Send + Unpin> Connection for T {}
 pub struct StreamingExchange {
     /// The request as it was sent.
     pub request: HttpRequest,
+    /// The exact bytes written, when the request was sent raw.
+    pub raw: Option<bytes::Bytes>,
     /// The parsed response head, including any quirks found in it.
     pub head: ResponseHead,
     /// What the TLS handshake produced, for `https` exchanges.
@@ -194,6 +277,9 @@ impl StreamingExchange {
                 truncated: collected.truncated,
             },
             request,
+            encoded_body: collected.encoded,
+            content_encoding: collected.reversed_coding,
+            raw_request: self.raw,
             duration: self.started.elapsed(),
             tls: self.tls,
         })
@@ -224,6 +310,13 @@ fn report_smuggling_signals(request: &HttpRequest, head: &ResponseHead, body_qui
 impl HttpTransport for TcpTransport {
     async fn send(&self, request: HttpRequest, options: SendOptions) -> Result<Exchange> {
         self.send_streaming(request, options).await?.collect().await
+    }
+
+    async fn send_raw(&self, request: RawRequest, options: SendOptions) -> Result<Exchange> {
+        self.send_raw_streaming(request, options)
+            .await?
+            .collect()
+            .await
     }
 }
 
@@ -664,6 +757,210 @@ mod tests {
         assert!(err.to_string().contains("terminating chunk"), "{err}");
     }
 
+    /// Compresses with gzip, so a test can assert against bytes it produced itself
+    /// rather than against whatever the implementation happened to emit.
+    fn gzip(payload: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(payload).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn zlib(payload: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(payload).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn brotli_compress(payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut reader = brotli::CompressorReader::new(payload, 4096, 5, 22);
+        std::io::Read::read_to_end(&mut reader, &mut out).unwrap();
+        out
+    }
+
+    /// Serves one response built at run time, which `serve` cannot: it takes a
+    /// `&'static [u8]` and a compressed fixture is produced while the test runs.
+    async fn serve_owned(response: Vec<u8>) -> (u16, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut scratch = vec![0u8; 8192];
+            let _ = socket.read(&mut scratch).await;
+            let _ = socket.write_all(&response).await;
+            let _ = socket.shutdown().await;
+        });
+        (port, handle)
+    }
+
+    /// Serves one response whose body is `body`, framed by Content-Length.
+    async fn serve_encoded(coding: &str, body: Vec<u8>) -> (u16, tokio::task::JoinHandle<()>) {
+        // Built here rather than inside the task: the coding is a borrowed `&str` and
+        // the task outlives the call.
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Encoding: {coding}\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let mut response = head.into_bytes();
+        response.extend_from_slice(&body);
+        serve_owned(response).await
+    }
+
+    #[tokio::test]
+    async fn an_uncompressed_response_keeps_one_copy_of_its_body() {
+        // No coding was reversed, so the decoded body already *is* the wire form.
+        // Storing a second identical copy would double the memory of every ordinary
+        // response to record a fact that is already true.
+        let (port, _server) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nplain").await;
+        let exchange = send(port, "/").await.unwrap();
+
+        assert_eq!(exchange.response.body.as_ref(), b"plain");
+        assert!(exchange.encoded_body.is_none());
+        assert!(exchange.content_encoding.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_gzip_response_keeps_the_gzip_bytes_and_the_application_bytes() {
+        let compressed = gzip(b"compressed payload");
+        let (port, _server) = serve_encoded("gzip", compressed.clone()).await;
+        let exchange = send(port, "/").await.unwrap();
+
+        assert_eq!(exchange.response.body.as_ref(), b"compressed payload");
+        assert_eq!(
+            exchange.encoded_body.as_deref(),
+            Some(compressed.as_slice()),
+            "the wire form is kept byte for byte, not re-compressed"
+        );
+        assert_eq!(exchange.content_encoding.as_deref(), Some("gzip"));
+
+        // And the kept bytes really are a gzip stream: they decode on their own.
+        let again = crate::decode::decode_body(
+            "gzip",
+            exchange.encoded_body.as_ref().unwrap(),
+            &Limits::default(),
+        )
+        .unwrap();
+        assert_eq!(again.body.as_ref(), b"compressed payload");
+    }
+
+    #[tokio::test]
+    async fn a_deflate_response_keeps_both_forms() {
+        let compressed = zlib(b"deflated payload");
+        let (port, _server) = serve_encoded("deflate", compressed.clone()).await;
+        let exchange = send(port, "/").await.unwrap();
+
+        assert_eq!(exchange.response.body.as_ref(), b"deflated payload");
+        assert_eq!(
+            exchange.encoded_body.as_deref(),
+            Some(compressed.as_slice())
+        );
+        assert_eq!(exchange.content_encoding.as_deref(), Some("deflate"));
+    }
+
+    #[tokio::test]
+    async fn a_brotli_response_keeps_both_forms() {
+        let compressed = brotli_compress(b"brotli payload");
+        let (port, _server) = serve_encoded("br", compressed.clone()).await;
+        let exchange = send(port, "/").await.unwrap();
+
+        assert_eq!(exchange.response.body.as_ref(), b"brotli payload");
+        assert_eq!(
+            exchange.encoded_body.as_deref(),
+            Some(compressed.as_slice())
+        );
+        assert_eq!(exchange.content_encoding.as_deref(), Some("br"));
+    }
+
+    #[tokio::test]
+    async fn chunked_framing_is_removed_but_the_gzip_bytes_survive() {
+        // The distinction this milestone exists for. Chunk headers are framing and
+        // are gone; the gzip stream inside them is content and is kept exactly.
+        let compressed = gzip(b"chunked and compressed");
+        let (first, second) = compressed.split_at(compressed.len() / 2);
+
+        let mut response = Vec::new();
+        response.extend_from_slice(
+            b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n",
+        );
+        response.extend_from_slice(format!("{:x}\r\n", first.len()).as_bytes());
+        response.extend_from_slice(first);
+        response.extend_from_slice(b"\r\n");
+        response.extend_from_slice(format!("{:x}\r\n", second.len()).as_bytes());
+        response.extend_from_slice(second);
+        response.extend_from_slice(b"\r\n0\r\n\r\n");
+
+        let (port, _server) = serve_owned(response).await;
+        let exchange = send(port, "/").await.unwrap();
+
+        assert_eq!(exchange.response.body.as_ref(), b"chunked and compressed");
+        assert_eq!(
+            exchange.encoded_body.as_deref(),
+            Some(compressed.as_slice()),
+            "the chunk headers are framing and belong in the quirks, not in the body"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_response_with_no_body_keeps_neither_form() {
+        let (port, _server) = serve(b"HTTP/1.1 204 No Content\r\n\r\n").await;
+        let exchange = send(port, "/").await.unwrap();
+
+        assert!(exchange.response.body.is_empty());
+        assert!(exchange.encoded_body.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_malformed_compressed_body_is_an_error_rather_than_a_wrong_answer() {
+        let (port, _server) = serve_encoded("gzip", b"not actually gzip".to_vec()).await;
+        let error = send(port, "/").await.unwrap_err();
+        assert_eq!(error.code(), "protocol", "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_decompression_bomb_bounds_both_forms_and_keeps_what_arrived() {
+        // Four megabytes of zeroes compress to a few kilobytes. The limit fires while
+        // the bytes are being expanded, so the decoded form stops at the cap — and the
+        // exchange is still returned, because whatever arrived before the cut is
+        // evidence. Neither representation grows past a bound: the wire form is capped
+        // by `max_body_bytes` as it arrived, the decoded form by the limit below.
+        let compressed = gzip(&vec![0u8; 4 * 1024 * 1024]);
+        let cap = 64 * 1024;
+        let (port, _server) = serve_encoded("gzip", compressed.clone()).await;
+
+        let exchange = TcpTransport::new()
+            .send(
+                request(port, "/"),
+                SendOptions {
+                    origin: Origin::Repeater,
+                    limits: Limits {
+                        max_decompressed_bytes: cap,
+                        ..Limits::default()
+                    },
+                    follow_redirects: false,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            exchange.response.truncated,
+            "a body cut short must say so, or a reader measures a bomb as a document"
+        );
+        assert!(
+            exchange.response.body.len() as u64 <= cap,
+            "decoded {} bytes against a {cap}-byte cap",
+            exchange.response.body.len()
+        );
+        assert_eq!(
+            exchange.encoded_body.as_deref(),
+            Some(compressed.as_slice()),
+            "and the bytes that actually arrived are kept, which is what shows the              response was a bomb in the first place"
+        );
+    }
+
     #[tokio::test]
     async fn a_gzip_encoded_body_is_decoded() {
         use std::io::Write as _;
@@ -688,6 +985,156 @@ mod tests {
 
         let exchange = send(port, "/").await.unwrap();
         assert_eq!(exchange.response.body.as_ref(), b"compressed payload");
+    }
+
+    // ------------------------------------------------------------------- raw mode
+
+    /// Sends bytes exactly as given and returns what the server actually received.
+    ///
+    /// The assertion that matters in every test below is against *that* — not against
+    /// what Hexora believed it sent. A byte-preservation claim checked anywhere but
+    /// the socket is a claim about the wrong thing.
+    async fn send_raw_bytes(bytes: &[u8]) -> (Exchange, Vec<u8>) {
+        let (port, server) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await;
+        let raw =
+            RawRequest::new(HttpService::new("127.0.0.1", port, false), bytes.to_vec()).unwrap();
+
+        let exchange = TcpTransport::new()
+            .send_raw(raw, SendOptions::interactive(Origin::Repeater))
+            .await
+            .unwrap();
+        let received = server.await.unwrap();
+        (exchange, received)
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_reaches_the_socket_byte_for_byte() {
+        // Bare LF line endings, a lowercase header name, a duplicated header, a
+        // deliberately wrong Content-Length and a byte that is not valid UTF-8. Every
+        // one of them is something a serializer would have corrected.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"get /a?x=1 HTTP/1.1\n");
+        bytes.extend_from_slice(b"host: 127.0.0.1\n");
+        bytes.extend_from_slice(b"X-Dup: one\n");
+        bytes.extend_from_slice(b"x-dup: two\n");
+        bytes.extend_from_slice(b"Content-Length: 999\n");
+        bytes.extend_from_slice(b"X-Odd: \xff\xfe\n");
+        bytes.extend_from_slice(b"\n");
+        bytes.extend_from_slice(b"hi");
+
+        let (exchange, received) = send_raw_bytes(&bytes).await;
+
+        assert_eq!(
+            received, bytes,
+            "the server must receive exactly what the tester wrote"
+        );
+        assert!(
+            !received.windows(2).any(|w| w == b"\r\n"),
+            "not one CRLF may appear where the tester wrote a bare LF"
+        );
+        assert_eq!(
+            exchange.raw_request.as_deref(),
+            Some(bytes.as_slice()),
+            "and the record of what was sent is the bytes, not a re-serialization"
+        );
+        assert_eq!(exchange.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn a_wrong_content_length_is_sent_as_written() {
+        // The repeater warns about this and does not repair it. A tool that corrected
+        // it would be answering a question about a different request.
+        let bytes =
+            b"POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nthis body is much longer";
+        let (_, received) = send_raw_bytes(bytes).await;
+        assert_eq!(received, bytes);
+    }
+
+    #[tokio::test]
+    async fn conflicting_framing_headers_are_sent_as_written() {
+        // Both `Content-Length` and `Transfer-Encoding`, which RFC 9112 6.1 says a
+        // recipient must reject — and which is the entire basis of request smuggling
+        // research, so it has to be sendable.
+        let bytes = b"POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+        let (_, received) = send_raw_bytes(bytes).await;
+        assert_eq!(received, bytes);
+    }
+
+    #[tokio::test]
+    async fn header_order_and_casing_survive() {
+        let bytes = b"GET / HTTP/1.1\r\nhOsT: h\r\nZ-Last: 1\r\nA-First: 2\r\n\r\n";
+        let (_, received) = send_raw_bytes(bytes).await;
+        assert_eq!(received, bytes);
+        let text = String::from_utf8_lossy(&received);
+        assert!(text.contains("hOsT:"), "casing is preserved: {text}");
+        assert!(
+            text.find("Z-Last").unwrap() < text.find("A-First").unwrap(),
+            "order is preserved: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_nul_byte_in_the_body_survives() {
+        let bytes = b"POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\na\x00b";
+        let (_, received) = send_raw_bytes(bytes).await;
+        assert_eq!(received, bytes);
+        assert!(received.contains(&0));
+    }
+
+    #[tokio::test]
+    async fn an_absolute_form_target_does_not_choose_the_socket() {
+        // The request line points at another host; the connection still goes where the
+        // caller said. Otherwise editing a request line would be a way to reach a host
+        // the scope guard never saw.
+        let bytes =
+            b"GET http://elsewhere.invalid/admin HTTP/1.1\r\nHost: elsewhere.invalid\r\n\r\n";
+        let (exchange, received) = send_raw_bytes(bytes).await;
+
+        assert_eq!(received, bytes, "written as the tester wrote it");
+        assert_eq!(
+            exchange.request.service.host, "127.0.0.1",
+            "but sent to the service the caller chose"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_raw_head_request_is_framed_as_a_head_response() {
+        // The method still matters for *reading* the answer: RFC 9112 6.3 says a HEAD
+        // response has no body however its headers are framed. Read from the raw
+        // request line rather than assumed.
+        let (port, _server) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 42\r\n\r\n").await;
+        let raw = RawRequest::new(
+            HttpService::new("127.0.0.1", port, false),
+            b"HEAD / HTTP/1.1\r\nHost: h\r\n\r\n".to_vec(),
+        )
+        .unwrap();
+
+        let exchange = TcpTransport::new()
+            .send_raw(raw, SendOptions::interactive(Origin::Repeater))
+            .await
+            .unwrap();
+        assert!(exchange.response.body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_structured_view_of_a_raw_request_is_readable_without_being_authoritative() {
+        let bytes = b"PUT /items/7 HTTP/1.1\nHost: h\nX-Trace: abc\n\npayload";
+        let (exchange, _) = send_raw_bytes(bytes).await;
+
+        // Good enough for a history row...
+        assert_eq!(exchange.request.method, "PUT");
+        assert_eq!(exchange.request.path, "/items/7");
+        assert_eq!(
+            exchange
+                .request
+                .headers
+                .get("X-Trace")
+                .map(|h| h.value_lossy().into_owned()),
+            Some("abc".to_string())
+        );
+        assert_eq!(exchange.request.body.as_ref(), b"payload");
+        // ...and never the thing that was sent.
+        assert_eq!(exchange.raw_request.as_deref(), Some(bytes.as_slice()));
     }
 
     // ------------------------------------------------------------------- TLS

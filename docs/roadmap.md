@@ -197,7 +197,7 @@ Full CLI parity with the desktop client on the same engine, plus a server mode t
 run on a VPS with a thin local client — Caido's architecture, and better than Burp's
 desktop-only model. CI/CD integration.
 
-**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.5 IMPLEMENTED)
+**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.6 IMPLEMENTED)
 
 **This is the flagship feature.** Neither competitor does it properly, and it automates
 the highest-value manual work in most engagements.
@@ -248,6 +248,13 @@ Not done:
   hand. A suggestion system would help, and it has to stay a suggestion: the moment a
   guess about what a string means becomes an assumption, the evidence model is gone.
 - **Attack chains** that retain evidence at every step.
+
+M12.6 closed the two pieces of wire-level debt that a scanner would otherwise be built
+on top of: response bodies are kept in both their transfer-decoded and content-decoded
+forms, and requests can be sent byte for byte through
+`RequestSource::{Structured, Raw}` rather than always being serialized from the message
+model. Raw mode is HTTP/1.x requests only; HTTP/2 and HTTP/3 want wire models of their
+own.
 
 ---
 

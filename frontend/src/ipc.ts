@@ -50,6 +50,8 @@ export interface HistoryRow {
   quirks: string[];
   /** The identity the request was sent as, for rows an authorization run produced. */
   identity: string | null;
+  /** How it reached the socket. A raw row was sent byte for byte. */
+  mode: RequestMode;
 }
 
 export interface HistoryPage {
@@ -78,6 +80,7 @@ export interface ExchangeDetail {
   id: string;
   parent: string | null;
   origin: string;
+  mode: RequestMode;
   url: string;
   request_head: string;
   request_body: BodyPreview;
@@ -86,11 +89,22 @@ export interface ExchangeDetail {
   sent_at: string;
 }
 
+/**
+ * How a request reaches the socket.
+ *
+ * `structured` serializes a message model: header order, casing and duplicates
+ * survive, but bare LF line endings become CRLF and missing framing may be added.
+ * `raw` writes the bytes exactly as they are. Nothing switches between them on its
+ * own — the difference is the point.
+ */
+export type RequestMode = "structured" | "raw";
+
 export interface DraftView {
   raw: string;
   url: string;
   parent: string | null;
   warnings: string[];
+  mode: RequestMode;
 }
 
 export interface DiffView {
@@ -109,6 +123,7 @@ export interface DiffView {
 export interface SendResult {
   id: string;
   parent: string | null;
+  mode: RequestMode;
   status: number;
   duration_ms: number;
   out_of_scope: boolean;
@@ -141,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 4;
+export const EXPECTED_RPC_CONTRACT_VERSION = 5;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -188,8 +203,9 @@ export const sendDraft = (
   raw: string,
   parent: string | null,
   insecure: boolean,
+  requestMode: RequestMode,
 ): Promise<SendResult> =>
-  invoke<SendResult>("repeater_send", { raw, parent, insecure });
+  invoke<SendResult>("repeater_send", { raw, parent, insecure, requestMode });
 
 export const branchesOf = (id: string): Promise<HistoryRow[]> =>
   invoke<HistoryRow[]>("repeater_tree", { id });

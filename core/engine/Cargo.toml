@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 hexora-types.workspace = true
+bytes.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 tracing.workspace = true

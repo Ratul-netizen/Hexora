@@ -42,6 +42,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "object_declarations",
         sql: include_str!("../migrations/0003_object_declarations.sql"),
     },
+    Migration {
+        version: 4,
+        name: "request_mode",
+        sql: include_str!("../migrations/0004_request_mode.sql"),
+    },
 ];
 
 /// The schema version this build expects.

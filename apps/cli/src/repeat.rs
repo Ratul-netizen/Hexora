@@ -13,6 +13,7 @@ use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_repeater::{Repeater, ResponseDiff, Sent};
 use hexora_types::ids::RequestId;
+use hexora_types::raw::RequestMode;
 use hexora_types::scope::Scope;
 use hexora_types::{HexoraError, Result};
 
@@ -28,6 +29,8 @@ pub struct RepeatArgs<'a> {
     pub show_body: bool,
     /// Do not verify upstream certificates.
     pub insecure: bool,
+    /// Edit and send the request as bytes rather than as a message.
+    pub raw: bool,
     pub json: bool,
 }
 
@@ -64,18 +67,27 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
     let repeater = Repeater::new(guard, store);
 
     let mut draft = repeater.draft_from(id)?;
+    // Asked for explicitly, and it sticks: a request that was captured raw comes back
+    // raw whether or not the flag is given, and `--raw` converts a structured one.
+    // Nothing here switches a draft back, because that would be the tool deciding it
+    // knew better than the bytes.
+    if args.raw {
+        draft = draft.into_raw();
+    }
     if args.edit {
         let edited = edit_in_editor(&draft.to_raw())?;
         draft.apply_raw(&edited, repeater.limits())?;
     }
 
     let warnings = draft.warnings();
+    let mode = draft.mode();
 
     if args.dry_run {
         if args.json {
             let payload = serde_json::json!({
                 "request": String::from_utf8_lossy(&draft.to_raw()),
                 "url": draft.request.url(),
+                "mode": mode.as_str(),
                 "warnings": warnings.iter().map(ToString::to_string).collect::<Vec<_>>(),
                 "scope": describe(repeater.decide(&draft)),
             });
@@ -83,6 +95,7 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
         } else {
             print!("{}", String::from_utf8_lossy(&draft.to_raw()));
             println!();
+            print_mode(mode);
             print_warnings(&warnings);
             println!("Not sent (--dry-run).");
         }
@@ -98,11 +111,26 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
     let diff = repeater.diff_against_parent(&sent)?;
 
     if args.json {
-        print_json(&sent, diff.as_ref(), &warnings, args.show_body);
+        print_json(&sent, diff.as_ref(), &warnings, args.show_body, mode);
     } else {
+        print_mode(mode);
         print_human(&sent, diff.as_ref(), &warnings, args.show_body);
     }
     Ok(())
+}
+
+/// Says which mode the request went out in, before anything about the response.
+///
+/// Only for raw: structured is what every other command does, and a line saying so on
+/// every send would be noise people stop reading. Raw is the one that changes what
+/// "send this" means, so it is the one that gets announced.
+fn print_mode(mode: RequestMode) {
+    if mode == RequestMode::Raw {
+        println!(
+            "Raw mode: these bytes are sent exactly as written. Nothing is normalized, \
+             framed or corrected."
+        );
+    }
 }
 
 /// Compares two stored exchanges without sending anything.
@@ -365,10 +393,12 @@ fn print_json(
     diff: Option<&ResponseDiff>,
     warnings: &[hexora_repeater::Warning],
     show_body: bool,
+    mode: RequestMode,
 ) {
     let response = &sent.exchange.response;
     let payload = serde_json::json!({
         "id": sent.id.to_string(),
+        "mode": mode.as_str(),
         "parent": sent.parent.map(|p| p.to_string()),
         "scope": describe(sent.decision),
         "status": response.status,
@@ -456,6 +486,7 @@ mod tests {
                     truncated: false,
                 },
                 encoded_body: None,
+                raw_request: None,
                 content_encoding: None,
                 origin: "proxy",
                 identity: None,
@@ -479,6 +510,7 @@ mod tests {
             dry_run: true,
             show_body: false,
             insecure: false,
+            raw: false,
             json: true,
         })
         .unwrap();
@@ -494,6 +526,7 @@ mod tests {
             dry_run: false,
             show_body: false,
             insecure: false,
+            raw: false,
             json: true,
         })
         .unwrap_err();
@@ -510,6 +543,7 @@ mod tests {
             dry_run: true,
             show_body: false,
             insecure: false,
+            raw: false,
             json: true,
         })
         .unwrap_err();
@@ -526,6 +560,7 @@ mod tests {
             dry_run: true,
             show_body: false,
             insecure: false,
+            raw: false,
             json: true,
         })
         .unwrap_err();
@@ -565,6 +600,7 @@ mod tests {
                         truncated: false,
                     },
                     encoded_body: None,
+                    raw_request: None,
                     content_encoding: None,
                     origin: "repeater",
                     identity: None,
@@ -604,6 +640,7 @@ mod tests {
                     truncated: false,
                 },
                 encoded_body: None,
+                raw_request: None,
                 content_encoding: None,
                 origin: "repeater",
                 identity: None,

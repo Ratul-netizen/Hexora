@@ -66,10 +66,40 @@ impl std::fmt::Debug for BodyStream<'_> {
 }
 
 /// A body that has been read to completion.
+///
+/// Two representations, and the boundary between them is exactly one step of the
+/// pipeline:
+///
+/// ```text
+/// TCP bytes
+///    │  framing: chunk headers, Content-Length, connection close
+///    ▼
+/// transfer-decoded bytes  ── kept as `encoded`, when there was a coding to reverse
+///    │  Content-Encoding: gzip, deflate, br
+///    ▼
+/// application bytes       ── `bytes`
+/// ```
+///
+/// Naming the middle stage matters for this tool in particular. Request-smuggling
+/// work is about the *framing* — which is recorded as [`Quirk`]s rather than bytes —
+/// and content-encoding work is about what sits inside it. A single "wire body" that
+/// blurred the two would be useless for both.
 #[derive(Debug, Clone)]
 pub struct CollectedBody {
     /// The body, with transfer *and* content coding reversed.
     pub bytes: Bytes,
+    /// The transfer-decoded bytes, before `Content-Encoding` was reversed.
+    ///
+    /// `None` when no coding was reversed — in which case [`Self::bytes`] already is
+    /// the transfer-decoded form and holding a second copy of it would double the
+    /// memory of every ordinary response for nothing.
+    pub encoded: Option<Bytes>,
+    /// The coding that was actually reversed, when one was.
+    ///
+    /// Read from the response rather than re-derived by a caller, and *actually
+    /// reversed* rather than merely announced: a truncated body is not decoded, and a
+    /// record claiming otherwise would describe bytes nobody produced.
+    pub reversed_coding: Option<String>,
     /// Trailer fields, for a chunked body that carried them.
     pub trailers: Headers,
     /// Deviations observed while framing the body.
@@ -275,6 +305,8 @@ impl<'a> BodyStream<'a> {
 
         let mut truncated = self.truncated;
         let mut body = bytes.freeze();
+        let mut encoded = None;
+        let mut reversed_coding = None;
 
         // Content coding is reversed only once the whole body is present: a partial
         // compressed stream does not decode to a partial plaintext, it decodes to an
@@ -282,11 +314,19 @@ impl<'a> BodyStream<'a> {
         if !truncated && !content_encoding.trim().is_empty() {
             let decoded = crate::decode::decode_body(content_encoding, &body, &self.limits)?;
             truncated |= decoded.truncated;
-            body = decoded.body;
+            // Kept, not copied: `Bytes` is reference-counted, so the transfer-decoded
+            // form costs nothing beyond the allocation it already had. The decoded
+            // form is a second allocation either way, and both are bounded — the
+            // first by `check_body_size` as it arrived, the second by
+            // `check_decompression` as it expanded.
+            encoded = Some(std::mem::replace(&mut body, decoded.body));
+            reversed_coding = Some(content_encoding.trim().to_string());
         }
 
         Ok(CollectedBody {
             bytes: body,
+            encoded,
+            reversed_coding,
             trailers: self.trailers.clone(),
             quirks: self.quirks.clone(),
             truncated,

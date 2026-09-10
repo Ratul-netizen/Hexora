@@ -508,6 +508,72 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M12.6, wire-exact traffic and raw request mode
+
+Two pieces of debt, both about the same thing: a security tool must not quietly change
+the bytes it is supposed to be showing you.
+
+**Encoded response bodies are kept.** The transport now hands back the body twice — the
+transfer-decoded bytes as they arrived, and the application bytes they decode to — and
+both are stored. `hexora history --body --wire` returns the gzip stream; `--body`
+returns the JSON inside it. `encoded_body` was written as NULL since M3, which meant
+`--wire` silently returned the decoded body for exactly the responses where the
+distinction mattered.
+
+- The boundary is named and documented (`docs/architecture.md`): **raw bytes** →
+  **transfer-decoded** (framing removed, `Content-Encoding` untouched) →
+  **content-decoded**. Request-smuggling research is about the first step and
+  content-encoding research about the second; a single "wire body" would be useless
+  for both.
+- No second buffer where there is nothing to keep: when no coding was reversed the
+  encoded form is *absent* rather than a duplicate, and the read path falls back.
+  `Bytes` is reference-counted, so keeping the compressed form costs no copy.
+- Both forms stay bounded — the arriving bytes by `max_body_bytes`, the expansion by
+  `max_decompressed_bytes` and the ratio check — and a decompression bomb still
+  truncates rather than erroring, so what arrived before the cut is still evidence.
+- `content_encoding` records what was *actually reversed*, not what the header
+  announced. A truncated body is never decoded, and a row saying otherwise would
+  describe a transformation nobody performed.
+
+**Requests can be sent as bytes.** `RequestSource::{Structured, Raw}` makes explicit
+what used to be implicit. A structured request is serialized from the message model,
+which normalizes line endings and can add framing headers. A raw request is written
+byte for byte:
+
+- `hexora repeat --raw`, and a Structured/Raw switch in the desktop repeater. Nothing
+  changes mode on its own: a request captured raw reloads raw, and converting is an
+  explicit operation with a visible result.
+- Bare LF stays bare LF, header casing and order survive, duplicates survive, a
+  `Content-Length` that disagrees with the body is sent wrong, and non-UTF-8 and NUL
+  bytes pass through. Proven against a real socket by asserting what the server
+  received, not what Hexora believed it sent.
+- **Raw mode does not bypass scope.** `ScopeGuard::send_raw` decides on the service the
+  request is addressed to and the target read out of its request line; an absolute-form
+  line contributes its path, never its authority, so rewriting it cannot point the
+  connection somewhere unscoped. A raw request whose request line cannot be read is
+  refused rather than sent.
+- An identity's credential cannot be applied to a raw request — doing so would mean
+  rewriting a header block the tester wrote deliberately. The error says so and says
+  what to do instead.
+- The bytes are stored content-addressed (`requests.raw_hash`), so re-sending a raw
+  request while fuzzing one header stores the variants rather than copies of
+  everything that did not change. Provenance is the existing one: `parent_id`,
+  identity, origin — `repeat --tree` answers "where did this come from?" unchanged.
+- Migration 4 is additive and backward compatible: rows written before raw mode
+  existed are structured by definition, and the column default says so.
+
+### Fixed
+
+- **The repeater's own documentation claimed byte preservation it did not have.** The
+  panel said "what is typed is what is sent, including a `Content-Length` that
+  disagrees with the body" while structured editing re-serialized the message. It now
+  describes what each mode actually promises.
+- **The history detail pane showed a `Host` header that was never sent.** The
+  structured *view* of a raw request was built with `HttpRequest::get`, which adds one
+  from the service — so a request deliberately sent without a `Host` displayed with
+  one. Found by looking at the window.
+- **The window did not mark raw rows** although the CLI did. Also found by looking.
+
 ### Not implemented
 
 There are no attack chains. Object identifiers must be declared by hand: Hexora does
@@ -521,7 +587,8 @@ desktop UI has been inspected on Windows at one window size, with a real project
 it has not been seen on macOS, on Linux, at a small window, or on a high-density
 display. The HTML report is shown in the window as text rather than rendered, and
 nobody has opened one in a browser and said it reads correctly. Connection reuse and
-redirects return `NotImplemented` naming the milestone that will provide them. The traffic store keeps both body forms, but the transport still returns
-only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
-the M1.5 gap. A repeater request edited to bare-LF line endings is re-serialized with
-CRLF, and says so. See `docs/roadmap.md`.
+redirects return `NotImplemented` naming the milestone that will provide them.
+
+Raw mode is HTTP/1.x request bytes only: there is no raw frame injection for HTTP/2 or
+HTTP/3, and no raw WebSocket frames. Those want wire models of their own rather than a
+byte buffer. See `docs/roadmap.md`.

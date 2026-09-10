@@ -37,7 +37,17 @@ use crate::MetadataDb;
 #[derive(Debug, Clone)]
 pub struct CapturedExchange {
     /// The request as it was sent.
+    ///
+    /// For a raw send this is a best-effort reading of [`Self::raw_request`], kept so
+    /// the history table has a method and a URL to show. It is never what goes back
+    /// on the wire.
     pub request: HttpRequest,
+    /// The exact bytes written, when the request was sent raw.
+    ///
+    /// `None` for a structured send, where re-serializing the model reproduces what
+    /// went out. `Some` is what makes a raw request re-sendable byte for byte a month
+    /// later — the whole reason raw mode exists.
+    pub raw_request: Option<bytes::Bytes>,
     /// The response as it was received, already decoded.
     pub response: HttpResponse,
     /// The response body exactly as it arrived, before content decoding.
@@ -98,6 +108,12 @@ pub struct StoredTraffic {
     /// replay whose row says only `idn_01a08c…` cannot be checked at a glance against
     /// the claim a finding makes about it.
     pub identity: Option<String>,
+    /// How the request reached the socket.
+    ///
+    /// In the index rather than only in the detail: a row that was sent byte for byte
+    /// may not mean what its method and path suggest, and that is worth knowing while
+    /// scrolling.
+    pub mode: hexora_types::raw::RequestMode,
 }
 
 /// A stored request, read back in full.
@@ -125,7 +141,18 @@ pub struct StoredRequest {
     /// line.
     pub headers_raw: Vec<u8>,
     /// The request body.
+    ///
+    /// For a raw request this is the bytes after the head terminator, as they were
+    /// sent. It is a *view*: what gets re-sent is [`Self::raw`].
     pub body: Vec<u8>,
+    /// How the request reached the socket.
+    pub mode: hexora_types::raw::RequestMode,
+    /// The exact bytes that were written, for a raw request.
+    ///
+    /// `None` for a structured one, and for a raw row whose blob has been pruned —
+    /// which is reported rather than papered over, because re-sending a structured
+    /// reconstruction of a raw request would send something else.
+    pub raw: Option<Vec<u8>>,
     /// Host, port and scheme it was sent to.
     pub service: hexora_types::http::HttpService,
     /// When it was sent, RFC 3339.
@@ -139,6 +166,8 @@ struct RequestRow {
     identity: Option<String>,
     body_hash: Option<String>,
     body_size: i64,
+    raw_hash: Option<String>,
+    raw_size: i64,
 }
 
 /// Reads and writes captured traffic.
@@ -150,6 +179,19 @@ pub struct TrafficStore {
 impl std::fmt::Debug for TrafficStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TrafficStore").finish_non_exhaustive()
+    }
+}
+
+impl CapturedExchange {
+    /// How this exchange's request reached the socket.
+    ///
+    /// Derived from whether raw bytes are present rather than stored twice: two
+    /// fields that could disagree about the same fact is one field too many.
+    pub fn mode(&self) -> hexora_types::raw::RequestMode {
+        match self.raw_request {
+            Some(_) => hexora_types::raw::RequestMode::Raw,
+            None => hexora_types::raw::RequestMode::Structured,
+        }
     }
 }
 
@@ -197,6 +239,13 @@ impl TrafficStore {
         let target = self.upsert_target(&service.host, service.port, service.secure)?;
 
         let request_body = self.put_body(&exchange.request.body)?;
+        // Content-addressed like every other body: fuzzing one header of the same raw
+        // request a thousand times stores the distinct variants, not a thousand copies
+        // of the parts that did not change.
+        let raw_request = match &exchange.raw_request {
+            Some(bytes) => self.put_body(bytes)?,
+            None => None,
+        };
         let decoded_body = self.put_body(&exchange.response.body)?;
         let encoded_body = match &exchange.encoded_body {
             Some(bytes) => self.put_body(bytes)?,
@@ -230,8 +279,9 @@ impl TrafficStore {
             "INSERT INTO requests
                 (id, target_id, origin, parent_id, method, path, http_version,
                  headers_raw, body_hash, body_size, sent_at, quirks, tls_json,
-                 identity_id)
-             VALUES (?1, ?2, ?3, ?13, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?14)",
+                 identity_id, request_mode, raw_hash, raw_size)
+             VALUES (?1, ?2, ?3, ?13, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?14,
+                     ?15, ?16, ?17)",
             params![
                 request_id.to_string(),
                 target.to_string(),
@@ -247,6 +297,9 @@ impl TrafficStore {
                 tls_json,
                 exchange.parent.map(|p| p.to_string()),
                 exchange.identity.map(|i| i.to_string()),
+                exchange.mode().as_str(),
+                encoded_hash(&raw_request),
+                encoded_size(&raw_request),
             ],
         )?;
 
@@ -290,7 +343,7 @@ impl TrafficStore {
             SELECT r.id, r.target_id, r.method, r.path, r.sent_at, r.quirks,
                    t.host, t.port, t.secure,
                    res.status, res.body_size, res.duration_ms,
-                   i.label
+                   i.label, r.request_mode
             FROM requests r
             JOIN targets t ON t.id = r.target_id
             LEFT JOIN responses res ON res.request_id = r.id
@@ -316,6 +369,7 @@ impl TrafficStore {
                 row.get::<_, Option<i64>>(10)?,
                 row.get::<_, Option<i64>>(11)?,
                 row.get::<_, Option<String>>(12)?,
+                row.get::<_, String>(13)?,
             ))
         })?;
 
@@ -335,6 +389,7 @@ impl TrafficStore {
                 size,
                 ms,
                 identity,
+                mode,
             ) = row?;
             let secure = secure != 0;
             let service = hexora_types::http::HttpService::new(&host, port as u16, secure);
@@ -350,6 +405,7 @@ impl TrafficStore {
                 quirks: serde_json::from_str(&quirks).unwrap_or_default(),
                 secure,
                 identity,
+                mode: hexora_types::raw::RequestMode::parse(&mode),
             });
         }
 
@@ -408,7 +464,8 @@ impl TrafficStore {
             .query_row(
                 "SELECT r.parent_id, r.origin, r.method, r.path, r.http_version,
                         r.headers_raw, r.body_hash, r.body_size, r.sent_at,
-                        t.host, t.port, t.secure, r.identity_id
+                        t.host, t.port, t.secure, r.identity_id,
+                        r.request_mode, r.raw_hash, r.raw_size
                  FROM requests r
                  JOIN targets t ON t.id = r.target_id
                  WHERE r.id = ?1",
@@ -418,8 +475,11 @@ impl TrafficStore {
                     let port: i64 = row.get(10)?;
                     let secure: i64 = row.get(11)?;
                     let identity: Option<String> = row.get(12)?;
+                    let mode: String = row.get(13)?;
                     Ok(RequestRow {
                         identity,
+                        raw_hash: row.get(14)?,
+                        raw_size: row.get(15)?,
                         // Parsed after the query: the id types return `HexoraError`,
                         // which is not a `rusqlite::Error` and cannot surface here.
                         parent: row.get(0)?,
@@ -441,6 +501,8 @@ impl TrafficStore {
                                 secure != 0,
                             ),
                             sent_at: row.get(8)?,
+                            mode: hexora_types::raw::RequestMode::parse(&mode),
+                            raw: None,
                         },
                     })
                 },
@@ -460,6 +522,13 @@ impl TrafficStore {
             Some(hash) => {
                 let reference = BlobRef::from_parts(hash, row.body_size as u64)?;
                 self.blobs.get(&reference)?
+            }
+        };
+        stored.raw = match row.raw_hash {
+            None => None,
+            Some(hash) => {
+                let reference = BlobRef::from_parts(hash, row.raw_size as u64)?;
+                Some(self.blobs.get(&reference)?)
             }
         };
         Ok(stored)
@@ -613,6 +682,7 @@ mod tests {
                 truncated: false,
             },
             encoded_body: None,
+            raw_request: None,
             content_encoding: None,
             origin: "proxy",
             identity: None,

@@ -88,21 +88,16 @@ impl ProjectCapture {
 
 /// Turns an engine exchange into the form the store persists.
 fn to_captured(exchange: &Exchange) -> CapturedExchange {
-    let content_encoding = exchange
-        .response
-        .headers
-        .get("Content-Encoding")
-        .map(|h| h.value_lossy().into_owned());
-
     CapturedExchange {
         request: exchange.request.clone(),
+        raw_request: exchange.raw_request.clone(),
         response: exchange.response.clone(),
-        // The engine currently hands back only the decoded body; the encoded form is
-        // recoverable from the response headers plus the decoded bytes only for
-        // lossless codings, so it is stored as absent rather than reconstructed
-        // wrongly. Threading the encoded bytes through the transport is a follow-up.
-        encoded_body: None,
-        content_encoding,
+        // Both forms, as the transport produced them. The coding recorded here is the
+        // one that was actually reversed rather than the one the header announced —
+        // a truncated body is never decoded, and saying otherwise would describe a
+        // transformation nobody performed.
+        encoded_body: exchange.encoded_body.clone(),
+        content_encoding: exchange.content_encoding.clone(),
         origin: "proxy",
         identity: None,
         // Proxied traffic has no parent: nobody derived it from an earlier request.
@@ -163,6 +158,9 @@ mod tests {
 
     fn exchange(path: &str) -> Exchange {
         Exchange {
+            encoded_body: None,
+            content_encoding: None,
+            raw_request: None,
             request: HttpRequest::get(HttpService::new("example.com", 443, true), path),
             response: HttpResponse {
                 status: 200,

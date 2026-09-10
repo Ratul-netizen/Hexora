@@ -496,11 +496,7 @@ impl<T: HttpTransport> AuthzTester<T> {
         // The parent is the request this was built from, so `hexora repeat --tree`
         // and the desktop history both answer "where did this come from?" without
         // knowing anything about object declarations.
-        let constructed = Draft {
-            request,
-            parent: draft.parent,
-            quirks: Vec::new(),
-        };
+        let constructed = Draft::derived_from(request, draft.parent);
 
         let sent = match self
             .repeater
@@ -1261,6 +1257,9 @@ mod tests {
             headers.set("Content-Type", "application/json");
             Ok(Exchange {
                 request,
+                encoded_body: None,
+                content_encoding: None,
+                raw_request: None,
                 response: HttpResponse {
                     status,
                     reason: None,
@@ -1352,6 +1351,7 @@ mod tests {
                     truncated: false,
                 },
                 encoded_body: None,
+                raw_request: None,
                 content_encoding: None,
                 origin: "proxy",
                 identity: None,

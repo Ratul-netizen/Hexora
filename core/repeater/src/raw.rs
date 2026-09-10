@@ -129,6 +129,13 @@ pub enum Warning {
     Quirk(Quirk),
     /// The text used bare LF line endings, which will be sent as CRLF.
     LineEndingsNormalized,
+    /// The draft is in raw mode: these bytes go out untouched.
+    ///
+    /// Not a complaint. It is here because the other warnings on this list describe
+    /// things Hexora would normally correct, and in raw mode it will not correct any
+    /// of them — which is the single most important thing a tester can know about the
+    /// request they are about to send.
+    RawMode,
 }
 
 impl std::fmt::Display for Warning {
@@ -153,6 +160,10 @@ impl std::fmt::Display for Warning {
             Self::LineEndingsNormalized => write!(
                 f,
                 "the text uses bare LF line endings; it will be sent with CRLF"
+            ),
+            Self::RawMode => write!(
+                f,
+                "raw mode: sent exactly as written; nothing above is corrected"
             ),
         }
     }

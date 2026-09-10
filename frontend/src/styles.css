@@ -843,3 +843,23 @@ tr.violation td {
 .findings-brief .badge {
   margin-right: 6px;
 }
+
+/* The structured/raw switch in the repeater. Two tabs rather than a checkbox: they
+ * are two different promises about what "send" does, and a checkbox reads like an
+ * option on one behaviour. */
+.modes {
+  display: flex;
+  gap: 2px;
+}
+
+.modes button.tab {
+  padding: 4px 10px;
+  border-bottom-width: 2px;
+}
+
+/* A row that was sent byte for byte. Marked in the index because it changes what the
+ * method and path next to it mean. */
+.tag.raw {
+  color: var(--accent);
+  border-color: var(--accent);
+}

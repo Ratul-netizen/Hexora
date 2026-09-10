@@ -38,50 +38,170 @@ pub mod raw;
 
 use std::sync::Arc;
 
+use bytes::Bytes;
 use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
 use hexora_storage::{CapturedExchange, TrafficStore};
 use hexora_types::error::Result;
-use hexora_types::http::HttpRequest;
+use hexora_types::http::{HttpRequest, HttpService};
 use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
+use hexora_types::raw::{RawRequest, RequestMode, RequestSource};
 
 pub use crate::diff::{HeaderChange, ResponseDiff};
 pub use crate::raw::{inspect, parse, render, ParsedRequest, Warning};
 
 /// A request being edited, and where it came from.
+///
+/// # Two modes, and no silent switching
+///
+/// A **structured** draft is a message model. Editing it and sending it serializes
+/// that model, which means CRLF line endings and framing headers added where they
+/// were missing — the right answer for almost every request, because almost every
+/// request is meant to be well formed.
+///
+/// A **raw** draft is bytes. They are sent exactly as they stand: a bare LF stays a
+/// bare LF, a `Content-Length` that disagrees with the body stays wrong, two headers
+/// with the same name stay in the order they were written. Nothing parses them on the
+/// way out.
+///
+/// A draft never changes mode on its own. [`Draft::into_raw`] converts a structured
+/// draft to bytes and says so by producing them; loading raw bytes keeps them raw.
+/// The reason is that the two modes disagree about what "send this" means, and a tool
+/// that guessed which one a tester wanted would eventually guess wrong about a request
+/// whose whole point was the byte the guess changed.
 #[derive(Debug, Clone)]
 pub struct Draft {
     /// The request as it currently stands.
+    ///
+    /// In raw mode this is a *view* of the bytes — good enough for a URL, a method
+    /// and a scope decision, and never what is written to the socket.
     pub request: HttpRequest,
     /// The stored request this was derived from, if any.
     pub parent: Option<RequestId>,
     /// What the parser noticed when the draft was last parsed from text.
     pub quirks: Vec<hexora_http::Quirk>,
+    /// The bytes to send, when this draft is in raw mode.
+    raw: Option<Bytes>,
 }
 
 impl Draft {
-    /// Starts a draft from a request built in code.
+    /// Starts a structured draft from a request built in code.
     pub fn new(request: HttpRequest) -> Self {
         Self {
             request,
             parent: None,
             quirks: Vec::new(),
+            raw: None,
         }
     }
 
+    /// Starts a structured draft that records what it was derived from.
+    ///
+    /// Used by subsystems that build a variant of a captured request — the
+    /// authorization matrix does — so the provenance survives without them needing to
+    /// know how a draft is put together.
+    pub fn derived_from(request: HttpRequest, parent: Option<RequestId>) -> Self {
+        Self {
+            request,
+            parent,
+            quirks: Vec::new(),
+            raw: None,
+        }
+    }
+
+    /// Starts a raw draft from bytes.
+    ///
+    /// The service is the connection target and is not re-derived from the bytes:
+    /// where a request goes and what it says are separate decisions, and letting the
+    /// second choose the first is how a rewritten request line would become a way to
+    /// reach a host nobody scoped.
+    pub fn raw(service: HttpService, bytes: impl Into<Bytes>) -> Result<Self> {
+        let request = RawRequest::new(service, bytes)?;
+        Ok(Self {
+            // A best-effort view, for display and for the history columns. It is
+            // regenerated from the bytes on every edit, and never sent.
+            request: view_of(&request),
+            parent: None,
+            quirks: Vec::new(),
+            raw: Some(request.bytes),
+        })
+    }
+
+    /// Which mode this draft is in.
+    pub fn mode(&self) -> RequestMode {
+        match self.raw {
+            Some(_) => RequestMode::Raw,
+            None => RequestMode::Structured,
+        }
+    }
+
+    /// The bytes this draft would send, when it is in raw mode.
+    pub fn raw_bytes(&self) -> Option<&Bytes> {
+        self.raw.as_ref()
+    }
+
+    /// Converts a structured draft to raw bytes, keeping what it currently says.
+    ///
+    /// An explicit operation with a visible result: the serialized form appears, and
+    /// from then on those bytes are what gets sent. Converting a raw draft does
+    /// nothing, because it is already the thing being converted to.
+    pub fn into_raw(mut self) -> Self {
+        if self.raw.is_none() {
+            self.raw = Some(Bytes::from(render(&self.request)));
+        }
+        self
+    }
+
+    /// Reverts a raw draft to structured editing by parsing its bytes.
+    ///
+    /// Also explicit, and lossy by definition — that is the point of naming it. What
+    /// comes back is a *model* of the bytes, and sending it will produce whatever
+    /// serializing that model produces, not what the bytes said.
+    pub fn into_structured(mut self, limits: &Limits) -> Result<Self> {
+        if let Some(bytes) = self.raw.take() {
+            let parsed = parse(&bytes, self.request.service.clone(), limits)?;
+            self.request = parsed.request;
+            self.quirks = parsed.quirks;
+        }
+        Ok(self)
+    }
+
     /// The draft as editable bytes.
+    ///
+    /// In raw mode this is exactly what will be sent. In structured mode it is the
+    /// serialization of the model, which is what would be sent.
     pub fn to_raw(&self) -> Vec<u8> {
-        render(&self.request)
+        match &self.raw {
+            Some(bytes) => bytes.to_vec(),
+            None => render(&self.request),
+        }
     }
 
     /// Replaces the draft's content with edited bytes.
     ///
-    /// The connection target is carried over rather than re-derived from `Host`, so
+    /// In **structured** mode the bytes are parsed and the model replaced: the
+    /// connection target is carried over rather than re-derived from `Host`, so
     /// editing `Host` tests virtual-host routing instead of silently sending the
     /// request somewhere else. An absolute-form request line still wins; see [`raw`].
+    ///
+    /// In **raw** mode the bytes are kept as they are. They are still *read* — a
+    /// method, a target and a set of headers are needed for the scope decision and
+    /// the history table — but reading is not rewriting, and what goes on the wire is
+    /// what was typed. A raw edit whose first line cannot be read at all is refused,
+    /// because a request nobody can scope must not be sent.
     pub fn apply_raw(&mut self, bytes: &[u8], limits: &Limits) -> Result<()> {
+        if self.raw.is_some() {
+            let request = RawRequest::new(self.request.service.clone(), bytes.to_vec())?;
+            self.request = view_of(&request);
+            // The quirk list belongs to the parser, and nothing was parsed. Leaving a
+            // stale one would attribute the previous draft's oddities to these bytes.
+            self.quirks.clear();
+            self.raw = Some(request.bytes);
+            return Ok(());
+        }
+
         let parsed = parse(bytes, self.request.service.clone(), limits)?;
         self.request = parsed.request;
         self.quirks = parsed.quirks;
@@ -90,9 +210,61 @@ impl Draft {
 
     /// Everything questionable about the draft, without changing any of it.
     pub fn warnings(&self) -> Vec<Warning> {
-        inspect(&self.request, &self.quirks)
+        let mut warnings = inspect(&self.request, &self.quirks);
+        if self.raw.is_some() {
+            warnings.push(Warning::RawMode);
+        }
+        warnings
+    }
+
+    /// What the transport will be handed.
+    pub fn source(&self) -> Result<RequestSource> {
+        match &self.raw {
+            Some(bytes) => Ok(RequestSource::Raw(RawRequest::new(
+                self.request.service.clone(),
+                bytes.clone(),
+            )?)),
+            None => Ok(RequestSource::Structured(self.request.clone())),
+        }
     }
 }
+
+/// A message-model view of raw bytes, for display, scope and the history columns.
+///
+/// Never sent. The bytes are.
+fn view_of(raw: &RawRequest) -> HttpRequest {
+    let line = raw.request_line();
+    let mut request = HttpRequest::get(
+        raw.service.clone(),
+        line.as_ref()
+            .map(|l| l.target.clone())
+            .unwrap_or_else(|| "/".to_string()),
+    );
+    request.method = line.map(|l| l.method).unwrap_or_default();
+    request.body = raw.body();
+    // `HttpRequest::get` adds a Host from the service. These bytes may not have
+    // carried one — a missing Host is a routing test — and a view that invented it
+    // would show the tester a header they did not send.
+    request.headers = hexora_types::http::Headers::new();
+
+    let head = raw.head();
+    let text = String::from_utf8_lossy(&head);
+    for field in text.split(LF).skip(1) {
+        let field = field.trim_end_matches(CR);
+        if field.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = field.split_once(':') {
+            request
+                .headers
+                .append(hexora_types::http::Header::new(name.trim(), value.trim()));
+        }
+    }
+    request
+}
+
+const LF: char = '\n';
+const CR: char = '\r';
 
 /// A completed repeater send.
 #[derive(Debug, Clone)]
@@ -188,6 +360,16 @@ impl<T: HttpTransport> Repeater<T> {
     pub fn draft_from(&self, id: RequestId) -> Result<Draft> {
         let stored = self.store.request(id)?;
 
+        // A request that was sent raw comes back raw. Rebuilding it from the columns
+        // would produce a structured request that *looks* the same and is not: the
+        // bare LF the tester wrote would come back as CRLF, which is precisely the
+        // difference they were testing.
+        if let (hexora_types::raw::RequestMode::Raw, Some(bytes)) = (stored.mode, &stored.raw) {
+            let mut draft = Draft::raw(stored.service.clone(), bytes.clone())?;
+            draft.parent = Some(id);
+            return Ok(draft);
+        }
+
         // Re-parsed from the stored header block rather than reconstructed field by
         // field: the round trip through bytes is what proves nothing was lost on the
         // way in, and it is the same path an edited draft takes.
@@ -210,6 +392,7 @@ impl<T: HttpTransport> Repeater<T> {
             request: parsed.request,
             parent: Some(id),
             quirks: parsed.quirks,
+            raw: None,
         })
     }
 
@@ -260,25 +443,38 @@ impl<T: HttpTransport> Repeater<T> {
         };
         options.limits = self.limits.clone();
 
-        let mut request = draft.request.clone();
-        if let Some(identity) = sender.identity {
-            identity.authenticate(&mut request.headers);
-        }
-
-        let decision = self.transport.decide(&request, &options);
-        let exchange = self.transport.send(request, options).await?;
-
-        let content_encoding = exchange
-            .response
-            .headers
-            .get("Content-Encoding")
-            .map(|h| h.value_lossy().into_owned());
+        // Raw mode is byte-exact, so a credential cannot be applied to it: doing so
+        // would mean rewriting a header block the tester wrote deliberately. A raw
+        // draft carries whatever authorization its bytes contain, and a caller that
+        // wants an identity applied converts to structured first.
+        let (decision, exchange) = match draft.source()? {
+            RequestSource::Raw(raw) => {
+                if sender.identity.is_some() {
+                    return Err(hexora_types::HexoraError::invalid_input(
+                        "raw",
+                        "a raw request is sent byte for byte, so an identity's \
+                         credential cannot be applied to it. Put the credential in the \
+                         bytes, or convert the draft to structured first",
+                    ));
+                }
+                let decision = self.transport.decide_raw(&raw, &options);
+                (decision, self.transport.send_raw(raw, options).await?)
+            }
+            RequestSource::Structured(mut request) => {
+                if let Some(identity) = sender.identity {
+                    identity.authenticate(&mut request.headers);
+                }
+                let decision = self.transport.decide(&request, &options);
+                (decision, self.transport.send(request, options).await?)
+            }
+        };
 
         let captured = CapturedExchange {
             request: exchange.request.clone(),
+            raw_request: exchange.raw_request.clone(),
             response: exchange.response.clone(),
-            encoded_body: None,
-            content_encoding,
+            encoded_body: exchange.encoded_body.clone(),
+            content_encoding: exchange.content_encoding.clone(),
             origin: sender.origin.as_str(),
             identity: sender.identity.map(|i| i.id),
             parent: draft.parent,
@@ -414,6 +610,7 @@ mod tests {
                 truncated: false,
             },
             encoded_body: None,
+            raw_request: None,
             content_encoding: None,
             origin: "proxy",
             identity: None,
@@ -600,4 +797,231 @@ mod tests {
 
     #[allow(dead_code)]
     fn assert_exchange_is_used(_: Exchange) {}
+    // ------------------------------------------------------------------- raw mode
+
+    const ODD: &[u8] = b"get /raw HTTP/1.1\nhOsT: example.com\nX-Dup: a\nX-Dup: b\n\nbody";
+
+    fn raw_draft() -> Draft {
+        Draft::raw(service(), ODD.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn a_draft_never_changes_mode_on_its_own() {
+        let structured = Draft::new(HttpRequest::get(service(), "/a"));
+        assert_eq!(structured.mode(), RequestMode::Structured);
+        assert!(structured.raw_bytes().is_none());
+
+        // Editing a structured draft leaves it structured, even when the bytes typed
+        // in were bare-LF: that is what the LineEndingsNormalized warning is for.
+        let mut edited = structured.clone();
+        edited
+            .apply_raw(
+                b"GET /b HTTP/1.1\nHost: example.com\n\n",
+                &Limits::default(),
+            )
+            .unwrap();
+        assert_eq!(edited.mode(), RequestMode::Structured);
+
+        // And converting is an explicit act with a visible result.
+        let raw = edited.into_raw();
+        assert_eq!(raw.mode(), RequestMode::Raw);
+        assert!(raw.raw_bytes().is_some());
+    }
+
+    #[test]
+    fn editing_a_raw_draft_keeps_every_byte() {
+        let mut draft = raw_draft();
+        assert_eq!(draft.to_raw(), ODD);
+
+        draft
+            .apply_raw(b"POST /x HTTP/1.1\nA: 1\n\n\xff", &Limits::default())
+            .unwrap();
+        assert_eq!(draft.to_raw(), b"POST /x HTTP/1.1\nA: 1\n\n\xff");
+        assert_eq!(draft.mode(), RequestMode::Raw);
+
+        // The view follows the bytes, so history and scope stay right...
+        assert_eq!(draft.request.method, "POST");
+        assert_eq!(draft.request.path, "/x");
+        // ...and the bytes are still what would be sent.
+        assert_eq!(
+            draft.raw_bytes().unwrap().as_ref(),
+            b"POST /x HTTP/1.1\nA: 1\n\n\xff"
+        );
+    }
+
+    #[test]
+    fn a_raw_draft_says_that_nothing_will_be_corrected() {
+        let warnings = raw_draft().warnings();
+        assert!(
+            warnings.iter().any(|w| matches!(w, Warning::RawMode)),
+            "{warnings:?}"
+        );
+        assert!(warnings
+            .iter()
+            .any(|w| w.to_string().contains("exactly as written")));
+    }
+
+    #[test]
+    fn a_raw_edit_with_no_readable_request_line_is_refused() {
+        // Not because it is malformed. Because scope is checked against the target,
+        // and a request nobody can scope must never reach a socket.
+        let mut draft = raw_draft();
+        let error = draft
+            .apply_raw(b"garbage\n\n", &Limits::default())
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_input");
+        assert_eq!(draft.to_raw(), ODD, "and the draft is left as it was");
+    }
+
+    #[tokio::test]
+    async fn a_raw_send_writes_the_bytes_and_records_them() {
+        let (repeater, store, _project) = repeater(in_scope());
+        let sent = repeater.send(&raw_draft()).await.unwrap();
+
+        assert_eq!(sent.exchange.raw_request.as_deref(), Some(ODD));
+
+        // And the project can hand them back, byte for byte, months later.
+        let stored = store.request(sent.id).unwrap();
+        assert_eq!(stored.mode, RequestMode::Raw);
+        assert_eq!(stored.raw.as_deref(), Some(ODD));
+    }
+
+    #[tokio::test]
+    async fn a_stored_raw_request_reloads_as_raw() {
+        // The regression this milestone exists to prevent: rebuilding a raw request
+        // from its columns would turn the tester's bare LF into CRLF and send a
+        // different request under the same name.
+        let (repeater, _store, _project) = repeater(in_scope());
+        let sent = repeater.send(&raw_draft()).await.unwrap();
+
+        let reloaded = repeater.draft_from(sent.id).unwrap();
+        assert_eq!(reloaded.mode(), RequestMode::Raw);
+        assert_eq!(reloaded.to_raw(), ODD);
+        assert_eq!(reloaded.parent, Some(sent.id));
+    }
+
+    #[tokio::test]
+    async fn a_structured_request_still_reloads_as_structured() {
+        let (repeater, _store, _project) = repeater(in_scope());
+        let sent = repeater
+            .send(&Draft::new(HttpRequest::get(service(), "/plain")))
+            .await
+            .unwrap();
+
+        let reloaded = repeater.draft_from(sent.id).unwrap();
+        assert_eq!(reloaded.mode(), RequestMode::Structured);
+        assert_eq!(reloaded.request.path, "/plain");
+    }
+
+    #[tokio::test]
+    async fn an_out_of_scope_raw_request_from_an_automated_origin_is_refused() {
+        // Raw mode is powerful on purpose, and it is not a way around invariant 1.
+        let (repeater, _store, _project) =
+            repeater(Scope::new().include(ScopeRule::host("elsewhere.example")));
+        let identity = Identity::bearer("Scanner", "t");
+
+        let error = repeater
+            .send_as(
+                &raw_draft(),
+                SendAs {
+                    origin: Origin::Scanner,
+                    identity: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "out_of_scope", "{error}");
+        let _ = identity;
+    }
+
+    #[tokio::test]
+    async fn an_out_of_scope_raw_request_from_a_human_is_flagged_rather_than_refused() {
+        let (repeater, _store, _project) =
+            repeater(Scope::new().include(ScopeRule::host("elsewhere.example")));
+        let sent = repeater.send(&raw_draft()).await.unwrap();
+        assert_eq!(sent.decision, ScopeDecision::AllowedOutOfScope);
+    }
+
+    #[tokio::test]
+    async fn a_raw_request_whose_line_points_elsewhere_is_scoped_by_its_path() {
+        // The authority in an absolute-form target does not choose the connection, so
+        // it must not choose the scope decision either — otherwise a rewritten request
+        // line would be a way to make an out-of-scope host look in scope, or the
+        // reverse.
+        let (repeater, _store, _project) = repeater(in_scope());
+        let draft = Draft::raw(
+            service(),
+            b"GET http://elsewhere.example/admin HTTP/1.1\r\nHost: elsewhere.example\r\n\r\n"
+                .to_vec(),
+        )
+        .unwrap();
+
+        let sent = repeater
+            .send_as(
+                &draft,
+                SendAs {
+                    origin: Origin::Scanner,
+                    identity: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sent.decision,
+            ScopeDecision::Allowed,
+            "example.com/admin is in scope; the request line said nothing about that"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_identity_cannot_be_applied_to_a_raw_request() {
+        // Applying one would mean rewriting a header block the tester wrote
+        // deliberately, which is the one thing raw mode promises not to do.
+        let (repeater, _store, _project) = repeater(in_scope());
+        let identity = Identity::bearer("User B", "TOKEN_B");
+
+        let error = repeater
+            .send_as(&raw_draft(), SendAs::authz(&identity))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_input");
+        assert!(error.to_string().contains("byte for byte"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_raw_send_keeps_its_provenance() {
+        let (repeater, store, _project) = repeater(in_scope());
+        let original = repeater
+            .send(&Draft::new(HttpRequest::get(service(), "/original")))
+            .await
+            .unwrap();
+
+        let mut draft = repeater.draft_from(original.id).unwrap().into_raw();
+        draft
+            .apply_raw(
+                b"GET /edited HTTP/1.1\nHost: example.com\n\n",
+                &Limits::default(),
+            )
+            .unwrap();
+
+        let resent = repeater.send(&draft).await.unwrap();
+        assert_eq!(resent.parent, Some(original.id));
+
+        let stored = store.request(resent.id).unwrap();
+        assert_eq!(stored.parent, Some(original.id));
+        assert_eq!(stored.mode, RequestMode::Raw);
+        assert_eq!(store.children(original.id).unwrap(), vec![resent.id]);
+    }
+
+    #[test]
+    fn converting_back_to_structured_is_explicit_and_says_what_it_costs() {
+        // Round-tripping through the model is lossy by definition: that is why it has
+        // a name rather than happening on the next edit.
+        let draft = raw_draft().into_structured(&Limits::default()).unwrap();
+        assert_eq!(draft.mode(), RequestMode::Structured);
+        assert!(
+            draft.to_raw().windows(2).any(|w| w == b"\r\n"),
+            "serializing the model produces CRLF, which is exactly the loss"
+        );
+    }
 }

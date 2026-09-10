@@ -51,6 +51,7 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
                     "quirks": item.quirks,
                     "secure": item.secure,
                     "identity": item.identity,
+                    "mode": item.mode.as_str(),
                 })
             })
             .collect();
@@ -97,8 +98,15 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
             None => String::new(),
             Some(label) => format!("  (as {label})"),
         };
+        // Marked because it changes what the row means: a raw request was sent byte
+        // for byte, so the method and path beside it are a reading of those bytes
+        // rather than a description of them.
+        let mode = match item.mode {
+            hexora_types::raw::RequestMode::Raw => "  [raw]",
+            hexora_types::raw::RequestMode::Structured => "",
+        };
         println!(
-            "{:<38} {status:>3} {:<6} {:>8} {duration:>7}  {}{identity}{quirks}",
+            "{:<38} {status:>3} {:<6} {:>8} {duration:>7}  {}{identity}{mode}{quirks}",
             item.id.to_string(),
             item.method,
             item.response_bytes,
@@ -176,6 +184,7 @@ mod tests {
                         truncated: false,
                     },
                     encoded_body: None,
+                    raw_request: None,
                     content_encoding: None,
                     origin: "proxy",
                     identity: None,

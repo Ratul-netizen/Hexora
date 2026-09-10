@@ -88,6 +88,9 @@ mod tests {
 
     fn exchange() -> Exchange {
         Exchange {
+            encoded_body: None,
+            content_encoding: None,
+            raw_request: None,
             request: HttpRequest::get(HttpService::new("example.com", 443, true), "/"),
             response: HttpResponse {
                 status: 200,

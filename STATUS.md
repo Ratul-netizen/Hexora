@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.5 (constructed cross-identity attempts)
+- **Last updated:** M12.6 (wire-exact traffic and raw request mode)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -32,30 +32,28 @@ milestone.
 | **M12.3** — The report | `hexora report` turns a project into a document: Markdown for a ticket, a self-contained HTML page for a client, JSON for whatever reads it next. Every claim quotes the request and the response behind it; a citation the project cannot resolve is printed as missing rather than as a dead id. Scope, identities and coverage come first, so a clean run reads as a record of what was tested rather than a clean bill of health. Leads stay in their own section, dismissed findings are counted rather than hidden, and credentials are redacted with the length of what was removed |
 | **M12.4** — The desktop workflow | The window does the whole loop without a terminal: declare scope and identities, pick a captured request, replay it as everybody, read the matrix, open any cell's exchange, work the findings list, follow a citation back into history, triage, and render the report. Same commands, same crates, same engine as the CLI. The interface has now been *looked at* on Windows, which is how two layout defects and a wrong run instruction in the docs were found |
 | **M12.5** — Constructed attempts | The matrix replays; this builds. Declare which identifiers are objects and who owns them, and a run substitutes one into the object slot of a captured request and sends it as each identity — the request nobody captured, which is the only way to ask "can User B reach *User A's* invoice?" from User B's own traffic. Nothing is guessed, a 200 is not a finding, every generated request records the substitution behind it, and the substitution touches nothing else in the message |
+| **M12.6** — Wire-exact traffic | Response bodies are kept in both forms — the bytes that arrived and the bytes they decode to — so `--wire` returns the gzip stream and `--body` the JSON inside it. Requests can be sent byte for byte: `RequestSource::{Structured, Raw}`, a `--raw` flag and a mode switch in the window. Bare LF stays bare LF, casing and duplicates survive, a wrong `Content-Length` is sent wrong. Raw mode still goes through the same scope guard, and Hexora no longer claims byte-preservation it does not have |
 
 ## Next
 
-**Hexora now builds the request nobody sent.** Capture one identity's traffic, declare
-whose objects are whose, and it will ask the question the capture cannot: not "can
-this identity reach this URL?" but "can it reach *that* object?" — with the
-substitution recorded next to the answer.
+**The request layer no longer changes anything it was not asked to.** A response is
+kept as it arrived *and* as it decodes; a request can be sent exactly as written. That
+matters most for what comes next: a scanner generating traffic on top of a layer that
+quietly rewrote bytes would produce findings about requests nobody made.
 
 What that leaves open, in the order it matters:
 
-- **The two pieces of traffic debt** below: `encoded_body` is written as NULL, and a
-  request edited to bare-LF is re-serialized with CRLF. Both are small, both are the
-  kind of thing a security tool should not get wrong, and both are much cheaper to fix
-  now than once a scanner is generating traffic through the same paths. A deliberate
-  `RequestSource::{Structured, Raw}` split is the shape the second one wants.
 - **Suggesting object identifiers.** Every one is declared by hand today. Hexora could
-  point at the values in a request that *look* like identifiers — and that has to stay
-  a suggestion a human accepts, because the moment a guess about what a string means
+  point at the values in a request that *look* like identifiers — and it has to stay a
+  suggestion a human accepts, because the moment a guess about what a string means
   becomes an assumption, the evidence model that makes this tool worth using is gone.
 - **M13 — the scanner.** Still the thing buyers compare on, and still the thing most
-  likely to waste a tester's day if it is wrong. Build the verification framework
-  first and let detectors produce hypotheses into it: the evidence ladder, the findings
-  store and the report already exist to be that framework. Passive checks over
-  captured traffic first — no new requests, easy to benchmark, immediately useful.
+  likely to waste a tester's day if it is wrong. Build the verification framework first
+  and let detectors produce hypotheses into it: the evidence ladder, the findings store
+  and the report already exist to be that framework. Passive checks over captured
+  traffic first — no new requests, easy to benchmark, immediately useful — then
+  authentication and authorization detectors, then an active mutation engine, then the
+  UI.
 - **Attack chains** that retain evidence at every step.
 
 **Two honesty notes carried forward:**
@@ -67,9 +65,16 @@ verified end to end.
 The authorization work — replay, construction and the report — has been exercised end
 to end against a local application with a deliberate IDOR *and* a correctly built
 version of the same endpoint, from the CLI and from the window. The broken one produced
-a High finding naming the exact substitution; the correct one produced nothing at all,
-which is the result that matters more. None of it has been run against a large real
-application, where response noise is worse than any fixture.
+a High finding naming the exact substitution; the correct one produced nothing at all.
+None of it has been run against a large real application, where response noise is worse
+than any fixture.
+
+**What raw mode does and does not cover.** HTTP/1.x request bytes, and nothing else:
+there is no raw frame injection for HTTP/2 or HTTP/3, and no raw WebSocket frames.
+Those want wire models of their own rather than a byte buffer with a different name.
+Raw mode also does not bypass scope, and cannot: the destination is the service the
+request is addressed to, the path is read out of the request line, and a request whose
+line cannot be read is refused.
 
 **What constructed testing does not prove.** Ownership is the tester's assertion, not
 something Hexora establishes: `hexora object add` records a claim. A constructed
@@ -84,18 +89,6 @@ display, and the HTML report is still shown as text rather than rendered.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
-
-**Debt carried out of M3:** the schema and the store keep both body forms, and the
-proxy records the `Content-Encoding` that was applied — but the transport still hands
-back only the decoded bytes, so `encoded_body` is written as NULL in practice. The
-column, the migration and the read path (`hexora history --body --wire`) are all in
-place; what remains is threading the encoded bytes out of `BodyStream::collect`. Until
-that lands, `--wire` returns the decoded body for compressed responses.
-
-**Debt carried out of M4:** a request edited to bare-LF line endings is re-serialized
-with CRLF, because `HttpRequest` stores fields rather than bytes. The warning says so
-explicitly rather than hiding it. Byte-exact raw sending needs a send path that
-bypasses the message model.
 
 Full plan: [`docs/roadmap.md`](docs/roadmap.md).
 
@@ -173,10 +166,12 @@ cargo run -p hexora-cli -- proxy --only target.example.com   # leave your own tr
 cargo run -p hexora-cli -- proxy --project ./scratch/demo
 cargo run -p hexora-cli -- history ./scratch/demo
 cargo run -p hexora-cli -- history ./scratch/demo --body req_01a08b… > response.bin
+cargo run -p hexora-cli -- history ./scratch/demo --body req_01a08b… --wire > wire.gz
 
 # The repeater: resend, edit, compare, and see what descended from what.
 cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --dry-run
 cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --edit
+cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --raw --edit   # bytes, untouched
 cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --tree
 cargo run -p hexora-cli -- repeat ./scratch/demo req_A --diff req_B
 
@@ -318,3 +313,15 @@ Written down because they were learned the hard way and are easy to undo by acci
 - **Include the target in its own candidate list.** Excluding it looked tidy and made
   "this request already asks for that object" — where the honest answer is *the matrix
   covers this* — come out as "there is nowhere to put it".
+- **"Wire body" is two different things, and both matter.** Framing (chunk headers,
+  Content-Length) and content coding (gzip) are separate steps, and a single name for
+  the bytes between them would be useless for smuggling research and for
+  content-encoding research alike. The stored pair is *transfer-decoded* and
+  *content-decoded*, and `docs/architecture.md` defines both.
+- **A structured view must not invent what the bytes did not carry.**
+  `HttpRequest::get` adds a `Host` header from the service, so the history pane showed
+  a `Host` on a raw request deliberately sent without one. A view of evidence that
+  adds a field is worse than one that omits it.
+- **The panel had been claiming byte preservation it did not have.** The repeater's
+  own description said "what is typed is what is sent" while structured editing
+  re-serialized the message. The fix was as much the sentence as the code.

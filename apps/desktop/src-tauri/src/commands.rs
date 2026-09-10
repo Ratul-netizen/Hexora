@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.5",
+        milestone: "M12.6",
     }
 }
 
@@ -267,6 +267,9 @@ pub struct HistoryRow {
     /// The identity the request was sent as, for rows an authorization run produced.
     /// `None` for proxy traffic, which carries whatever credential the browser had.
     pub identity: Option<String>,
+    /// `structured` or `raw`. A raw row was sent byte for byte, so its method and
+    /// path are a reading of those bytes rather than a description of them.
+    pub mode: String,
 }
 
 /// A page of history.
@@ -304,6 +307,8 @@ pub struct ExchangeDetail {
     pub id: String,
     pub parent: Option<String>,
     pub origin: String,
+    /// How the request reached the socket.
+    pub mode: String,
     pub url: String,
     pub request_head: String,
     pub request_body: BodyPreview,
@@ -323,13 +328,24 @@ pub fn history_detail(state: State<'_, AppState>, id: String) -> CommandResult<E
         store.response_head(request_id).map_err(fail)?;
     let response_body = store.response_body(request_id, false).map_err(fail)?;
 
-    let request_head = format!(
-        "{} {} {}\r\n{}",
-        request.method,
-        request.path,
-        request.http_version,
-        header_block(&request.headers_raw)
-    );
+    // A request that was sent raw is shown as the bytes that were sent. Rebuilding it
+    // from the columns would put CRLF where the tester wrote LF, and a tidy request
+    // line where they may have written something else — a pane that exists to be
+    // evidence, showing a request nobody sent.
+    let request_head = match (request.mode, &request.raw) {
+        (hexora_types::raw::RequestMode::Raw, Some(bytes)) => {
+            let raw = hexora_types::raw::RawRequest::new(request.service.clone(), bytes.clone())
+                .map_err(fail)?;
+            String::from_utf8_lossy(&raw.head()).into_owned()
+        }
+        _ => format!(
+            "{} {} {}\r\n{}",
+            request.method,
+            request.path,
+            request.http_version,
+            header_block(&request.headers_raw)
+        ),
+    };
     let response_head = format!(
         "{version} {status}{}\r\n{}",
         reason.map(|r| format!(" {r}")).unwrap_or_default(),
@@ -339,6 +355,7 @@ pub fn history_detail(state: State<'_, AppState>, id: String) -> CommandResult<E
     Ok(ExchangeDetail {
         id,
         parent: request.parent.map(|p| p.to_string()),
+        mode: request.mode.as_str().to_string(),
         origin: request.origin,
         url: format!("{}{}", request.service.origin(), request.path),
         request_head,
@@ -360,6 +377,8 @@ pub struct DraftView {
     pub url: String,
     pub parent: Option<String>,
     pub warnings: Vec<String>,
+    /// `structured` or `raw` — what pressing Send will actually do with these bytes.
+    pub mode: String,
 }
 
 /// Loads a stored request as an editable draft.
@@ -375,6 +394,7 @@ pub fn repeater_draft(state: State<'_, AppState>, id: String) -> CommandResult<D
         url: draft.request.url(),
         parent: draft.parent.map(|p| p.to_string()),
         warnings: warnings(&draft.warnings()),
+        mode: draft.mode().as_str().to_string(),
     })
 }
 
@@ -383,6 +403,8 @@ pub fn repeater_draft(state: State<'_, AppState>, id: String) -> CommandResult<D
 pub struct SendResult {
     pub id: String,
     pub parent: Option<String>,
+    /// How the request went out.
+    pub mode: String,
     pub status: u16,
     pub duration_ms: u64,
     pub out_of_scope: bool,
@@ -414,6 +436,7 @@ pub async fn repeater_send(
     raw: String,
     parent: Option<String>,
     insecure: bool,
+    request_mode: Option<String>,
 ) -> CommandResult<SendResult> {
     let repeater = build_repeater(&state, insecure)?;
 
@@ -427,11 +450,18 @@ pub async fn repeater_send(
         Some(id) => repeater.draft_from(id).map_err(fail)?,
         None => return Err("a repeater send needs a request to start from".to_string()),
     };
+    // The window asks for a mode explicitly. A request captured raw is already raw
+    // when it loads, and asking for raw on a structured draft converts it — which is
+    // the only way that conversion ever happens.
+    if request_mode.as_deref() == Some("raw") {
+        draft = draft.into_raw();
+    }
     draft
         .apply_raw(raw.as_bytes(), repeater.limits())
         .map_err(fail)?;
 
     let warnings = warnings(&draft.warnings());
+    let mode = draft.mode();
     let sent = repeater.send(&draft).await.map_err(fail)?;
     let diff = repeater
         .diff_against_parent(&sent)
@@ -456,6 +486,7 @@ pub async fn repeater_send(
     Ok(SendResult {
         id: sent.id.to_string(),
         parent: sent.parent.map(|p| p.to_string()),
+        mode: mode.as_str().to_string(),
         status: response.status,
         duration_ms: sent.exchange.duration.as_millis().min(u128::from(u64::MAX)) as u64,
         out_of_scope: sent.decision == ScopeDecision::AllowedOutOfScope,
@@ -1336,6 +1367,7 @@ fn row(item: hexora_storage::StoredTraffic) -> HistoryRow {
         secure: item.secure,
         quirks: item.quirks,
         identity: item.identity,
+        mode: item.mode.as_str().to_string(),
     }
 }
 
@@ -1793,6 +1825,7 @@ mod tests {
             quirks: vec!["BareLf".into()],
             secure: true,
             identity: Some("User B".into()),
+            mode: hexora_types::raw::RequestMode::Structured,
         });
         let json = serde_json::to_value(&row).unwrap();
         for key in [

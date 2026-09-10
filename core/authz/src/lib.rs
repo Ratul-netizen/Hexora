@@ -621,6 +621,9 @@ mod tests {
             headers.set("Content-Type", "application/json");
             Ok(Exchange {
                 request,
+                encoded_body: None,
+                content_encoding: None,
+                raw_request: None,
                 response: HttpResponse {
                     status,
                     reason: None,
@@ -665,6 +668,7 @@ mod tests {
                     truncated: false,
                 },
                 encoded_body: None,
+                raw_request: None,
                 content_encoding: None,
                 origin: "proxy",
                 identity: None,

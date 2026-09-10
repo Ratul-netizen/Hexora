@@ -35,7 +35,7 @@ mod setup;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.5. The proxy, HTTP/1.x engine \
+                  Development status: M12.6. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -253,6 +253,16 @@ enum Command {
         /// Do not verify the target's TLS certificate.
         #[arg(short = 'k', long)]
         insecure: bool,
+
+        /// Edit and send the request as raw bytes.
+        ///
+        /// Structured editing serializes a message model, which means CRLF line
+        /// endings and framing headers added where they were missing. Raw mode sends
+        /// exactly what you typed: a bare LF stays a bare LF, a wrong Content-Length
+        /// stays wrong, duplicate headers stay in the order you wrote them. A request
+        /// that was captured raw comes back raw without the flag.
+        #[arg(long, conflicts_with_all = ["diff", "tree"])]
+        raw: bool,
 
         /// Compare this request against another instead of sending anything.
         #[arg(long, value_name = "OTHER_ID", conflicts_with_all = ["edit", "dry_run"])]
@@ -753,6 +763,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             dry_run,
             show_body,
             insecure,
+            raw,
             diff,
             tree,
         } => {
@@ -777,6 +788,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                     dry_run: *dry_run,
                     show_body: *show_body,
                     insecure: *insecure,
+                    raw: *raw,
                     json: cli.json,
                 })
             }
@@ -860,14 +872,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.5",
+            "milestone": "M12.6",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.5 (constructed attempts)");
+        println!("  milestone:               M12.6 (wire-exact traffic)");
     }
 }
 
@@ -938,7 +950,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.5"),
+            help.contains("M12.6"),
             "users must not mistake this for a finished tool"
         );
     }

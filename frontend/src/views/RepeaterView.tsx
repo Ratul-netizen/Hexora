@@ -8,16 +8,30 @@ import {
   sendDraft,
   type DiffView,
   type HistoryRow,
+  type RequestMode,
   type SendResult,
 } from "../ipc";
 
 /**
  * Edit a captured request and send it again.
  *
- * The editor is a plain textarea holding the request exactly as bytes. That is
- * deliberate: a structured form would have to decide what a header "should" look
- * like, and the whole value of this panel is that it decides nothing. What is typed
- * is what is sent, including a `Content-Length` that disagrees with the body.
+ * The editor is a plain textarea holding the request as text. A structured form would
+ * have to decide what a header "should" look like, and the value of this panel is
+ * that it decides as little as possible.
+ *
+ * # Structured and raw are not the same promise
+ *
+ * In **structured** mode the text is parsed into a message and that message is sent.
+ * Almost everything survives — header order, casing, duplicates, a `Content-Length`
+ * that disagrees with the body — but the message is *serialized*, so bare LF line
+ * endings go out as CRLF and framing headers may be added where they were missing.
+ * The warning list says so when it applies.
+ *
+ * In **raw** mode the bytes are sent exactly as typed. Nothing is parsed on the way
+ * out, nothing is added, nothing is corrected.
+ *
+ * The difference is small and it is the whole reason this panel exists, so it is a
+ * switch a person operates rather than something the editor infers.
  */
 export function RepeaterView({
   requestId,
@@ -34,6 +48,7 @@ export function RepeaterView({
   const [branches, setBranches] = useState<HistoryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [insecure, setInsecure] = useState(false);
+  const [mode, setMode] = useState<RequestMode>("structured");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -48,6 +63,9 @@ export function RepeaterView({
         setRaw(draft.raw);
         setUrl(draft.url);
         setWarnings(draft.warnings);
+        // A request that was captured raw comes back raw. Loading it as structured
+        // would offer to send something else under the same name.
+        setMode(draft.mode);
       })
       .catch((e) => {
         if (!cancelled) setError(describeError(e));
@@ -69,7 +87,7 @@ export function RepeaterView({
     setBusy(true);
     setError(null);
     try {
-      const sent = await sendDraft(raw, requestId, insecure);
+      const sent = await sendDraft(raw, requestId, insecure, mode);
       setResult(sent);
       setWarnings(sent.warnings);
       setBranches(await branchesOf(requestId));
@@ -94,6 +112,17 @@ export function RepeaterView({
       <div className="repeater-editor">
         <header className="detail-header">
           <span className="mono">{url}</span>
+          <div className="modes">
+            {(["structured", "raw"] as const).map((option) => (
+              <button
+                key={option}
+                className={mode === option ? "tab active" : "tab"}
+                onClick={() => setMode(option)}
+              >
+                {option === "structured" ? "Structured" : "Raw"}
+              </button>
+            ))}
+          </div>
           <label className="checkbox inline">
             <input
               type="checkbox"
@@ -107,6 +136,14 @@ export function RepeaterView({
           </button>
         </header>
 
+        {/* Said above the editor rather than in the warning list, because it changes
+            what every other line of that list means. */}
+        <p className={mode === "raw" ? "notice warn" : "muted small"}>
+          {mode === "raw"
+            ? "Raw: these bytes are sent exactly as typed. Nothing is parsed, added or corrected — including the line endings."
+            : "Structured: the text is parsed and the message re-serialized, so bare LF becomes CRLF and missing framing may be added. Switch to Raw to send bytes untouched."}
+        </p>
+
         <textarea
           className="editor"
           value={raw}
@@ -119,7 +156,11 @@ export function RepeaterView({
           // request — a tool that silently fixed them would turn a smuggling test
           // into a test of the tool.
           <div className="warnings">
-            <strong>Sent exactly as written:</strong>
+            <strong>
+              {mode === "raw"
+                ? "Sent exactly as written:"
+                : "Reported, not corrected:"}
+            </strong>
             <ul>
               {warnings.map((warning) => (
                 <li key={warning}>{warning}</li>

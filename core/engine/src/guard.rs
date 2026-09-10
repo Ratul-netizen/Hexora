@@ -25,6 +25,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hexora_types::error::{HexoraError, Result};
 use hexora_types::http::HttpRequest;
+use hexora_types::raw::RawRequest;
 use hexora_types::scope::Scope;
 
 use crate::transport::{Exchange, HttpTransport, SendOptions};
@@ -69,7 +70,28 @@ impl<T: HttpTransport> ScopeGuard<T> {
     /// Exposed so the UI can render the decision (and offer to widen scope) before
     /// the user commits to an action.
     pub fn decide(&self, request: &HttpRequest, options: &SendOptions) -> ScopeDecision {
-        if self.scope.contains(&request.service, &request.path) {
+        self.decide_for(&request.service, &request.path, options)
+    }
+
+    /// The same decision for a request the tester wrote as bytes.
+    ///
+    /// Raw mode changes what is written on the connection. It does not change which
+    /// connection is opened, and it does not change who may open one: the destination
+    /// is the service the raw request carries, and the path comes from reading its
+    /// request line — an absolute-form target contributes its *path*, never its
+    /// authority, so a rewritten request line cannot point the socket somewhere the
+    /// scope does not cover.
+    pub fn decide_raw(&self, request: &RawRequest, options: &SendOptions) -> ScopeDecision {
+        self.decide_for(&request.service, &request.scope_path(), options)
+    }
+
+    fn decide_for(
+        &self,
+        service: &hexora_types::http::HttpService,
+        path: &str,
+        options: &SendOptions,
+    ) -> ScopeDecision {
+        if self.scope.contains(service, path) {
             return ScopeDecision::Allowed;
         }
         if options.origin.is_automated() {
@@ -105,6 +127,29 @@ impl<T: HttpTransport> HttpTransport for ScopeGuard<T> {
                 self.inner.send(request, options).await
             }
             ScopeDecision::Allowed => self.inner.send(request, options).await,
+        }
+    }
+
+    async fn send_raw(&self, request: RawRequest, options: SendOptions) -> Result<Exchange> {
+        match self.decide_raw(&request, &options) {
+            ScopeDecision::Refused => {
+                let target = request.url();
+                tracing::warn!(
+                    origin = options.origin.as_str(),
+                    target = %target,
+                    "refusing an out-of-scope raw request from an automated subsystem"
+                );
+                Err(HexoraError::OutOfScope(target))
+            }
+            ScopeDecision::AllowedOutOfScope => {
+                tracing::debug!(
+                    origin = options.origin.as_str(),
+                    target = %request.url(),
+                    "sending an out-of-scope raw request from a human-driven subsystem"
+                );
+                self.inner.send_raw(request, options).await
+            }
+            ScopeDecision::Allowed => self.inner.send_raw(request, options).await,
         }
     }
 }

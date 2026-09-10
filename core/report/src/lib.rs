@@ -326,6 +326,14 @@ pub struct Transcript {
     pub sent_at: String,
     /// Which subsystem sent it — `proxy`, `repeater`, `authz`.
     pub origin: String,
+    /// How the request reached the socket: `structured` or `raw`.
+    ///
+    /// A structured request is reproduced by serializing the model, so what is quoted
+    /// below is what went out. A raw one was sent byte for byte, and what is quoted is
+    /// a *reading* of those bytes with credentials removed — close, and not identical.
+    /// A report that let a reader assume otherwise would be wrong about the one thing
+    /// raw mode exists to control.
+    pub mode: String,
     /// The identity it was sent as, by label, when it was sent as one.
     pub identity: Option<String>,
     /// Request headers, after redaction.
@@ -827,6 +835,7 @@ fn transcribe(
     Citation::Resolved(Box::new(Transcript {
         request,
         url: url_of(&stored),
+        mode: stored.mode.as_str().to_string(),
         method: stored.method.clone(),
         http_version: stored.http_version.clone(),
         sent_at: stored.sent_at.clone(),
@@ -1007,6 +1016,7 @@ mod tests {
                     truncated: false,
                 },
                 encoded_body: None,
+                raw_request: None,
                 content_encoding: None,
                 origin: "authz",
                 identity: None,

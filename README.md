@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.5 — it builds the request nobody sent
+## Status: M12.6 — the bytes are the bytes
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -69,6 +69,8 @@ work.
 | HTTP/1.x engine over TCP — wire-preserving parser, per-phase timeouts | **IMPLEMENTED** |
 | TLS / HTTPS with certificate policy fit for testing | **IMPLEMENTED** |
 | Chunked transfer decoding, gzip / deflate / brotli, streaming bodies | **IMPLEMENTED** |
+| Both body forms kept: transfer-decoded and content-decoded (`history --body --wire`) | **IMPLEMENTED** |
+| Raw request mode — bytes sent exactly as written (`repeat --raw`) | **IMPLEMENTED** |
 | Intercepting proxy, TLS interception, request/response hooks | **IMPLEMENTED** |
 | Interception CA, trust installation, `hexora setup` | **IMPLEMENTED** |
 | Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |

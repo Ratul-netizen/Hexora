@@ -76,6 +76,63 @@ Similarly, a trait earns its place when at least two components must agree on it
 when it is the seam an invariant is enforced at. Speculative interfaces are worse than
 none: they constrain the implementation before anything is known about it.
 
+## Four names for a message, and why they are not interchangeable
+
+Hexora keeps more than one representation of the same HTTP message, and confusing them
+produces bugs that look like protocol findings. The vocabulary is fixed:
+
+```text
+REQUEST                              RESPONSE
+
+structured HttpRequest               structured HttpResponse
+   │ serialize                          ▲ parse
+   ▼                                    │
+raw bytes  ────── socket ──────►  TCP bytes
+                                        │ remove framing:
+                                        │ chunk headers, Content-Length,
+                                        │ connection close
+                                        ▼
+                                  transfer-decoded bytes   (`encoded_body`)
+                                        │ reverse Content-Encoding:
+                                        │ gzip, deflate, br
+                                        ▼
+                                  content-decoded bytes    (`body`)
+```
+
+**Structured message** — [`HttpRequest`] / [`HttpResponse`]. A model: fields, an
+ordered header list that tolerates duplicates and odd casing, a byte body. Serializing
+one produces a well-formed request, which means CRLF line endings and framing headers
+added where they were missing.
+
+**Raw bytes** — what actually crossed the socket. For a request this is
+[`RawRequest`], and it is not derived from the model: a raw request is sent exactly as
+the tester wrote it, so it can be malformed in ways a model cannot represent.
+
+**Transfer-decoded bytes** — the response body with HTTP *framing* removed and nothing
+else. Chunk headers are gone; a `Content-Encoding: gzip` body is still gzip. Stored as
+`responses.encoded_body_hash`, and reachable with `hexora history --body --wire`.
+
+**Content-decoded bytes** — the application's bytes, after `Content-Encoding` has been
+reversed. Stored as `responses.body_hash`, and what every comparison, search and
+finding is computed against.
+
+The middle two are the pair that gets conflated, and keeping them apart is not
+pedantry: **request-smuggling research is about the framing, and content-encoding
+research is about what sits inside it.** A single "wire body" would be useless for
+both. The framing itself is not stored as bytes at all — it is recorded as `Quirk`s on
+the exchange, because what matters about a chunk header is what was irregular about
+it, not the bytes it occupied.
+
+Two consequences worth stating:
+
+* When no coding was reversed, `encoded_body` is **absent** rather than a copy. The
+  decoded body already is the transfer-decoded form, and storing it twice would double
+  the cost of every ordinary response to record a fact that is already true.
+  `--wire` falls back to it.
+* When a body hit a limit it is **not decoded at all**, and `content_encoding` records
+  what was actually reversed rather than what the header announced. A row claiming a
+  transformation nobody performed would be worse than one admitting it stopped.
+
 ## Where the invariants live
 
 The security properties in [`security-invariants.md`](security-invariants.md) are

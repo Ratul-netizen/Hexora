@@ -1568,6 +1568,7 @@ name = "hexora-engine"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "hexora-types",
  "serde",
  "serde_json",

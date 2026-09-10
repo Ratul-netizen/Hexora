@@ -126,6 +126,39 @@ both `devUrl` and `frontendDist`, and a debug binary uses the first — so
 dev server. Either run the dev server alongside it, as above, or build in release
 (`cargo tauri build`), which embeds `dist`.
 
+## Structured and raw requests
+
+Two ways to send, and they promise different things:
+
+```bash
+# Serialized from the message model: header order, casing and duplicates survive, but
+# bare LF becomes CRLF and missing framing headers may be added.
+cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --edit
+
+# Written byte for byte. Nothing is parsed on the way out.
+cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --raw --edit
+```
+
+A request captured in raw mode reloads in raw mode without the flag — the mode is a
+property of the stored request, not of the command. `hexora history` marks those rows
+`[raw]`, and the desktop repeater has a Structured/Raw switch.
+
+Raw mode does not bypass scope: the destination is the service the request is addressed
+to, and the path comes from reading the request line. A raw request whose first line
+cannot be read is refused rather than sent.
+
+## Response bodies exist twice
+
+```bash
+hexora history ./scratch/demo --body req_01a08b…          # content-decoded: the JSON
+hexora history ./scratch/demo --body req_01a08b… --wire   # transfer-decoded: the gzip
+```
+
+The names are exact and are defined in [`architecture.md`](architecture.md): *raw
+bytes* → *transfer-decoded* (framing removed, `Content-Encoding` untouched) →
+*content-decoded*. When no coding was reversed there is only one form and `--wire`
+returns it.
+
 ## Platform-gated code is only checked by CI
 
 Anything behind `#[cfg(windows)]`, `#[cfg(target_os = "macos")]` or

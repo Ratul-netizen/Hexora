@@ -241,6 +241,11 @@ the request it was built from, the identity it was sent as, and the exact
 substitution that produced it — and the substitution touches nothing else in the
 message. The captured request it was built from is never modified.
 
+A request sent in **raw mode** goes further: nothing is normalized at all. What the
+tester wrote is what reaches the socket, and the bytes are stored so it can be re-sent
+identically months later. Hexora never claims byte-preservation it does not have —
+structured sends are serialized from a model and say so.
+
 **Why.** A constructed request is one nobody sent by hand. Six weeks later, "why did
 Hexora ask for `invoice-1001` as User B?" has to be answerable from the project, or
 the traffic in it is noise a reader cannot distinguish from the tester's own work.
@@ -256,6 +261,13 @@ encoded; a credential header is never an object location, in either direction.
 
 **Corollaries.**
 
+- **Raw mode is not an exception.** A request the tester wrote as bytes is written to
+  the socket unchanged — and it still goes through `ScopeGuard::send_raw`, which
+  decides on the service it is addressed to and the target read out of its request
+  line. An absolute-form request line contributes its *path*, never its authority, so
+  rewriting the line cannot point the connection at a host nobody scoped. A raw
+  request whose request line cannot be read at all is refused rather than sent,
+  because a request nobody can scope must not reach a socket.
 - **Ownership is declared, never inferred.** A value that looks like an identifier is
   not one. Nothing constructs a request on the strength of a guess about what a
   string means.
@@ -269,7 +281,12 @@ encoded; a credential header is never an object location, in either direction.
   send, and `HARD_MAX_ATTEMPTS` caps the cap. An authorization test that turns into a
   crawl is one that gets an engagement stopped.
 
-**Tests.** `core/authz/src/construct.rs` —
+**Tests.** `core/repeater/src/lib.rs` —
+`an_out_of_scope_raw_request_from_an_automated_origin_is_refused`,
+`a_raw_request_whose_line_points_elsewhere_is_scoped_by_its_path`;
+`core/http/src/transport.rs` — `a_raw_request_reaches_the_socket_byte_for_byte`,
+`an_absolute_form_target_does_not_choose_the_socket`;
+`core/authz/src/construct.rs` —
 `an_out_of_scope_target_is_refused_before_anything_is_sent`,
 `the_provenance_of_every_constructed_request_is_recorded`,
 `substituting_never_touches_anything_but_the_slot`,
