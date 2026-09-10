@@ -1,0 +1,35 @@
+# Rust
+/target
+**/target
+Cargo.lock.bak
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Tauri
+apps/desktop/src-tauri/gen/
+
+# Java
+compatibility/burp-montoya/build/
+compatibility/burp-montoya/.gradle/
+
+# Hexora local state — never commit projects, CAs or captured traffic
+*.hexora
+*.hexora-wal
+*.hexora-shm
+/local/
+/.hexora/
+ca/
+*.pem
+*.key
+*.p12
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
