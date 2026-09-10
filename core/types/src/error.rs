@@ -108,6 +108,10 @@ impl HexoraError {
 }
 
 /// Network-level failures.
+///
+/// Variants are named for the condition they describe; the `#[error]` message on
+/// each is the documentation that actually reaches a user.
+#[allow(missing_docs)]
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NetworkError {
@@ -140,6 +144,7 @@ impl NetworkError {
 }
 
 /// Which phase of a request exceeded its deadline.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeoutPhase {
     Resolve,
@@ -170,6 +175,7 @@ impl std::fmt::Display for TimeoutPhase {
 ///
 /// Hexora must stay stable when a hostile target returns deliberately broken data,
 /// so these are ordinary errors rather than panics.
+#[allow(missing_docs)]
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ProtocolError {
@@ -197,6 +203,7 @@ pub enum ProtocolError {
 
 /// A resource limit was hit. Each variant records the configured limit so the UI can
 /// tell the user which setting to raise.
+#[allow(missing_docs)]
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum LimitError {

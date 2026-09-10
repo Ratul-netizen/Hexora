@@ -1,0 +1,25 @@
+[package]
+name = "hexora-desktop"
+description = "Tauri shell for the Hexora desktop client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "hexora_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-storage.workspace = true
+hexora-engine.workspace = true
+tauri.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

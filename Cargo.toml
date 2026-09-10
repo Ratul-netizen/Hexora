@@ -1,85 +1,50 @@
 [workspace]
 resolver = "2"
-members = [
-    "core/types",
-    "core/http",
-    "core/tls",
-    "core/proxy",
-    "core/storage",
-    "core/scanner",
-    "core/fuzzer",
-    "core/oast",
-    "core/workflows",
-    "core/fingerprint",
-    "core/extensions",
-    "apps/cli",
-    "apps/server",
-    "apps/desktop/src-tauri",
-]
+# Only crates that exist and build are listed. New crates are split out of
+# `core/engine` as each milestone lands; see docs/architecture.md.
+members = ["core/types", "core/storage", "core/engine", "apps/cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/hexora/hexora"
+repository = "https://github.com/Ratul-netizen/Hexora"
 authors = ["Hexora contributors"]
 
 [workspace.dependencies]
-# Internal crates
 hexora-types = { path = "core/types" }
-hexora-http = { path = "core/http" }
-hexora-tls = { path = "core/tls" }
-hexora-proxy = { path = "core/proxy" }
 hexora-storage = { path = "core/storage" }
-hexora-scanner = { path = "core/scanner" }
-hexora-fuzzer = { path = "core/fuzzer" }
-hexora-oast = { path = "core/oast" }
-hexora-workflows = { path = "core/workflows" }
-hexora-fingerprint = { path = "core/fingerprint" }
-hexora-extensions = { path = "core/extensions" }
+hexora-engine = { path = "core/engine" }
 
-# Async runtime
-tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal", "fs"] }
-tokio-util = { version = "0.7", features = ["io"] }
-futures = "0.3"
+# Async runtime. Needed at M0 only for the engine trait signatures.
+tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "sync", "time"] }
 async-trait = "0.1"
-
-# HTTP / TLS
-hyper = { version = "1.5", features = ["http1", "http2", "client", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy"] }
-http = "1.2"
-http-body-util = "0.1"
-bytes = "1.9"
-rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["tls12", "ring"] }
-rustls-pemfile = "2.2"
-rcgen = "0.13"
-webpki-roots = "0.26"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 
 # Storage
-rusqlite = { version = "0.32", features = ["bundled", "chrono", "blob"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 
+# Hashing (content-addressed blob store)
+sha2 = "0.10"
+
 # Utility
 thiserror = "2.0"
-anyhow = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.11", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive", "env"] }
-regex = "1.11"
-url = "2.5"
-flate2 = "1.0"
-brotli = "7.0"
-base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+bytes = { version = "1.9", features = ["serde"] }
+
+# Desktop shell
+tauri = { version = "2.1", features = [] }
+tauri-build = { version = "2.0", features = [] }
 
 # Testing
 tempfile = "3.14"
@@ -91,5 +56,9 @@ lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
 
-[profile.bench]
-inherits = "release"
+[profile.dev]
+# Proxy and fuzzer work is unbearable with unoptimized dependencies, and this costs
+# nothing after the first build.
+opt-level = 0
+[profile.dev.package."*"]
+opt-level = 2

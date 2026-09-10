@@ -1,0 +1,24 @@
+[package]
+name = "hexora-cli"
+description = "Headless command-line interface for the Hexora security platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hexora"
+path = "src/main.rs"
+
+[dependencies]
+hexora-types.workspace = true
+hexora-storage.workspace = true
+hexora-engine.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

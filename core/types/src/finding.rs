@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{FindingId, RequestId, ResponseId, TargetId};
 
 /// Impact severity, aligned with common reporting scales.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -140,6 +141,7 @@ pub struct Location {
 }
 
 /// Which part of an HTTP message a [`Location`] refers to.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessagePart {
@@ -155,11 +157,15 @@ pub enum MessagePart {
 /// A verified issue, ready for the findings list and the report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
+    /// Stable identifier.
     pub id: FindingId,
+    /// The target this finding belongs to.
     pub target: TargetId,
     /// Short title, e.g. "IDOR in GET /api/accounts/{id}".
     pub title: String,
+    /// Impact severity.
     pub severity: Severity,
+    /// How firmly the finding is established.
     pub confidence: Confidence,
     /// Where the issue lives.
     pub location: Option<Location>,
@@ -182,7 +188,9 @@ pub struct Finding {
     pub cvss: Option<String>,
     /// Which detector or human raised it.
     pub source: FindingSource,
+    /// When the finding was first recorded.
     pub created_at: DateTime<Utc>,
+    /// When the finding was last modified.
     pub updated_at: DateTime<Utc>,
     /// Triage state.
     pub status: FindingStatus,
@@ -225,6 +233,7 @@ impl FindingSource {
 }
 
 /// Triage state of a finding.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingStatus {

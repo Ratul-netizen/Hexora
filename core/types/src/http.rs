@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{HexoraError, ProtocolError, Result};
 
 /// The HTTP version a message was sent or received on.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpVersion {
@@ -179,6 +180,7 @@ impl<'a> IntoIterator for &'a Headers {
 }
 
 /// Where a message is going: scheme, host and port.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HttpService {
     pub host: String,

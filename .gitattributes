@@ -1,0 +1,6 @@
+# Normalise to LF in the repository. Rust, SQL and shell tooling all assume it, and
+# CRLF in a .sql or .rs file makes diffs unreadable on non-Windows machines.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
