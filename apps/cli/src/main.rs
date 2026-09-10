@@ -18,6 +18,7 @@ mod authz;
 mod findings;
 mod history;
 mod identity;
+mod object;
 mod project;
 mod proxy;
 mod repeat;
@@ -34,9 +35,9 @@ mod setup;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.4. The proxy, HTTP/1.x engine \
+                  Development status: M12.5. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
-                  testing, findings and reports all work. The scanner and fuzzer do not."
+                  testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -266,6 +267,14 @@ enum Command {
     #[command(subcommand)]
     Identity(IdentityCommand),
 
+    /// Declare which identifiers are objects, and who owns them.
+    ///
+    /// Data entry, not a test: declaring sends nothing. It is what lets
+    /// `hexora authz --construct` build the request nobody captured — one identity
+    /// asking for another's object.
+    #[command(subcommand)]
+    Object(ObjectCommand),
+
     /// Show and change what this engagement is authorized to touch.
     ///
     /// Scope is not cosmetic: automated components refuse to send traffic to hosts
@@ -320,6 +329,20 @@ enum Command {
         /// cannot be cited, and the traffic behind it is already saved.
         #[arg(long)]
         no_save: bool,
+
+        /// Also build cross-identity requests from the objects declared in the
+        /// project.
+        ///
+        /// A replay asks "can this identity reach this URL?". Substituting an
+        /// identifier somebody else owns asks "can it reach *their* object?", which
+        /// is the question a captured request usually cannot answer. Declare who owns
+        /// what with `hexora object add` first.
+        #[arg(long)]
+        construct: bool,
+
+        /// The most constructed requests one run may send.
+        #[arg(long, value_name = "N", default_value_t = 12, requires = "construct")]
+        max_attempts: usize,
     },
 
     /// Read and triage the findings recorded in a project.
@@ -462,6 +485,46 @@ enum IdentityCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ObjectCommand {
+    /// Declare an object identifier and who owns it.
+    Add {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The identifier, exactly as it appears in a request.
+        value: String,
+
+        /// The identity that owns it, by label or id.
+        #[arg(long, value_name = "IDENTITY")]
+        owner: String,
+
+        /// What kind of object it is, e.g. `invoice`.
+        #[arg(long, default_value = "object")]
+        name: String,
+
+        /// A captured request the value appears in.
+        ///
+        /// Given one, Hexora finds the value and records where it actually sat, so
+        /// nobody has to count path segments. Without one the declaration records the
+        /// value alone, and a run substitutes it wherever the sender's own object is.
+        #[arg(long, value_name = "ID")]
+        in_request: Option<String>,
+    },
+    /// List the objects declared in a project.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Remove a declaration by id.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// The declaration's id.
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ScopeCommand {
     /// Print the project's scope.
     List {
@@ -560,6 +623,22 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         Command::Identity(IdentityCommand::Remove { path, who }) => {
             identity::remove(path, who, cli.json)
         }
+        Command::Object(ObjectCommand::Add {
+            path,
+            value,
+            owner,
+            name,
+            in_request,
+        }) => object::add(object::AddArgs {
+            project: path,
+            value,
+            owner,
+            name,
+            in_request: in_request.as_deref(),
+            json: cli.json,
+        }),
+        Command::Object(ObjectCommand::List { path }) => object::list(path, cli.json),
+        Command::Object(ObjectCommand::Remove { path, id }) => object::remove(path, id, cli.json),
         Command::Scope(ScopeCommand::List { path }) => scope::list(path, cli.json),
         Command::Scope(ScopeCommand::Add {
             path,
@@ -578,6 +657,8 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             yes,
             insecure,
             no_save,
+            construct,
+            max_attempts,
         } => authz::run(authz::AuthzArgs {
             project: path,
             id,
@@ -588,6 +669,8 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             yes: *yes,
             insecure: *insecure,
             no_save: *no_save,
+            construct: *construct,
+            max_attempts: *max_attempts,
             json: cli.json,
         }),
         Command::Findings {
@@ -777,14 +860,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.4",
+            "milestone": "M12.5",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.4 (the desktop workflow)");
+        println!("  milestone:               M12.5 (constructed attempts)");
     }
 }
 
@@ -830,20 +913,32 @@ mod tests {
 
     #[test]
     fn help_does_not_advertise_unimplemented_features() {
-        let help = Cli::command().render_long_help().to_string().to_lowercase();
+        // The command list, not the prose. Grepping the rendered help for "  scan"
+        // also matched the development-status paragraph the moment a line wrapped
+        // before the word "scanner" — a guard that fails on its own description is
+        // one somebody eventually deletes.
+        let commands: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|command| command.get_name().to_lowercase())
+            .collect();
+
         for absent in ["scan", "fuzz", "intruder"] {
             assert!(
-                !help.contains(&format!("  {absent}")),
-                "help offers a {absent} command that does not exist"
+                !commands.iter().any(|name| name.starts_with(absent)),
+                "help offers a {absent} command that does not exist: {commands:?}"
             );
         }
+        assert!(
+            commands.iter().any(|name| name == "authz"),
+            "and it must still list the ones that do: {commands:?}"
+        );
     }
 
     #[test]
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.4"),
+            help.contains("M12.5"),
             "users must not mistake this for a finished tool"
         );
     }

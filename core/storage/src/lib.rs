@@ -42,8 +42,9 @@
 //!
 //! Implemented and tested: connection management, pragmas, migrations, the blob store,
 //! [`TrafficStore`] (captured exchanges, both body forms, keyset-paginated history),
-//! [`IdentityStore`], [`Settings`] (the project scope) and [`FindingStore`] — findings
-//! with their evidence, filtered and paged, refusing anything
+//! [`IdentityStore`], [`ObjectStore`] (declared object identifiers and the requests
+//! constructed from them), [`Settings`] (the project scope) and [`FindingStore`] —
+//! findings with their evidence, filtered and paged, refusing anything
 //! [`Finding::validate`](hexora_types::finding::Finding::validate) rejects.
 //!
 //! Still unimplemented: the session and search traits in [`repository`]. Nothing here
@@ -57,6 +58,7 @@ pub mod error;
 pub mod findings;
 pub mod identities;
 pub mod migrations;
+pub mod objects;
 pub mod repository;
 pub mod settings;
 pub mod traffic;
@@ -76,6 +78,7 @@ pub use crate::blob::{BlobRef, BlobStore, FsBlobStore, MemoryBlobStore};
 pub use crate::error::{Result, StorageError};
 pub use crate::findings::{FindingFilter, FindingStore, Recorded};
 pub use crate::identities::IdentityStore;
+pub use crate::objects::{ConstructedAttempt, ObjectStore};
 pub use crate::settings::Settings;
 pub use crate::traffic::{CapturedExchange, StoredRequest, StoredTraffic, TrafficStore};
 
@@ -249,6 +252,11 @@ impl Project {
     /// The identities this project tests as.
     pub fn identities(&self) -> IdentityStore {
         IdentityStore::new(self.metadata.clone())
+    }
+
+    /// The object identifiers this project has declared, and who owns them.
+    pub fn objects(&self) -> ObjectStore {
+        ObjectStore::new(self.metadata.clone())
     }
 
     /// The findings recorded against this project.

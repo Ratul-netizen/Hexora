@@ -141,7 +141,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 3;
+export const EXPECTED_RPC_CONTRACT_VERSION = 4;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -297,6 +297,31 @@ export interface CellView {
   note: string | null;
 }
 
+/** One constructed cross-identity attempt. */
+export interface AttemptView {
+  sender: string;
+  object_name: string;
+  object_value: string;
+  owner: string;
+  /** What was replaced, and where — the whole substitution in one line. */
+  substitution: string;
+  location: string;
+  original_value: string;
+  request: string | null;
+  control: string | null;
+  status: number | null;
+  similarity: number;
+  outcome: string;
+  verdict: string;
+  violation: boolean;
+  disclosed_object_ids: string[];
+  echoed: boolean;
+  own_object_ids: string[];
+  reproduced: boolean;
+  error: string | null;
+  note: string | null;
+}
+
 export interface MatrixView {
   base: string;
   method: string;
@@ -304,6 +329,8 @@ export interface MatrixView {
   owner: CellView;
   cells: CellView[];
   appears_public: boolean;
+  constructed: AttemptView[];
+  not_constructed: string[];
   findings: FindingRow[];
   saved: number;
   updated: number;
@@ -325,10 +352,47 @@ export interface AuthzRequest {
   insecure: boolean;
   confirm_state_changing: boolean;
   save: boolean;
+  construct: boolean;
+  max_attempts: number;
 }
 
 export const runAuthz = (request: AuthzRequest): Promise<MatrixView> =>
   invoke<MatrixView>("authz_run", { request });
+
+/* ------------------------------------------------------------------ *
+ * Declared objects
+ * ------------------------------------------------------------------ */
+
+/**
+ * An identifier a tester declared, and who owns it.
+ *
+ * Declaring is data entry: it sends nothing. It is also not evidence of ownership —
+ * it is the tester's assertion, which is why a constructed attempt that cannot show
+ * the returned object really is the declared one produces a lead rather than a
+ * finding.
+ */
+export interface ObjectView {
+  id: string;
+  name: string;
+  value: string;
+  owner: string;
+  owner_id: string;
+  location: string;
+  source_request: string | null;
+}
+
+export const listObjects = (): Promise<ObjectView[]> =>
+  invoke<ObjectView[]>("objects_list");
+
+export const addObject = (declaration: {
+  value: string;
+  owner: string;
+  name: string;
+  inRequest: string | null;
+}): Promise<ObjectView[]> => invoke<ObjectView[]>("object_add", declaration);
+
+export const removeObject = (id: string): Promise<ObjectView[]> =>
+  invoke<ObjectView[]>("object_remove", { id });
 
 /* ------------------------------------------------------------------ *
  * Findings

@@ -36,6 +36,14 @@
 //! and the identity it was sent as, so the evidence behind a finding is two request
 //! ids somebody else can open months later.
 //!
+//! ## Constructing, not only replaying
+//!
+//! A replay answers "can User B reach this URL?". It cannot answer "can User B reach
+//! **User A's** invoice?" when the only captured traffic is User B asking for their
+//! own — the request that would answer it has never existed. [`construct`] builds it,
+//! by substituting an identifier the tester has declared as somebody else's. Nothing
+//! about which value is an object, or whose it is, is guessed. See that module.
+//!
 //! ## What a run does not do
 //!
 //! It does not decide that anything is a vulnerability on its own. It produces
@@ -58,12 +66,13 @@
 
 pub mod analysis;
 pub mod compare;
+pub mod construct;
 
 use std::sync::Arc;
 
 use hexora_engine::transport::HttpTransport;
 use hexora_repeater::{Repeater, SendAs};
-use hexora_storage::{IdentityStore, TrafficStore};
+use hexora_storage::{IdentityStore, ObjectStore, TrafficStore};
 use hexora_types::error::Result;
 use hexora_types::identity::{Identity, PrivilegeLevel};
 use hexora_types::ids::{IdentityId, RequestId};
@@ -263,6 +272,12 @@ pub struct AuthzTester<T: HttpTransport> {
     repeater: Repeater<T>,
     store: Arc<TrafficStore>,
     identities: IdentityStore,
+    /// Declared objects, and the provenance of every request constructed from one.
+    ///
+    /// Held by the tester rather than passed per call: a constructed request that
+    /// reached the network and whose reason was not written down is a row nobody can
+    /// explain later, so recording it must not be something a caller can forget.
+    objects: ObjectStore,
 }
 
 impl<T: HttpTransport> std::fmt::Debug for AuthzTester<T> {
@@ -278,10 +293,12 @@ impl<T: HttpTransport> AuthzTester<T> {
     /// applying a credential, sending it and recording the result is exactly what it
     /// already does, and a second send path would be a second set of bugs.
     pub fn new(repeater: Repeater<T>, store: Arc<TrafficStore>, identities: IdentityStore) -> Self {
+        let objects = ObjectStore::new(identities.database().clone());
         Self {
             repeater,
             store,
             identities,
+            objects,
         }
     }
 

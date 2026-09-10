@@ -38,8 +38,10 @@ use hexora_types::finding::{
 };
 use hexora_types::identity::PrivilegeLevel;
 use hexora_types::ids::{FindingId, TargetId};
+use hexora_types::object::ObjectLocation;
 
-use crate::{Cell, Matrix, Verdict};
+use crate::construct::{Attempt, Construction};
+use crate::{Cell, Matrix, Outcome, Verdict};
 
 /// The longest excerpt quoted as evidence from a response body.
 ///
@@ -205,6 +207,244 @@ fn finding_for(matrix: &Matrix, cell: &Cell, target: TargetId) -> Option<Finding
     // without evidence, nothing actionable without reproduction steps.
     debug_assert!(finding.validate().is_ok(), "{:?}", finding.validate());
     Some(finding)
+}
+
+/// Builds the findings a construction run supports, most severe first.
+///
+/// Two kinds come out of it, and keeping them apart is the point:
+///
+/// * A **violation** — an identity received an object it does not own. Firm when the
+///   response carried identifiers the caller never sent, Confirmed when a second
+///   attempt reproduced it, Tentative when the only evidence is that the response
+///   quotes the identifier and looks like the caller's own document.
+/// * A **lead** — the response looked exactly like the object document and contained
+///   nothing that says whose object it is. That is worth a tester's time and is not a
+///   claim, so it comes out at [`Confidence::Tentative`] with a title that says so.
+///
+/// Anything the application refused, redirected, or answered with the caller's own
+/// data produces nothing at all. A run against a correctly built endpoint should be
+/// silent, and a tool that fills that silence with informational rows is a tool people
+/// stop reading.
+pub fn construction_findings(construction: &Construction, target: TargetId) -> Vec<Finding> {
+    let mut findings: Vec<Finding> = construction
+        .attempts
+        .iter()
+        .filter_map(|attempt| finding_for_attempt(construction, attempt, target))
+        .collect();
+
+    findings.sort_by_key(|finding| {
+        (
+            finding.severity.rank(),
+            std::cmp::Reverse(finding.confidence),
+        )
+    });
+    findings
+}
+
+fn finding_for_attempt(
+    construction: &Construction,
+    attempt: &Attempt,
+    target: TargetId,
+) -> Option<Finding> {
+    // An attempt with no stored request cannot be cited, and an uncitable finding is
+    // exactly what this crate exists not to produce.
+    let variant = attempt.request?;
+    let baseline = attempt.control?;
+
+    let disclosed = !attempt.disclosed_object_ids.is_empty();
+    let unidentified = attempt.verdict == Verdict::Inconclusive;
+    if !attempt.is_violation() && !(unidentified && attempt.outcome == Outcome::Allowed) {
+        return None;
+    }
+
+    // The verdict has already done the hard part. A violation means the response
+    // either carried identifiers the caller never sent, or quoted the one it asked
+    // for inside a document shaped like the caller's own — both are facts about the
+    // bytes, so both are Firm. A second attempt that reproduces it makes it Confirmed.
+    // Everything else that gets this far is the shape-only case, which is a lead.
+    let confidence = match (attempt.reproduced, attempt.is_violation()) {
+        (true, true) => Confidence::Confirmed,
+        (_, true) => Confidence::Firm,
+        (_, false) => Confidence::Tentative,
+    };
+
+    let severity = if attempt.is_violation() {
+        Severity::High
+    } else {
+        Severity::Medium
+    };
+
+    let title = if attempt.is_violation() {
+        format!(
+            "{} can reach {}'s {} {} in {} {}",
+            attempt.sender_label,
+            attempt.owner_label,
+            attempt.object_name,
+            attempt.object_value,
+            construction.method,
+            path_of(&construction.url),
+        )
+    } else {
+        format!(
+            "Unproven cross-identity access to {} {} in {} {}",
+            attempt.object_name,
+            attempt.object_value,
+            construction.method,
+            path_of(&construction.url),
+        )
+    };
+
+    let difference = if disclosed {
+        format!(
+            "{} asked for {}, declared as {}'s, and received a response containing {}",
+            attempt.sender_label,
+            attempt.object_value,
+            attempt.owner_label,
+            attempt.disclosed_object_ids.join(", "),
+        )
+    } else if attempt.echoed {
+        format!(
+            "{} asked for {}, declared as {}'s, and received a response {:.0}% alike \
+             the document it receives for its own object, quoting that identifier",
+            attempt.sender_label,
+            attempt.object_value,
+            attempt.owner_label,
+            attempt.similarity * 100.0,
+        )
+    } else {
+        format!(
+            "{} asked for {}, declared as {}'s, and received a response {:.0}% alike \
+             the document it receives for its own object — but nothing in it \
+             establishes whose object it is",
+            attempt.sender_label,
+            attempt.object_value,
+            attempt.owner_label,
+            attempt.similarity * 100.0,
+        )
+    };
+
+    let mut evidence = vec![Evidence::Comparison {
+        baseline,
+        variant,
+        difference: difference.clone(),
+    }];
+    if disclosed {
+        evidence.push(Evidence::Exchange {
+            request: variant,
+            response: None,
+            note: format!(
+                "the response body contains {}, declared as belonging to {} and never \
+                 sent by {}",
+                excerpt(&attempt.disclosed_object_ids),
+                attempt.owner_label,
+                attempt.sender_label,
+            ),
+        });
+    }
+
+    let description = format!(
+        "This request was not captured; it was constructed. {} was taken from the \
+         captured request and replaced with {}, which the tester declared as {}'s, and \
+         the result was sent as {}. {}",
+        attempt.original_value,
+        attempt.object_value,
+        attempt.owner_label,
+        attempt.sender_label,
+        if attempt.is_violation() {
+            "The application served it."
+        } else {
+            "What the application served cannot be attributed to either principal."
+        },
+    );
+
+    let now = Utc::now();
+    let finding = Finding {
+        id: FindingId::new(),
+        target,
+        title,
+        severity,
+        confidence,
+        location: Some(Location {
+            part: message_part(&attempt.location),
+            name: attempt.location.describe(),
+        }),
+        description,
+        impact: construction_impact(attempt, disclosed),
+        remediation: REMEDIATION.into(),
+        reproduction: construction_reproduction(construction, attempt),
+        evidence,
+        cwe: Some("CWE-639".into()),
+        owasp: Some("API1:2023 Broken Object Level Authorization".into()),
+        // Left unset deliberately; see the note on the replay path.
+        cvss: None,
+        source: FindingSource::AuthorizationTest,
+        created_at: now,
+        updated_at: now,
+        status: FindingStatus::New,
+    };
+
+    debug_assert!(finding.validate().is_ok(), "{:?}", finding.validate());
+    Some(finding)
+}
+
+fn construction_impact(attempt: &Attempt, disclosed: bool) -> String {
+    if !attempt.is_violation() {
+        return format!(
+            "Unknown, and that is the finding: {} received a document of exactly the \
+             shape it receives for its own {}, in answer to a request for somebody \
+             else's. Declaring more of {}'s objects would settle whether this is a \
+             disclosure or an empty template.",
+            attempt.sender_label, attempt.object_name, attempt.owner_label,
+        );
+    }
+
+    let mut impact = format!(
+        "Any principal that can reach this endpoint can read another principal's {} by \
+         putting its identifier in the request.",
+        attempt.object_name
+    );
+    if disclosed {
+        impact.push_str(
+            " The response carried identifiers the caller never sent and that the \
+             tester had declared as the other principal's, so this is a disclosure of \
+             that principal's data rather than only a difference in behaviour.",
+        );
+    }
+    impact
+}
+
+fn construction_reproduction(construction: &Construction, attempt: &Attempt) -> String {
+    format!(
+        "1. Send {} as {} — the unmodified request, recorded as {}.\n\
+         2. Replace {} with {} ({}), and send that as {} — recorded as {}.\n\
+         3. Compare the two responses: `hexora repeat <project> {} --diff {}`.\n\
+         The second response answers a request for an object {} does not own.",
+        construction.url,
+        attempt.sender_label,
+        attempt.control.map(|r| r.to_string()).unwrap_or_default(),
+        attempt.original_value,
+        attempt.object_value,
+        attempt.location.describe(),
+        attempt.sender_label,
+        attempt.request.map(|r| r.to_string()).unwrap_or_default(),
+        attempt.control.map(|r| r.to_string()).unwrap_or_default(),
+        attempt.request.map(|r| r.to_string()).unwrap_or_default(),
+        attempt.sender_label,
+    )
+}
+
+/// Which part of the message a substitution touched.
+fn message_part(location: &ObjectLocation) -> MessagePart {
+    match location {
+        ObjectLocation::PathSegment { .. } => MessagePart::Path,
+        ObjectLocation::Query { .. } => MessagePart::Query,
+        ObjectLocation::Header { .. } => MessagePart::Header,
+        ObjectLocation::Body { .. } => MessagePart::Body,
+        // Never reached from an attempt — a run resolves `Anywhere` to a concrete
+        // place before it sends anything — but a finding with no location at all
+        // would be worse than one that says "the path".
+        ObjectLocation::Anywhere => MessagePart::Path,
+    }
 }
 
 const REMEDIATION: &str = "Enforce the authorization check on the server for every \

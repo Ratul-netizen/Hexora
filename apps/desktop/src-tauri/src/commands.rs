@@ -21,6 +21,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use hexora_authz::construct::ConstructionPlan;
 use hexora_authz::{analysis, AuthzTester, Cell, Plan, Verdict};
 use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_http::{TcpTransport, TlsConfig};
@@ -36,6 +37,7 @@ use hexora_types::finding::{Confidence, Evidence, FindingStatus, Severity};
 use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
 use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
+use hexora_types::object::{ObjectDeclaration, ObjectLocation};
 use hexora_types::redact::Secret;
 use hexora_types::scope::{PathMatch, SchemeMatch, Scope, ScopeRule};
 use serde::{Deserialize, Serialize};
@@ -82,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.4",
+        milestone: "M12.5",
     }
 }
 
@@ -725,6 +727,104 @@ pub fn identity_remove(state: State<'_, AppState>, id: String) -> CommandResult<
 }
 
 // ---------------------------------------------------------------------------
+// Declared objects
+// ---------------------------------------------------------------------------
+
+/// A declared object identifier, as the window shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ObjectView {
+    pub id: String,
+    pub name: String,
+    pub value: String,
+    /// The owning identity's label, so the list can be read against the claim a
+    /// finding makes rather than against an id.
+    pub owner: String,
+    pub owner_id: String,
+    pub location: String,
+    pub source_request: Option<String>,
+}
+
+/// Lists the objects a project has declared.
+#[tauri::command]
+pub fn objects_list(state: State<'_, AppState>) -> CommandResult<Vec<ObjectView>> {
+    let project = open(&state)?;
+    let identities = project.identities();
+    Ok(project
+        .objects()
+        .list()
+        .map_err(fail)?
+        .into_iter()
+        .map(|declaration| object_view(&declaration, &identities))
+        .collect())
+}
+
+/// Declares an object identifier and who owns it.
+///
+/// Data entry: nothing is sent. Given a request the value appears in, the location is
+/// discovered rather than typed — a tester who has just found an identifier should
+/// not also have to count path segments.
+#[tauri::command]
+pub fn object_add(
+    state: State<'_, AppState>,
+    value: String,
+    owner: String,
+    name: String,
+    in_request: Option<String>,
+) -> CommandResult<Vec<ObjectView>> {
+    let project = open(&state)?;
+    let identities = project.identities();
+    let owner = resolve_identity(&identities, &owner)?;
+    let store = project.objects();
+
+    let declarations = match in_request.as_deref().filter(|id| !id.trim().is_empty()) {
+        Some(id) => {
+            let request_id: RequestId = id.parse().map_err(fail)?;
+            let stored = project.traffic().request(request_id).map_err(fail)?;
+            let request = rebuild(&stored);
+            let locations = hexora_authz::construct::locate(&request, &value);
+            if locations.is_empty() {
+                return Err(format!(
+                    "{value:?} does not appear in that request — not in the path, the \
+                     query, a header or the body. Credential headers are never \
+                     searched: an Authorization value is a session, not an object."
+                ));
+            }
+            locations
+                .into_iter()
+                .map(|location| {
+                    ObjectDeclaration::new(&name, &value, owner.id, location)
+                        .map(|d| d.found_in(request_id))
+                        .map_err(fail)
+                })
+                .collect::<CommandResult<Vec<_>>>()?
+        }
+        // Without a request to look in there is nowhere to discover. Recording a
+        // place it was not found would be a lie a later run would act on.
+        None => vec![
+            ObjectDeclaration::new(&name, &value, owner.id, ObjectLocation::Anywhere)
+                .map_err(fail)?,
+        ],
+    };
+
+    for declaration in &declarations {
+        store.put(declaration).map_err(fail)?;
+    }
+    objects_list(state)
+}
+
+/// Removes a declaration. Requests already constructed from it keep their record of
+/// the substitution they made.
+#[tauri::command]
+pub fn object_remove(state: State<'_, AppState>, id: String) -> CommandResult<Vec<ObjectView>> {
+    let project = open(&state)?;
+    let object_id = id.parse().map_err(fail)?;
+    if !project.objects().delete(object_id).map_err(fail)? {
+        return Err(format!("no object declaration {id}"));
+    }
+    objects_list(state)
+}
+
+// ---------------------------------------------------------------------------
 // Authorization matrix
 // ---------------------------------------------------------------------------
 
@@ -748,6 +848,33 @@ pub struct CellView {
     pub note: Option<String>,
 }
 
+/// One constructed cross-identity attempt, as the window shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct AttemptView {
+    pub sender: String,
+    pub object_name: String,
+    pub object_value: String,
+    pub owner: String,
+    /// What was replaced, and where — the whole substitution in one line.
+    pub substitution: String,
+    pub location: String,
+    pub original_value: String,
+    pub request: Option<String>,
+    /// The sender's own unmodified send, which the attempt is compared against.
+    pub control: Option<String>,
+    pub status: Option<u16>,
+    pub similarity: f32,
+    pub outcome: String,
+    pub verdict: String,
+    pub violation: bool,
+    pub disclosed_object_ids: Vec<String>,
+    pub echoed: bool,
+    pub own_object_ids: Vec<String>,
+    pub reproduced: bool,
+    pub error: Option<String>,
+    pub note: Option<String>,
+}
+
 /// A finished matrix and what it concluded.
 #[derive(Debug, Clone, Serialize)]
 pub struct MatrixView {
@@ -759,6 +886,10 @@ pub struct MatrixView {
     /// Whether an unauthenticated request received the same resource, which demotes
     /// every per-identity verdict on the endpoint.
     pub appears_public: bool,
+    /// Requests that were built rather than replayed, when the run asked for them.
+    pub constructed: Vec<AttemptView>,
+    /// Combinations that produced no constructed request, and why.
+    pub not_constructed: Vec<String>,
     /// The candidate findings the run supports, worst first.
     pub findings: Vec<FindingRow>,
     /// How many of those were written into the project, and how many were updates of
@@ -790,6 +921,10 @@ pub struct AuthzRequest {
     pub confirm_state_changing: bool,
     /// Whether to write the findings into the project.
     pub save: bool,
+    /// Whether to also build cross-identity requests from the declared objects.
+    pub construct: bool,
+    /// The most constructed requests this run may send.
+    pub max_attempts: usize,
 }
 
 /// Replays a captured request as several identities.
@@ -807,6 +942,8 @@ pub async fn authz_run(
         insecure,
         confirm_state_changing,
         save,
+        construct,
+        max_attempts,
     } = request;
     let project = open(&state)?;
     let base: RequestId = id.parse().map_err(fail)?;
@@ -857,7 +994,35 @@ pub async fn authz_run(
 
     let matrix = tester.run(&plan).await.map_err(fail)?;
     let target = store.target_of(base).map_err(fail)?;
-    let findings = analysis::findings(&matrix, target);
+    let mut findings = analysis::findings(&matrix, target);
+
+    // Constructed attempts run after the matrix and against the same base request, so
+    // a tester who only wanted the replay results already has them if this fails.
+    let construction = if construct {
+        let declarations = project.objects().list().map_err(fail)?;
+        if declarations.is_empty() {
+            return Err(
+                "no objects are declared in this project, so there is nothing \
+                        to construct a request for. Declare one first."
+                    .to_string(),
+            );
+        }
+        let senders = std::iter::once(plan.owner.clone())
+            .chain(plan.others.iter().cloned())
+            .collect();
+        let construction = tester
+            .construct(
+                &ConstructionPlan::new(base, senders, declarations)
+                    .with_limit(max_attempts)
+                    .verifying(verify),
+            )
+            .await
+            .map_err(fail)?;
+        findings.extend(analysis::construction_findings(&construction, target));
+        Some(construction)
+    } else {
+        None
+    };
 
     let mut saved = 0;
     let mut updated = 0;
@@ -878,6 +1043,14 @@ pub async fn authz_run(
         owner: cell_view(&matrix.owner),
         cells: matrix.cells.iter().map(cell_view).collect(),
         appears_public: matrix.appears_public,
+        constructed: construction
+            .as_ref()
+            .map(|c| c.attempts.iter().map(attempt_view).collect())
+            .unwrap_or_default(),
+        not_constructed: construction
+            .as_ref()
+            .map(|c| c.skipped.clone())
+            .unwrap_or_default(),
         findings: findings.iter().map(finding_row).collect(),
         saved,
         updated,
@@ -1350,6 +1523,72 @@ fn resolve_identity(store: &hexora_storage::IdentityStore, who: &str) -> Command
     store.by_label(who).map_err(fail)
 }
 
+fn object_view(
+    declaration: &ObjectDeclaration,
+    identities: &hexora_storage::IdentityStore,
+) -> ObjectView {
+    ObjectView {
+        id: declaration.id.to_string(),
+        name: declaration.name.clone(),
+        value: declaration.value.clone(),
+        owner: identities
+            .get(declaration.owner)
+            .map(|i| i.label)
+            .unwrap_or_else(|_| declaration.owner.to_string()),
+        owner_id: declaration.owner.to_string(),
+        location: declaration.location.describe(),
+        source_request: declaration.source_request.map(|r| r.to_string()),
+    }
+}
+
+/// Rebuilds a message model from a stored request, so a declared value can be looked
+/// for in the target, the headers and the body.
+fn rebuild(stored: &hexora_storage::StoredRequest) -> hexora_types::http::HttpRequest {
+    let mut request = hexora_types::http::HttpRequest::get(stored.service.clone(), &stored.path);
+    request.method = stored.method.clone();
+    request.body = bytes::Bytes::from(stored.body.clone());
+    for line in String::from_utf8_lossy(&stored.headers_raw)
+        .split("\r\n")
+        .flat_map(|l| l.split(LF))
+    {
+        if let Some((name, value)) = line.split_once(':') {
+            request
+                .headers
+                .append(hexora_types::http::Header::new(name.trim(), value.trim()));
+        }
+    }
+    request
+}
+
+/// Split on bare LF as well as CRLF: a stored block came off the wire, and the wire
+/// is not always well behaved.
+const LF: char = '\n';
+
+fn attempt_view(attempt: &hexora_authz::construct::Attempt) -> AttemptView {
+    AttemptView {
+        sender: attempt.sender_label.clone(),
+        object_name: attempt.object_name.clone(),
+        object_value: attempt.object_value.clone(),
+        owner: attempt.owner_label.clone(),
+        substitution: attempt.describe_substitution(),
+        location: attempt.location.describe(),
+        original_value: attempt.original_value.clone(),
+        request: attempt.request.map(|r| r.to_string()),
+        control: attempt.control.map(|r| r.to_string()),
+        status: attempt.status,
+        similarity: attempt.similarity,
+        outcome: attempt.outcome.as_str().to_string(),
+        verdict: verdict_word(attempt.verdict).to_string(),
+        violation: attempt.is_violation(),
+        disclosed_object_ids: attempt.disclosed_object_ids.clone(),
+        echoed: attempt.echoed,
+        own_object_ids: attempt.own_object_ids.clone(),
+        reproduced: attempt.reproduced,
+        error: attempt.error.clone(),
+        note: attempt.note.clone(),
+    }
+}
+
 fn cell_view(cell: &Cell) -> CellView {
     CellView {
         identity: cell.identity.to_string(),
@@ -1600,6 +1839,67 @@ mod tests {
         assert!(!json.contains("sk-live-not-a-real-token"), "{json}");
         assert!(json.contains("\"credential\":\"bearer\""), "{json}");
         assert!(json.contains("User B"), "{json}");
+    }
+
+    #[test]
+    fn an_attempt_view_says_what_was_substituted_and_carries_no_credential() {
+        let attempt = hexora_authz::construct::Attempt {
+            sender: hexora_types::ids::IdentityId::new(),
+            sender_label: "User B".into(),
+            declaration: hexora_types::ids::ObjectId::new(),
+            object_name: "account".into(),
+            object_value: "acct-1000".into(),
+            owner: hexora_types::ids::IdentityId::new(),
+            owner_label: "User A".into(),
+            location: ObjectLocation::PathSegment { index: 1 },
+            original_value: "acct-2000".into(),
+            request: Some(RequestId::new()),
+            control: Some(RequestId::new()),
+            status: Some(200),
+            similarity: 1.0,
+            outcome: hexora_authz::Outcome::Allowed,
+            verdict: Verdict::Violation,
+            disclosed_object_ids: vec!["alice@example.com".into()],
+            echoed: true,
+            own_object_ids: Vec::new(),
+            reproduced: true,
+            error: None,
+            note: None,
+        };
+
+        let view = attempt_view(&attempt);
+        assert!(view.violation);
+        assert_eq!(view.substitution, "acct-2000 → acct-1000 in path segment 1");
+
+        // Whatever else changes, the shape that crosses the IPC boundary has no field
+        // a credential could travel in.
+        let json = serde_json::to_value(&view).unwrap();
+        assert!(json.get("credential").is_none());
+        assert!(json.get("token").is_none());
+        for key in ["sender", "object_value", "owner", "substitution", "request"] {
+            assert!(json.get(key).is_some(), "{key} missing from {json}");
+        }
+    }
+
+    #[test]
+    fn declaring_an_object_records_where_it_was_found_rather_than_guessing() {
+        // The window offers a request to look in; the location comes from the value
+        // actually being there, which is why a declaration that points nowhere is
+        // refused rather than recorded.
+        let mut request = hexora_types::http::HttpRequest::get(
+            hexora_types::http::HttpService::new("api.example.com", 443, true),
+            "/accounts/acct-1000",
+        );
+        request.headers.set("Authorization", "Bearer acct-1000");
+
+        let found = hexora_authz::construct::locate(&request, "acct-1000");
+        assert_eq!(found, vec![ObjectLocation::PathSegment { index: 1 }]);
+        assert!(
+            !found
+                .iter()
+                .any(|l| matches!(l, ObjectLocation::Header { .. })),
+            "a credential header is never an object location"
+        );
     }
 
     #[test]

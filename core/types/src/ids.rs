@@ -128,6 +128,11 @@ define_id!(
     "idn"
 );
 define_id!(
+    /// Identifies an object identifier a tester declared, and its owner.
+    ObjectId,
+    "obj"
+);
+define_id!(
     /// Identifies an installed extension instance.
     ExtensionId,
     "ext"

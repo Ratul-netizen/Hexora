@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.4 — the whole workflow, with or without a terminal
+## Status: M12.5 — it builds the request nobody sent
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -74,12 +74,13 @@ work.
 | Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |
 | Traffic history, Repeater with diffing and branch trees | **IMPLEMENTED** |
 | Identities, project scope, authorization matrix (`hexora authz`) | **IMPLEMENTED** |
+| Declared object identifiers and constructed cross-identity attempts (`hexora object`, `authz --construct`) | **IMPLEMENTED** |
 | Findings persisted with their evidence, triage (`hexora findings`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater, scope, identities, the authorization matrix, findings and the report | **IMPLEMENTED** |
 | Reports: Markdown / HTML / JSON, every claim citing its exchange (`hexora report`) | **IMPLEMENTED** |
-| Attack chains, constructed cross-identity attempts | **PLANNED (rest of M12)** |
+| Attack chains, suggesting which values are object identifiers | **PLANNED (rest of M12)** |
 | Connection reuse | **DEFERRED (M1.4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
 

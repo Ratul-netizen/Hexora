@@ -109,6 +109,12 @@ impl IdentityStore {
         Self { db }
     }
 
+    /// The database this store reads, so a caller holding one store can open another
+    /// over the same project without threading a `Project` through every layer.
+    pub fn database(&self) -> &MetadataDb {
+        &self.db
+    }
+
     /// Inserts an identity, or replaces the one already stored under its id.
     ///
     /// **The credential is written in cleartext.** Project files are as sensitive as

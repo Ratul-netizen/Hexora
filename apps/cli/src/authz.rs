@@ -9,6 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use hexora_authz::construct::{Construction, ConstructionPlan};
 use hexora_authz::{analysis, AuthzTester, Cell, Matrix, Plan, Verdict};
 use hexora_engine::guard::ScopeGuard;
 use hexora_http::{TcpTransport, TlsConfig};
@@ -38,6 +39,10 @@ pub struct AuthzArgs<'a> {
     pub insecure: bool,
     /// Report the findings without writing them into the project.
     pub no_save: bool,
+    /// Also build cross-identity requests from the declared objects.
+    pub construct: bool,
+    /// The most constructed requests this run may send.
+    pub max_attempts: usize,
     pub json: bool,
 }
 
@@ -95,7 +100,34 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     // freshly minted id would cite a target the project has never heard of, and the
     // foreign key would refuse it — correctly.
     let target = store.target_of(base)?;
-    let findings = analysis::findings(&matrix, target);
+    let mut findings = analysis::findings(&matrix, target);
+
+    // Constructed attempts run after the matrix and against the same base request, so
+    // the replay results are on screen before anything new is sent — and so a tester
+    // who only wanted the matrix has already got it if construction fails.
+    let construction = if args.construct {
+        let declarations = project.objects().list()?;
+        if declarations.is_empty() {
+            return Err(HexoraError::invalid_input(
+                "--construct",
+                "no objects are declared in this project, so there is nothing to                  construct a request for. Declare one with `hexora object add`",
+            ));
+        }
+        let senders = std::iter::once(plan.owner.clone())
+            .chain(plan.others.iter().cloned())
+            .collect();
+        let construction = runtime.block_on(
+            tester.construct(
+                &ConstructionPlan::new(base, senders, declarations)
+                    .with_limit(args.max_attempts)
+                    .verifying(args.verify),
+            ),
+        )?;
+        findings.extend(analysis::construction_findings(&construction, target));
+        Some(construction)
+    } else {
+        None
+    };
 
     let saved = if args.no_save || findings.is_empty() {
         Vec::new()
@@ -104,11 +136,76 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     };
 
     if args.json {
-        print_json(&matrix, &findings, &saved);
+        print_json(&matrix, construction.as_ref(), &findings, &saved);
     } else {
-        print_human(&matrix, &findings, &saved, args.no_save);
+        print_human(
+            &matrix,
+            construction.as_ref(),
+            &findings,
+            &saved,
+            args.no_save,
+        );
     }
     Ok(())
+}
+
+/// Prints what was built, and what each attempt showed.
+fn print_construction(construction: &Construction) {
+    println!();
+    println!(
+        "Constructed {} cross-identity attempt(s) from {}:",
+        construction.attempts.len(),
+        construction.url
+    );
+    for attempt in &construction.attempts {
+        println!();
+        println!(
+            "  {} → {} ({}, owned by {})",
+            attempt.sender_label, attempt.object_value, attempt.object_name, attempt.owner_label
+        );
+        println!("    substituted {}", attempt.describe_substitution());
+        match attempt.status {
+            // The similarity is only meaningful next to a response that carried
+            // something: "401 denied, 100% alike its own object" reads as nonsense
+            // when the identity's own request was refused as well.
+            Some(status) if attempt.outcome == hexora_authz::Outcome::Denied => {
+                println!("    → {status} {}", attempt.outcome.as_str())
+            }
+            Some(status) => println!(
+                "    → {status} {} · {:.0}% alike its own object",
+                attempt.outcome.as_str(),
+                attempt.similarity * 100.0
+            ),
+            None => println!(
+                "    → not sent: {}",
+                attempt.error.as_deref().unwrap_or("unknown reason")
+            ),
+        }
+        if !attempt.disclosed_object_ids.is_empty() {
+            println!(
+                "    → response carried {}, which {} never sent",
+                attempt.disclosed_object_ids.join(", "),
+                attempt.sender_label
+            );
+        }
+        println!(
+            "    → {}{}",
+            attempt.verdict.as_str(),
+            if attempt.reproduced {
+                ", reproduced"
+            } else {
+                ""
+            }
+        );
+        if let Some(note) = &attempt.note {
+            println!("    {note}");
+        }
+    }
+
+    for skipped in &construction.skipped {
+        println!();
+        println!("  not constructed — {skipped}");
+    }
 }
 
 /// Writes the run's findings into the project.
@@ -140,7 +237,13 @@ fn choose(
         .collect()
 }
 
-fn print_human(matrix: &Matrix, findings: &[Finding], saved: &[Recorded], no_save: bool) {
+fn print_human(
+    matrix: &Matrix,
+    construction: Option<&Construction>,
+    findings: &[Finding],
+    saved: &[Recorded],
+    no_save: bool,
+) {
     println!("{} {}", matrix.method, matrix.url);
     println!(
         "Baseline: {} → {}",
@@ -181,6 +284,10 @@ fn print_human(matrix: &Matrix, findings: &[Finding], saved: &[Recorded], no_sav
             println!();
             println!("{}: could not be sent — {error}", cell.label);
         }
+    }
+
+    if let Some(construction) = construction {
+        print_construction(construction);
     }
 
     println!();
@@ -225,7 +332,12 @@ fn print_human(matrix: &Matrix, findings: &[Finding], saved: &[Recorded], no_sav
     println!("Read them back with `hexora findings <project>`.");
 }
 
-fn print_json(matrix: &Matrix, findings: &[Finding], saved: &[Recorded]) {
+fn print_json(
+    matrix: &Matrix,
+    construction: Option<&Construction>,
+    findings: &[Finding],
+    saved: &[Recorded],
+) {
     let cells: Vec<_> = matrix
         .cells
         .iter()
@@ -259,6 +371,36 @@ fn print_json(matrix: &Matrix, findings: &[Finding], saved: &[Recorded]) {
         },
         "appears_public": matrix.appears_public,
         "cells": cells,
+        "constructed": construction.map(|construction| {
+            serde_json::json!({
+                "limit": construction.limit,
+                "skipped": construction.skipped,
+                "attempts": construction
+                    .attempts
+                    .iter()
+                    .map(|attempt| serde_json::json!({
+                        "sender": attempt.sender_label,
+                        "object": attempt.object_value,
+                        "object_name": attempt.object_name,
+                        "owner": attempt.owner_label,
+                        "location": attempt.location.describe(),
+                        "original_value": attempt.original_value,
+                        "request": attempt.request.map(|r| r.to_string()),
+                        "control": attempt.control.map(|r| r.to_string()),
+                        "status": attempt.status,
+                        "similarity": attempt.similarity,
+                        "outcome": attempt.outcome.as_str(),
+                        "verdict": attempt.verdict.as_str(),
+                        "disclosed_object_ids": attempt.disclosed_object_ids,
+                        "echoed": attempt.echoed,
+                        "own_object_ids": attempt.own_object_ids,
+                        "reproduced": attempt.reproduced,
+                        "note": attempt.note,
+                        "error": attempt.error,
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        }),
         "findings": findings,
         "recorded": saved
             .iter()

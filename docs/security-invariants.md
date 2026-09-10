@@ -234,6 +234,52 @@ write.
 
 ---
 
+## 9. A generated request says where it came from, and changes only what it claims to
+
+**Rule.** Every request Hexora builds rather than replays records its provenance —
+the request it was built from, the identity it was sent as, and the exact
+substitution that produced it — and the substitution touches nothing else in the
+message. The captured request it was built from is never modified.
+
+**Why.** A constructed request is one nobody sent by hand. Six weeks later, "why did
+Hexora ask for `invoice-1001` as User B?" has to be answerable from the project, or
+the traffic in it is noise a reader cannot distinguish from the tester's own work.
+And a substitution that quietly changed a second thing — a path that walked
+somewhere else, a header that was rewritten, a body that was re-serialized — would
+produce an answer about a request nobody chose while reading as though it were about
+the one on screen.
+
+**Enforced by.** `core/authz/src/construct.rs`, and the `constructed_attempts` table.
+The substitution is applied to a clone; a declared value is refused if it contains a
+control character, exceeds `MAX_IDENTIFIER_LEN`, or would leave its slot once
+encoded; a credential header is never an object location, in either direction.
+
+**Corollaries.**
+
+- **Ownership is declared, never inferred.** A value that looks like an identifier is
+  not one. Nothing constructs a request on the strength of a guess about what a
+  string means.
+- **A 200 is not a finding.** An identity receiving a response to a request for
+  somebody else's object has shown nothing until the response can be tied to that
+  object — see invariant 6. Where it cannot be, the result is a lead.
+- **Constructed traffic is automated traffic.** It goes through the same
+  `ScopeGuard`, on the same transport, as everything else — invariant 1 applies
+  unchanged, and there is no flag that bypasses it.
+- **A run is bounded.** `ConstructionPlan::limit` caps how many requests one run may
+  send, and `HARD_MAX_ATTEMPTS` caps the cap. An authorization test that turns into a
+  crawl is one that gets an engagement stopped.
+
+**Tests.** `core/authz/src/construct.rs` —
+`an_out_of_scope_target_is_refused_before_anything_is_sent`,
+`the_provenance_of_every_constructed_request_is_recorded`,
+`substituting_never_touches_anything_but_the_slot`,
+`a_path_traversal_payload_stays_inside_its_segment`,
+`a_credential_header_is_never_an_object_location`,
+`the_attempt_limit_is_enforced_and_reported`,
+`a_200_with_nothing_identifiable_in_it_is_not_a_finding`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

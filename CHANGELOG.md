@@ -456,12 +456,64 @@ since a typed URL is a human decision.
   trying Hexora for the first time, from a broken application. `STATUS.md` and
   `docs/development.md` now say to run the dev server alongside it, and why.
 
+### Added — M12.5, constructed cross-identity attempts
+
+A replay answers "can User B reach this URL?". It cannot answer "can User B reach
+**User A's** invoice?" when the only captured traffic is User B asking for their own —
+the request that would answer it has never existed. Hexora now builds it.
+
+- **`hexora object add`** declares which identifiers are objects and who owns them
+  (`core/types/src/object.rs`, `core/storage/src/objects.rs`). Given a request the
+  value appears in, the location is *discovered* — path segment, query parameter,
+  header or byte offset in the body — so nobody counts path segments by hand.
+  Declaring sends nothing: it is data entry, and running the test is a separate act.
+- **`hexora authz --construct`** substitutes a declared identifier into the object
+  slot of a captured request and sends the result as each identity. `--max-attempts`
+  bounds it; the default is 12 and the ceiling is 100.
+- **Nothing is guessed.** Both facts that make this possible — which value is an
+  object, and whose it is — are declared by a human. A value that merely looks like an
+  identifier is not one, and a tool that guessed would send traffic at an endpoint on
+  the strength of that guess and then reason about the answer as if it meant
+  something.
+- **A 200 is not a finding.** Each sender first sends the request unmodified, so there
+  is a control: the document that identity gets when the application is working. A
+  response is then a violation when it carries the owner's *other* identifiers (the
+  caller never sent them), or quotes the substituted one inside a document shaped like
+  the caller's own. A response carrying the caller's own data clears the endpoint. An
+  error page quoting its input, a document of the right shape with nothing
+  identifiable in it, and a bare 200 all produce a lead or nothing at all.
+- **The substitution is recorded, not inferred.** `constructed_attempts` holds the
+  source request, the declaration, the sender, the location, and both values. The
+  generated request also carries `parent_id`, so `hexora repeat --tree` and the
+  desktop history answer "where did this come from?" without knowing anything about
+  declarations.
+- **The substitution touches nothing else.** Path segments are encoded so an
+  identifier containing `/` or `..` cannot walk somewhere else; query values are
+  encoded so one cannot add a parameter; an existing `%XX` escape is preserved rather
+  than double-encoded; the body is edited byte-for-byte with no JSON round trip, so
+  duplicate keys and whitespace survive; `Content-Length` is left exactly as the
+  tester had it. Credential headers are never an object location, in either direction.
+- **Declared values are validated where they enter and where they are used.** Control
+  characters are refused — a value carrying CRLF spliced into a header is request
+  splitting inside a tool the tester trusts — as is anything over 512 bytes.
+- **Matching is byte-exact.** No Unicode normalization and no decoding to a fixed
+  point: two spellings of the same character are two different identifiers to an
+  application, and which one it accepts may be the finding.
+- **The desktop window** declares objects, runs constructed attempts, and shows each
+  substitution next to what it returned. IPC contract 4.
+- **Security invariant 9** — a generated request says where it came from, and changes
+  only what it claims to.
+
+Exercised end to end against a local application with a deliberate IDOR *and* a
+correctly built version of the same endpoint: the first produced a High/Confirmed
+finding naming the substitution, the second produced nothing at all.
+
 ### Not implemented
 
-There are no attack chains. The matrix replays a request verbatim — substituting one identity's object identifiers into
-another's request, to *construct* cross-identity attempts rather than only replaying
-captured ones, is not implemented. Credentials are stored in cleartext; encryption
-under a project passphrase is still only in the threat model.
+There are no attack chains. Object identifiers must be declared by hand: Hexora does
+not suggest which values in a request look like one, and until it does, constructed
+testing is only as broad as what a tester has told it. Credentials are stored in
+cleartext; encryption under a project passphrase is still only in the threat model.
 
 The macOS and Linux trust-store paths are written, unit-tested and type-checked but
 have not been run on those platforms; only Windows has been verified end to end. The

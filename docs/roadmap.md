@@ -197,13 +197,13 @@ Full CLI parity with the desktop client on the same engine, plus a server mode t
 run on a VPS with a thin local client — Caido's architecture, and better than Burp's
 desktop-only model. CI/CD integration.
 
-**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.4 IMPLEMENTED)
+**M12 — Authorization testing and attack chains** · PARTIAL (M12.1–M12.5 IMPLEMENTED)
 
 **This is the flagship feature.** Neither competitor does it properly, and it automates
 the highest-value manual work in most engagements.
 
-Done (M12.1–M12.4), in `core/authz`, `core/storage`, `core/report`, the `authz` /
-`findings` / `report` commands and the desktop window:
+Done (M12.1–M12.5), in `core/authz`, `core/storage`, `core/report`, the `authz` /
+`findings` / `report` / `object` commands and the desktop window:
 
 - Multiple identities, persisted in the project with their privilege ordering and the
   object identifiers they own (`core/storage/src/identities.rs`).
@@ -235,11 +235,18 @@ Done (M12.1–M12.4), in `core/authz`, `core/storage`, `core/report`, the `authz
   commands, contract version 3, and an identity view with no field that could carry a
   credential.
 
+- Constructed cross-identity attempts (M12.5): object identifiers and their owners
+  are declared by a human (`hexora object add`), and a run substitutes one into the
+  object slot of a captured request and sends it as each identity. A control send per
+  identity is what makes "the response looks like the object document" mean anything;
+  a 200 with nothing identifiable in it is a lead, not a finding. Every generated
+  request records the substitution that produced it — security invariant 9.
+
 Not done:
 
-- **Constructed attempts.** The matrix replays a request as written; substituting one
-  identity's object identifiers into another's request is the other half of this
-  milestone.
+- **Suggesting which values are object identifiers.** Today every one is declared by
+  hand. A suggestion system would help, and it has to stay a suggestion: the moment a
+  guess about what a string means becomes an assumption, the evidence model is gone.
 - **Attack chains** that retain evidence at every step.
 
 ---

@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.4 (the desktop workflow)
+- **Last updated:** M12.5 (constructed cross-identity attempts)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -31,27 +31,32 @@ milestone.
 | **M12.2** — The findings store | A run's conclusions are written into the project, with their evidence. Storage refuses a claim that fails its own validation. Re-running updates the claim rather than duplicating it, keeps triage decisions, and lets confidence fall when the evidence no longer supports it. `hexora findings` lists, shows and triages |
 | **M12.3** — The report | `hexora report` turns a project into a document: Markdown for a ticket, a self-contained HTML page for a client, JSON for whatever reads it next. Every claim quotes the request and the response behind it; a citation the project cannot resolve is printed as missing rather than as a dead id. Scope, identities and coverage come first, so a clean run reads as a record of what was tested rather than a clean bill of health. Leads stay in their own section, dismissed findings are counted rather than hidden, and credentials are redacted with the length of what was removed |
 | **M12.4** — The desktop workflow | The window does the whole loop without a terminal: declare scope and identities, pick a captured request, replay it as everybody, read the matrix, open any cell's exchange, work the findings list, follow a citation back into history, triage, and render the report. Same commands, same crates, same engine as the CLI. The interface has now been *looked at* on Windows, which is how two layout defects and a wrong run instruction in the docs were found |
+| **M12.5** — Constructed attempts | The matrix replays; this builds. Declare which identifiers are objects and who owns them, and a run substitutes one into the object slot of a captured request and sends it as each identity — the request nobody captured, which is the only way to ask "can User B reach *User A's* invoice?" from User B's own traffic. Nothing is guessed, a 200 is not a finding, every generated request records the substitution behind it, and the substitution touches nothing else in the message |
 
 ## Next
 
-**The core workflow no longer needs a terminal.** Capture, replay as everybody, file
-what it proves, triage it, and hand over a document — all of it in the window, on the
-same crates the CLI calls.
+**Hexora now builds the request nobody sent.** Capture one identity's traffic, declare
+whose objects are whose, and it will ask the question the capture cannot: not "can
+this identity reach this URL?" but "can it reach *that* object?" — with the
+substitution recorded next to the answer.
 
 What that leaves open, in the order it matters:
 
-- **Construct the attempts, do not only replay them.** The matrix replays a request as
-  written. Substituting one identity's object identifiers into another's request —
-  "can User B reach *User A's* invoice id?" — is the other half of M12 and finds bugs
-  a replay cannot. This is now the most valuable thing left in the authorization line.
 - **The two pieces of traffic debt** below: `encoded_body` is written as NULL, and a
-  raw request edited to bare-LF is re-serialized with CRLF. Both are small, both are
-  the kind of thing a security tool should not get wrong, and both are easier to fix
-  now than after a scanner is generating traffic through the same paths.
+  request edited to bare-LF is re-serialized with CRLF. Both are small, both are the
+  kind of thing a security tool should not get wrong, and both are much cheaper to fix
+  now than once a scanner is generating traffic through the same paths. A deliberate
+  `RequestSource::{Structured, Raw}` split is the shape the second one wants.
+- **Suggesting object identifiers.** Every one is declared by hand today. Hexora could
+  point at the values in a request that *look* like identifiers — and that has to stay
+  a suggestion a human accepts, because the moment a guess about what a string means
+  becomes an assumption, the evidence model that makes this tool worth using is gone.
 - **M13 — the scanner.** Still the thing buyers compare on, and still the thing most
   likely to waste a tester's day if it is wrong. Build the verification framework
-  first and let the detectors produce hypotheses into it: the evidence ladder and the
-  findings store already exist to be that framework.
+  first and let detectors produce hypotheses into it: the evidence ladder, the findings
+  store and the report already exist to be that framework. Passive checks over
+  captured traffic first — no new requests, easy to benchmark, immediately useful.
+- **Attack chains** that retain evidence at every step.
 
 **Two honesty notes carried forward:**
 
@@ -59,19 +64,23 @@ The macOS and Linux trust paths in `core/proxy/src/trust.rs` are written, unit-t
 and type-checked, but have never been *run* on those platforms. Only Windows is
 verified end to end.
 
-The authorization matrix and the report have been exercised end to end against a local
-application with a deliberate IDOR — from the CLI and, at M12.4, from the window: the
-run found the bug at High, correctly cleared a per-identity endpoint that scores 1.00
-on similarity, correctly reduced a public page to a single finding, updated the
-existing claim rather than duplicating it, and let its confidence fall from Confirmed
-to Firm because that run did not reproduce it. Neither has been run against a large
-real application, where response noise is worse than any fixture.
+The authorization work — replay, construction and the report — has been exercised end
+to end against a local application with a deliberate IDOR *and* a correctly built
+version of the same endpoint, from the CLI and from the window. The broken one produced
+a High finding naming the exact substitution; the correct one produced nothing at all,
+which is the result that matters more. None of it has been run against a large real
+application, where response noise is worse than any fixture.
 
-**The window has now been inspected**, on Windows, at 1454x882 — every tab, with a
-real project open. That closes the "nobody has looked at it" caveat that stood from M5
-to M12.3. It has not been seen on macOS or Linux, at a small window size, or on a
-high-density display, and the HTML report is still shown as text rather than rendered,
-so nobody has viewed *that* in a browser either.
+**What constructed testing does not prove.** Ownership is the tester's assertion, not
+something Hexora establishes: `hexora object add` records a claim. A constructed
+attempt that cannot tie what came back to the declared owner produces a lead, never a
+finding — and Hexora does not suggest which values are identifiers, so the coverage is
+exactly as broad as what somebody has declared. Do not read "no findings" from a
+construction run as "no IDOR".
+
+**The window has been inspected** on Windows, every tab, with a real project open. It
+has not been seen on macOS or Linux, at a small window size, or on a high-density
+display, and the HTML report is still shown as text rather than rendered.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -178,6 +187,12 @@ cargo run -p hexora-cli -- identity add ./scratch/demo "User B"     --kind beare
 cargo run -p hexora-cli -- identity list ./scratch/demo
 cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User A"
 cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User A" --verify
+
+# Ask the question a capture cannot: not "can this identity reach this URL?" but
+# "can it reach *that* object?". Declaring sends nothing; --construct does.
+cargo run -p hexora-cli -- object add ./scratch/demo acct-1000 --owner "User A" --name account --in-request req_01a08b…
+cargo run -p hexora-cli -- object list ./scratch/demo
+cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User B" --construct --verify
 
 # What a run concluded, and what to do about it.
 cargo run -p hexora-cli -- findings ./scratch/demo
@@ -290,3 +305,16 @@ Written down because they were learned the hard way and are easy to undo by acci
   has no field that could carry one, so a token cannot reach a devtools console, a
   screenshot or a crash report by accident. The typed IPC edge is where that is
   enforced, and there is a test asserting it.
+- **The object slot belongs to the request, not to the sender.** Resolving it per
+  identity meant the anonymous control — which owns nothing — fell back to a location
+  recorded on a *different* endpoint and substituted into the literal path word
+  `accounts`. One request, at a URL nobody chose, answering nothing. It is resolved
+  once from the request now, and a location recorded elsewhere is never reused.
+- **A control response is what makes a similarity score mean anything.** "The reply
+  looks like the object document" is empty without the document that identity gets for
+  its *own* object, so every sender sends one unmodified request first. The first
+  version of the test fixture returned the same error page to everybody, which scored
+  1.00 against itself and turned an error page into a violation.
+- **Include the target in its own candidate list.** Excluding it looked tidy and made
+  "this request already asks for that object" — where the honest answer is *the matrix
+  covers this* — come out as "there is nowhere to put it".

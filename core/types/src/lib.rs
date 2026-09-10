@@ -15,6 +15,7 @@
 //! | [`http`]     | The raw-preserving HTTP message model |
 //! | [`scope`]    | Authorization boundary for automated traffic |
 //! | [`identity`] | Testing principals for authorization work |
+//! | [`object`]   | Declared object identifiers, and where they sit in a request |
 //! | [`finding`]  | The evidence-driven vulnerability model |
 //! | [`limits`]   | Resource bounds against hostile targets |
 //! | [`redact`]   | Secret wrapping and redaction policy |
@@ -39,6 +40,7 @@ pub mod http;
 pub mod identity;
 pub mod ids;
 pub mod limits;
+pub mod object;
 pub mod redact;
 pub mod scope;
 pub mod tls;
@@ -48,6 +50,7 @@ pub use finding::{Confidence, Evidence, Finding, Hypothesis, Severity};
 pub use http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
 pub use identity::{Credential, Identity, PrivilegeLevel};
 pub use limits::Limits;
+pub use object::{ObjectDeclaration, ObjectLocation};
 pub use redact::{RedactionPolicy, Secret};
 pub use scope::{Scope, ScopeRule};
 pub use tls::{CertificateSummary, TlsInfo, Verification};
@@ -60,4 +63,4 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped whenever the UI/engine boundary changes shape. The desktop client refuses
 /// to talk to an engine reporting a different major value rather than misinterpreting
 /// messages.
-pub const RPC_CONTRACT_VERSION: u32 = 3;
+pub const RPC_CONTRACT_VERSION: u32 = 4;

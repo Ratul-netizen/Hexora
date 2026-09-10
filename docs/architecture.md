@@ -31,7 +31,7 @@ influenced part of the process.
 | `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
 | `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
-| `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings | **Implemented** (M12.1) |
+| `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5) | **Implemented** (M12.1, M12.5) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic | **Implemented** (M12.3) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** (layout unreviewed) |
@@ -59,7 +59,9 @@ to. That is why `hexora report` can be trusted to change nothing.
 `core/authz` deliberately owns no send path of its own: it drives `core/repeater`,
 because loading a stored request, applying a credential, sending it and recording the
 result is exactly what the repeater already does, and a second implementation would be
-a second set of bugs.
+a second set of bugs. That holds for *constructed* requests too — a request Hexora
+built rather than replayed goes out the same way, so security invariant 1 needs no
+second enforcement point.
 
 ### Why so few crates
 

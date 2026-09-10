@@ -37,6 +37,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "wire_bodies",
         sql: include_str!("../migrations/0002_wire_bodies.sql"),
     },
+    Migration {
+        version: 3,
+        name: "object_declarations",
+        sql: include_str!("../migrations/0003_object_declarations.sql"),
+    },
 ];
 
 /// The schema version this build expects.

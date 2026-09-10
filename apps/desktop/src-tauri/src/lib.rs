@@ -15,7 +15,8 @@
 //! Commands are added only as the milestone that implements them lands, so the
 //! surface never advertises capability that does not exist. At M12.4 it covers
 //! projects, the proxy, history, the repeater, the certificate authority, project
-//! scope, identities, the authorization matrix, findings and the report — everything
+//! scope, identities, declared objects, the authorization matrix with
+//! constructed attempts, findings and the report — everything
 //! the CLI can do, calling exactly the same crates.
 //!
 //! # State lives in Rust
@@ -64,6 +65,9 @@ pub fn run() {
             commands::identities_list,
             commands::identity_add,
             commands::identity_remove,
+            commands::objects_list,
+            commands::object_add,
+            commands::object_remove,
             commands::authz_run,
             commands::findings_list,
             commands::findings_detail,
