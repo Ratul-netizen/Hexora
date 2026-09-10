@@ -16,6 +16,7 @@
 //! | [`scope`]    | Authorization boundary for automated traffic |
 //! | [`identity`] | Testing principals for authorization work |
 //! | [`object`]   | Declared object identifiers, and where they sit in a request |
+//! | [`candidate`]| Values that *might* be identifiers, suggested and never assumed |
 //! | [`raw`]      | Requests sent as bytes rather than as a model |
 //! | [`finding`]  | The evidence-driven vulnerability model |
 //! | [`limits`]   | Resource bounds against hostile targets |
@@ -35,6 +36,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod candidate;
 pub mod error;
 pub mod finding;
 pub mod http;
@@ -47,6 +49,7 @@ pub mod redact;
 pub mod scope;
 pub mod tls;
 
+pub use candidate::{CandidateStatus, IdentifierCandidate, Signal, SignalKind, Strength};
 pub use error::{HexoraError, Result};
 pub use finding::{Confidence, Evidence, Finding, Hypothesis, Severity};
 pub use http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};

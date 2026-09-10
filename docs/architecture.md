@@ -31,11 +31,11 @@ influenced part of the process.
 | `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
 | `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
-| `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5) | **Implemented** (M12.1, M12.5) |
+| `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic | **Implemented** (M12.3) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
-| `apps/desktop` | Tauri shell | **Implemented** (layout unreviewed) |
-| `frontend` | React + TypeScript UI | **Implemented** (layout unreviewed) |
+| `apps/desktop` | Tauri shell | **Implemented** |
+| `frontend` | React + TypeScript UI | **Implemented** |
 
 The dependency graph is a DAG with `core/types` at the bottom and nothing depending on
 the applications:
@@ -55,6 +55,16 @@ types ← storage ← http ← proxy
 `core/report` depends on `core/storage` and `core/types` and on nothing else: a report
 is a read of a finished project, so it has no reason to reach the network and no way
 to. That is why `hexora report` can be trusted to change nothing.
+
+The suggestion analyzer inside `core/authz` goes the other way: it takes no transport
+*at all*. Its whole signature is stores in, suggestions out —
+
+```rust
+fn analyze(&TrafficStore, &ObjectStore, &CandidateStore) -> Result<Suggestions>
+```
+
+— so "reading the project cannot send a request" is not a rule anybody has to follow.
+There is nothing in the function to send with.
 
 `core/authz` deliberately owns no send path of its own: it drives `core/repeater`,
 because loading a stored request, applying a credential, sending it and recording the
@@ -152,6 +162,30 @@ someone added a sixth subsystem — and someone always does.
 
 The same reasoning applies to `GrantSet` (no `add` method, so no code path can widen a
 permission) and `ToolGate` (the AI proposes; it does not call).
+
+## Three statements about a string, and why only one is machine-made
+
+The authorization work turns on a distinction that is easy to collapse and expensive
+to get wrong:
+
+| | Says | Made by |
+| - | ---- | ------- |
+| `IdentifierCandidate` | "this value varies where an object id would" | analysis of captured traffic |
+| `ObjectDeclaration` | "this value is an invoice" | a person |
+| its `owner` | "…belonging to User A" | a person |
+
+The lifecycle is one-directional and every arrow is a human pressing something:
+
+```text
+captured traffic → candidate → (accept) → still a candidate
+                                   │  declare, with an owner
+                                   ▼
+                            ObjectDeclaration → constructed attempt → evidence → finding
+```
+
+Accepting a candidate records that it is an identifier and nothing else. Nothing
+promotes a candidate to a declaration automatically, and `IdentifierCandidate` has no
+field an owner could be written into. See invariant 10.
 
 ## Storage
 

@@ -863,3 +863,68 @@ tr.violation td {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* ---------------------------------------------------------------- *
+ * Identifier suggestions
+ * ---------------------------------------------------------------- */
+
+.identifiers {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* The value is the one column a tester reads character by character — a truncated
+ * identifier is one you cannot retype into a request — so it is the column allowed
+ * to wrap while the rest of the row stays on one line. */
+.identifiers td.wrap {
+  white-space: normal;
+  word-break: break-all;
+  max-width: 320px;
+}
+
+.identifiers td.actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.identifiers tr.reasons > td {
+  white-space: normal;
+  background: var(--bg-raised);
+  padding: 10px 14px;
+}
+
+/* `table { width: 100% }` is right for the row lists and wrong here: it stretched
+ * the three columns across the window, leaving each weight an inch from the reason
+ * it belonged to. A reasons table should be as wide as its reasons. */
+.signals {
+  width: auto;
+}
+
+.signals td {
+  border: 0;
+  padding: 2px 12px 2px 0;
+}
+
+.signals tr {
+  cursor: default;
+}
+
+.signals tr:hover {
+  background: none;
+}
+
+/* Right-aligned and monospaced so the signs line up: a column of weights a reader
+ * can add up themselves is the difference between a score and an argument. */
+.signals td.weight {
+  font-family: var(--mono);
+  text-align: right;
+  width: 48px;
+}
+
+.signals td.weight.against {
+  color: var(--text-muted);
+}

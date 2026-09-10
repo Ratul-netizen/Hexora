@@ -17,6 +17,7 @@ use hexora_storage::{migrations, Project};
 mod authz;
 mod findings;
 mod history;
+mod identifiers;
 mod identity;
 mod object;
 mod project;
@@ -35,7 +36,7 @@ mod setup;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.6. The proxy, HTTP/1.x engine \
+                  Development status: M12.7. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -276,6 +277,38 @@ enum Command {
     /// Manage the identities a project tests as.
     #[command(subcommand)]
     Identity(IdentityCommand),
+
+    /// Review values that might be object identifiers.
+    ///
+    /// Analysis reads captured traffic and offers the values that *vary* where an
+    /// identifier would. It sends nothing and declares nothing: accepting a
+    /// suggestion says it is an identifier, never whose it is.
+    Identifiers {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Read the project's traffic and offer what it finds.
+        #[arg(long)]
+        analyze: bool,
+
+        /// Only suggestions in this state.
+        #[arg(long, value_name = "STATE")]
+        status: Option<String>,
+
+        /// Show one suggestion in full, with the reasons it was offered.
+        #[arg(long, value_name = "ID")]
+        show: Option<String>,
+
+        /// Record that this value is an identifier.
+        ///
+        /// Says nothing about who owns it. Declaring that is `hexora object add`.
+        #[arg(long, value_name = "ID", conflicts_with_all = ["show", "reject"])]
+        accept: Option<String>,
+
+        /// Record that this value is not an identifier, so it is not offered again.
+        #[arg(long, value_name = "ID", conflicts_with = "show")]
+        reject: Option<String>,
+    },
 
     /// Declare which identifiers are objects, and who owns them.
     ///
@@ -633,6 +666,34 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         Command::Identity(IdentityCommand::Remove { path, who }) => {
             identity::remove(path, who, cli.json)
         }
+        Command::Identifiers {
+            path,
+            analyze,
+            status,
+            show,
+            accept,
+            reject,
+        } => match (show, accept, reject) {
+            (Some(id), _, _) => identifiers::show(path, id, cli.json),
+            (_, Some(id), _) => identifiers::decide(
+                path,
+                id,
+                hexora_types::candidate::CandidateStatus::Accepted,
+                cli.json,
+            ),
+            (_, _, Some(id)) => identifiers::decide(
+                path,
+                id,
+                hexora_types::candidate::CandidateStatus::Rejected,
+                cli.json,
+            ),
+            (None, None, None) => identifiers::list(identifiers::ListArgs {
+                project: path,
+                status: status.as_deref(),
+                analyze: *analyze,
+                json: cli.json,
+            }),
+        },
         Command::Object(ObjectCommand::Add {
             path,
             value,
@@ -872,14 +933,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.6",
+            "milestone": "M12.7",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.6 (wire-exact traffic)");
+        println!("  milestone:               M12.7 (identifier suggestions)");
     }
 }
 
@@ -950,7 +1011,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.6"),
+            help.contains("M12.7"),
             "users must not mistake this for a finished tool"
         );
     }

@@ -47,6 +47,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "request_mode",
         sql: include_str!("../migrations/0004_request_mode.sql"),
     },
+    Migration {
+        version: 5,
+        name: "identifier_candidates",
+        sql: include_str!("../migrations/0005_identifier_candidates.sql"),
+    },
 ];
 
 /// The schema version this build expects.

@@ -44,6 +44,14 @@
 //! by substituting an identifier the tester has declared as somebody else's. Nothing
 //! about which value is an object, or whose it is, is guessed. See that module.
 //!
+//! ## Suggesting, never assuming
+//!
+//! Declaring every object identifier by hand is what keeps constructed testing
+//! narrower than it should be. [`suggest`] reads captured traffic and offers the
+//! values that *vary where an identifier would* — and stops there. A suggestion is not
+//! an object and an object is not an ownership claim; both remaining steps are a
+//! person's. Nothing in that module sends a request or writes a finding.
+//!
 //! ## What a run does not do
 //!
 //! It does not decide that anything is a vulnerability on its own. It produces
@@ -67,6 +75,7 @@
 pub mod analysis;
 pub mod compare;
 pub mod construct;
+pub mod suggest;
 
 use std::sync::Arc;
 

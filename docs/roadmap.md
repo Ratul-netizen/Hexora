@@ -61,7 +61,7 @@ built through M12 exist to make the second one possible, and the scanner is buil
 top of them rather than beside them.
 
 ```text
-M12.7  Identifier suggestions        candidates a human confirms, never assertions
+M12.7  Identifier suggestions        candidates a human confirms, never assertions  ✔
 M12.8  Engagement snapshots          what changed since the last assessment
 M13.1  Verification framework        detector ≠ finding, enforced by the type system
 M13.2  Passive scanner               observations over captured traffic, no new requests
@@ -295,7 +295,7 @@ forms, and requests can be sent byte for byte through
 model. Raw mode is HTTP/1.x requests only; HTTP/2 and HTTP/3 want wire models of their
 own.
 
-**M12.7 — Identifier suggestions** · PLANNED
+**M12.7 — Identifier suggestions** · DONE
 
 Every object identifier is declared by hand today, so constructed testing is exactly as
 broad as what somebody typed. Hexora can do better than that without pretending to know
@@ -321,6 +321,16 @@ never becomes an ownership assertion on its own.** A suggestion carries where th
 was seen and how often; ownership is still something a person asserts, because the tool
 cannot know whose account `1000` is and a guess dressed as a fact would poison every
 finding downstream. Nothing is sent as a result of a suggestion.
+
+Built as described, with three decisions worth recording:
+
+- **Suggestions persist.** An engagement is captured on Monday and worked on Friday.
+  Re-analysis refreshes a proposed candidate and leaves a decided one alone.
+- **The score is explainable.** Each candidate carries the signed signals behind it
+  rather than a bare confidence, so a tester can answer "why did Hexora suggest this?"
+  — and, when it is wrong, see *which* reason was wrong.
+- **`IdentifierCandidate` has no owner field**, and neither does its table. Security
+  invariant 10 records this, with the tests that hold it.
 
 **M12.8 — Engagement snapshots** · PLANNED
 

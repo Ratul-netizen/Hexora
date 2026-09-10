@@ -1510,6 +1510,7 @@ dependencies = [
  "hexora-repeater",
  "hexora-storage",
  "hexora-types",
+ "proptest",
  "serde",
  "serde_json",
  "tempfile",

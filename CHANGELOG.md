@@ -508,6 +508,84 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M12.7, persisted identifier suggestions
+
+Every object identifier was declared by hand, so constructed authorization testing was
+exactly as broad as what somebody typed. Hexora now reads a project's own traffic and
+*offers* the values that behave like object identifiers — and stops there, because the
+gap between "this looks like an id" and "this id belongs to User A" is the gap the
+whole evidence model stands on.
+
+**A suggestion is a third thing, kept apart from the two that already existed.**
+
+```text
+IdentifierCandidate   "acct-1000 varies where an object id would, in 6 requests"
+        │  a human decides
+        ▼
+ObjectDeclaration     "acct-1000 is an account"
+        │  a human decides
+        ▼
+ownership             "…belonging to User A"
+```
+
+`IdentifierCandidate` has no owner field and `identifier_candidates` has no owner
+column — not as a convention but as an absence, so there is nowhere for an inferred
+owner to be written. Accepting a suggestion records that it is an identifier and
+creates no declaration. New security invariant 10 states this, with the tests that
+enforce it.
+
+**Suggestions are persisted, because an engagement is not one sitting.** Traffic is
+captured on Monday and worked on Friday. Migration 5 adds the candidates and their
+observations; re-analysis refreshes a proposed candidate's signals in place and leaves
+a decided one alone, the same way re-running a test keeps triage.
+
+**The score is an argument, not a number.** A confidence of `0.87` cannot be
+disagreed with. Each candidate carries the signed signals behind it, so `hexora
+identifiers --show` and the window print the reasoning and its total:
+
+```text
+ +12  varies in place            2 different values seen in this place
+  +8  resource-like path         follows /accounts/ in the path
+  +5  appears in response        came back in 3 responses
+ +25  total
+```
+
+Signals that argue *against* carry negative weights and are printed with their sign: a
+common paging name (`?page=`, `?offset=`), a very short value, a plain word in a path.
+
+**Evidence, not appearance.** A value is offered because it *varies where an identifier
+would*, against a path that is holding still — never because it looks numeric. So
+`/api/v2/accounts/1000` never suggests `v2`, and `/status` against `/profile` suggests
+neither, because a path shape with nothing constant in it is an endpoint varying rather
+than an identifier. `?page=2` varies in a resource-like path and is argued down by
+name.
+
+**Observed bytes are preserved exactly.** `1000`, `"1000"` and `%31%30%30%30` are three
+candidates. Normalising them would let a tester replay a spelling the application never
+received. Where a value sits is part of what it is, so the same value in a path segment
+and in a query parameter is two rows — and each row names the endpoint shape it was
+seen in (`path segment 1 of /accounts/{}`), because an index alone does not tell two
+rows apart.
+
+**It cannot send.** `suggest::analyze(&TrafficStore, &ObjectStore, &CandidateStore)`
+takes no transport at all, mutates no captured request or response, and creates no
+finding. Reading a project is safe at any point in an engagement, including after the
+client has gone home.
+
+- `hexora identifiers <project> [--analyze] [--status <s>] [--show <id>] [--accept
+  <id>] [--reject <id>] [--json]`.
+- An **Identifiers** tab in the desktop window: the suggestions, their reasons on
+  demand, and explicit Accept / Reject. It says in three places that accepting names no
+  owner, because that is the sentence the milestone turns on.
+- Candidates whose source traffic has since been deleted are still listed, with how
+  many of their observations are still in the project.
+
+Verified end to end against the existing IDOR demo: seven captured exchanges produced
+four suggestions, all four the account ids and none of the endpoint names; the
+suggestions survived reopening the project in a separate process; accepting one in the
+window declared no object and named no identity; and the M12.5 constructed-attempt
+behaviour is unchanged.
+
 ### Added — M12.6, wire-exact traffic and raw request mode
 
 Two pieces of debt, both about the same thing: a security tool must not quietly change

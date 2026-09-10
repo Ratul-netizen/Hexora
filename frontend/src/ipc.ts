@@ -411,6 +411,51 @@ export const removeObject = (id: string): Promise<ObjectView[]> =>
   invoke<ObjectView[]>("object_remove", { id });
 
 /* ------------------------------------------------------------------ *
+ * Identifier suggestions
+ * ------------------------------------------------------------------ */
+
+/** One reason a value was suggested, and what it counted for. */
+export interface SignalView {
+  kind: string;
+  weight: number;
+  detail: string;
+}
+
+/**
+ * A value that *might* be an object identifier.
+ *
+ * Note what is not here: an owner. A suggestion is Hexora saying "this looks like
+ * an identifier"; who it belongs to is an assertion only a tester can make, and it
+ * is made by declaring an {@link ObjectView}. Accepting a suggestion does not
+ * declare anything.
+ */
+export interface CandidateView {
+  id: string;
+  value: string;
+  location: string;
+  status: string;
+  score: number;
+  strength: string;
+  occurrences: number;
+  live_observations: number;
+  signals: SignalView[];
+  source_request: string | null;
+}
+
+export const listCandidates = (): Promise<CandidateView[]> =>
+  invoke<CandidateView[]>("candidates_list");
+
+/** Reads the project's own traffic. Sends nothing, changes nothing captured. */
+export const analyzeCandidates = (): Promise<CandidateView[]> =>
+  invoke<CandidateView[]>("candidates_analyze");
+
+export const decideCandidate = (
+  id: string,
+  status: "accepted" | "rejected",
+): Promise<CandidateView[]> =>
+  invoke<CandidateView[]>("candidate_decide", { id, status });
+
+/* ------------------------------------------------------------------ *
  * Findings
  * ------------------------------------------------------------------ */
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthzView } from "./views/AuthzView";
 import { FindingsView } from "./views/FindingsView";
 import { HistoryView } from "./views/HistoryView";
+import { IdentifiersView } from "./views/IdentifiersView";
 import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
 import { SetupView } from "./views/SetupView";
@@ -24,13 +25,21 @@ type Boot =
   | { status: "incompatible"; info: EngineInfo }
   | { status: "error"; message: string };
 
-type Tab = "setup" | "history" | "repeater" | "authz" | "findings" | "report";
+type Tab =
+  | "setup"
+  | "history"
+  | "repeater"
+  | "identifiers"
+  | "authz"
+  | "findings"
+  | "report";
 
 /** The tab strip, in the order the work happens in. */
 const TABS: { id: Tab; label: string }[] = [
   { id: "setup", label: "Setup" },
   { id: "history", label: "History" },
   { id: "repeater", label: "Repeater" },
+  { id: "identifiers", label: "Identifiers" },
   { id: "authz", label: "Authorization" },
   { id: "findings", label: "Findings" },
   { id: "report", label: "Report" },
@@ -158,6 +167,9 @@ export default function App() {
             requestId={repeating}
             onCaptured={() => setCaptureCount((n) => n + 1)}
           />
+        )}
+        {tab === "identifiers" && (
+          <IdentifiersView hasProject={project !== null} />
         )}
         {tab === "authz" && (
           <AuthzView

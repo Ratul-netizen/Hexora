@@ -54,6 +54,7 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod blob;
+pub mod candidates;
 pub mod error;
 pub mod findings;
 pub mod identities;
@@ -75,6 +76,7 @@ use rusqlite::Connection;
 pub use rusqlite;
 
 pub use crate::blob::{BlobRef, BlobStore, FsBlobStore, MemoryBlobStore};
+pub use crate::candidates::{CandidateFilter, CandidateStore, Suggested};
 pub use crate::error::{Result, StorageError};
 pub use crate::findings::{FindingFilter, FindingStore, Recorded};
 pub use crate::identities::IdentityStore;
@@ -257,6 +259,11 @@ impl Project {
     /// The object identifiers this project has declared, and who owns them.
     pub fn objects(&self) -> ObjectStore {
         ObjectStore::new(self.metadata.clone())
+    }
+
+    /// Values that might be identifiers, suggested and awaiting a human.
+    pub fn candidates(&self) -> CandidateStore {
+        CandidateStore::new(self.metadata.clone())
     }
 
     /// The findings recorded against this project.

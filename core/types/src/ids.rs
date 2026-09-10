@@ -133,6 +133,11 @@ define_id!(
     "obj"
 );
 define_id!(
+    /// Identifies a suggested object identifier, before anybody has agreed it is one.
+    CandidateId,
+    "cnd"
+);
+define_id!(
     /// Identifies an installed extension instance.
     ExtensionId,
     "ext"

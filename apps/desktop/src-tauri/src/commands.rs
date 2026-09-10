@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.6",
+        milestone: "M12.7",
     }
 }
 
@@ -841,6 +841,111 @@ pub fn object_add(
         store.put(declaration).map_err(fail)?;
     }
     objects_list(state)
+}
+
+// ---------------------------------------------------------------------------
+// Identifier suggestions
+// ---------------------------------------------------------------------------
+
+/// One reason a value was suggested, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct SignalView {
+    pub kind: String,
+    pub weight: i32,
+    pub detail: String,
+}
+
+/// A suggested identifier, as the window shows it.
+///
+/// There is deliberately no `owner` field, and there is no command that would fill
+/// one in. Ownership belongs to [`ObjectView`], which a human produces by declaring
+/// it — a suggestion that could carry an owner would be an assertion nobody made.
+#[derive(Debug, Clone, Serialize)]
+pub struct CandidateView {
+    pub id: String,
+    pub value: String,
+    pub location: String,
+    pub status: String,
+    pub score: i32,
+    pub strength: String,
+    pub occurrences: u32,
+    pub live_observations: u32,
+    pub signals: Vec<SignalView>,
+    pub source_request: Option<String>,
+}
+
+fn candidate_view(candidate: &hexora_types::candidate::IdentifierCandidate) -> CandidateView {
+    CandidateView {
+        id: candidate.id.to_string(),
+        value: candidate.value.clone(),
+        location: candidate.descriptor.clone(),
+        status: candidate.status.as_str().to_string(),
+        score: candidate.score,
+        strength: candidate.strength().as_str().to_string(),
+        occurrences: candidate.occurrences,
+        live_observations: candidate.live_observations,
+        signals: candidate
+            .signals
+            .iter()
+            .map(|signal| SignalView {
+                kind: signal.kind.as_str().to_string(),
+                weight: signal.weight,
+                detail: signal.detail.clone(),
+            })
+            .collect(),
+        source_request: candidate.source_request.map(|id| id.to_string()),
+    }
+}
+
+/// Lists the suggestions a project holds, strongest first.
+#[tauri::command]
+pub fn candidates_list(state: State<'_, AppState>) -> CommandResult<Vec<CandidateView>> {
+    let project = open(&state)?;
+    Ok(project
+        .candidates()
+        .list(&hexora_storage::CandidateFilter::default())
+        .map_err(fail)?
+        .iter()
+        .map(candidate_view)
+        .collect())
+}
+
+/// Reads captured traffic and offers what it finds.
+///
+/// Sends nothing, changes no stored request or response, and creates no finding. It
+/// is a read of the project against itself, which is why the button is safe to press
+/// at any point in an engagement.
+#[tauri::command]
+pub fn candidates_analyze(state: State<'_, AppState>) -> CommandResult<Vec<CandidateView>> {
+    let project = open(&state)?;
+    hexora_authz::suggest::analyze(
+        &project.traffic(),
+        &project.objects(),
+        &project.candidates(),
+    )
+    .map_err(fail)?;
+    candidates_list(state)
+}
+
+/// Records a human's decision about a suggestion.
+///
+/// Accepting means "this is an identifier". It does not create an
+/// [`ObjectDeclaration`], because that would need an owner nobody has named.
+#[tauri::command]
+pub fn candidate_decide(
+    state: State<'_, AppState>,
+    id: String,
+    status: String,
+) -> CommandResult<Vec<CandidateView>> {
+    let project = open(&state)?;
+    let candidate_id: hexora_types::ids::CandidateId = id.parse().map_err(fail)?;
+    let status = hexora_types::candidate::CandidateStatus::parse(&status)
+        .ok_or_else(|| format!("{status:?} is not a status a suggestion can be in"))?;
+    project
+        .candidates()
+        .set_status(candidate_id, status)
+        .map_err(fail)?;
+    candidates_list(state)
 }
 
 /// Removes a declaration. Requests already constructed from it keep their record of

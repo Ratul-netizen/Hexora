@@ -297,6 +297,56 @@ encoded; a credential header is never an object location, in either direction.
 
 ---
 
+## 10. Identifier suggestions never establish ownership
+
+Hexora reads captured traffic and offers values that *might* be object identifiers.
+It never decides that they are, and it never decides whose they are. Three statements
+are kept strictly apart, and only the first is machine-made:
+
+```text
+IdentifierCandidate   "acct-1000 varies where an object id would, in 6 requests"
+        │  a human decides
+        ▼
+ObjectDeclaration     "acct-1000 is an account"
+        │  a human decides
+        ▼
+ownership             "…belonging to User A"
+```
+
+The reason is that nothing in the bytes distinguishes them. `/api/users/1000` might be
+a user id, an account id, a tenant id, a page number or a schema version, and a tool
+that guessed would put a fabricated premise underneath every finding built on top of
+it — including the constructed authorization tests of invariant 9, whose entire claim
+is *this object belongs to somebody else*.
+
+**What this means in the code.**
+
+- `IdentifierCandidate` has **no owner field**, and the `identifier_candidates` table
+  has no owner column. This is not a convention: there is nowhere to put one.
+- Accepting a candidate sets a status. It does not create an `ObjectDeclaration`, and
+  no code path anywhere turns a candidate into one automatically.
+- The analyzer is a read. It sends no request, mutates no captured request or
+  response, and creates no finding — so it takes no `HttpTransport` at all, which is
+  why it cannot reach a network even by mistake.
+- Suggestions are *evidence-shaped*, not scored by appearance: a value is offered
+  because it varies where an identifier would, against a path that is holding still.
+  A number that never varies is not offered; a word that varies where an endpoint
+  varies is not offered either.
+- Observed bytes are preserved exactly. `1000`, `"1000"` and `%31%30%30%30` are three
+  candidates, because normalising them would let a tester replay a spelling the
+  application never received.
+
+**Tests.** `core/types/src/candidate.rs` —
+`a_candidate_carries_no_owner_field_at_all`; `core/authz/src/suggest.rs` —
+`no_amount_of_traffic_produces_an_ownership_claim`,
+`three_spellings_of_the_same_number_are_three_different_candidates`,
+`a_path_segment_is_offered_exactly_as_it_was_observed`,
+`top_level_endpoint_names_are_not_suggested_as_identifiers`,
+`a_number_that_never_varies_is_not_suggested`,
+`a_value_already_declared_as_an_object_is_the_strongest_signal`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

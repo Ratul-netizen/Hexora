@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.6 (wire-exact traffic and raw request mode)
+- **Last updated:** M12.7 (persisted identifier suggestions)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -33,8 +33,16 @@ milestone.
 | **M12.4** — The desktop workflow | The window does the whole loop without a terminal: declare scope and identities, pick a captured request, replay it as everybody, read the matrix, open any cell's exchange, work the findings list, follow a citation back into history, triage, and render the report. Same commands, same crates, same engine as the CLI. The interface has now been *looked at* on Windows, which is how two layout defects and a wrong run instruction in the docs were found |
 | **M12.5** — Constructed attempts | The matrix replays; this builds. Declare which identifiers are objects and who owns them, and a run substitutes one into the object slot of a captured request and sends it as each identity — the request nobody captured, which is the only way to ask "can User B reach *User A's* invoice?" from User B's own traffic. Nothing is guessed, a 200 is not a finding, every generated request records the substitution behind it, and the substitution touches nothing else in the message |
 | **M12.6** — Wire-exact traffic | Response bodies are kept in both forms — the bytes that arrived and the bytes they decode to — so `--wire` returns the gzip stream and `--body` the JSON inside it. Requests can be sent byte for byte: `RequestSource::{Structured, Raw}`, a `--raw` flag and a mode switch in the window. Bare LF stays bare LF, casing and duplicates survive, a wrong `Content-Length` is sent wrong. Raw mode still goes through the same scope guard, and Hexora no longer claims byte-preservation it does not have |
+| **M12.7** — Identifier suggestions | Hexora reads a project's own traffic and offers the values that behave like object identifiers. It stops there: a candidate has no owner field, accepting one declares nothing, and the analyzer takes no transport so it cannot send. A value is offered because it *varies where an identifier would* against a path that is holding still — not because it looks numeric — so `v2` is never suggested and `/status` against `/profile` suggests neither. Each suggestion carries the signed signals behind it rather than a confidence number, so "why did it suggest this?" has an answer you can disagree with. Suggestions persist across sessions; a decision survives re-analysis. `hexora identifiers` and an Identifiers tab in the window |
 
 ## Next
+
+**Every object identifier no longer has to be typed by somebody.** M12.5 could build
+the request nobody captured, but only from identifiers a human had already declared,
+which made constructed testing exactly as broad as somebody's patience. M12.7 lets
+Hexora point at the candidates — and go no further, because the distance between
+*IdentifierCandidate*, *ObjectDefinition* and *ownership* is the distance between a
+tool whose findings can be trusted and one whose findings rest on a guess.
 
 **The request layer no longer changes anything it was not asked to.** A response is
 kept as it arrived *and* as it decodes; a request can be sent exactly as written. That
@@ -47,7 +55,6 @@ making every automated result explainable, reproducible and safe.* Full detail i
 [`docs/roadmap.md`](docs/roadmap.md).
 
 ```text
-M12.7  Identifier suggestions        candidates a human confirms, never assertions
 M12.8  Engagement snapshots          what changed since the last assessment
 M13.1  Verification framework        detector ≠ finding, enforced by the type system
 M13.2  Passive scanner               observations over captured traffic, no new requests
@@ -58,14 +65,8 @@ M13.6  Auth/session verification     the identity model, applied differentially
 M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 ```
 
-The two immediately next, in more detail:
+The one immediately next, in more detail:
 
-- **M12.7 — identifier suggestions.** Every object identifier is declared by hand
-  today, so constructed testing is exactly as broad as what somebody typed. Hexora can
-  point at values in captured traffic that *look* like identifiers, with where they
-  were seen and how often — and a candidate never becomes an ownership assertion on its
-  own. The moment a guess about what a string means becomes an assumption, the evidence
-  model that makes this tool worth using is gone.
 - **M12.8 — engagement snapshots.** A consultant tests, the client fixes, the
   consultant re-tests, and the question on the second visit is *what changed*. Scope,
   identities, traffic, declared objects, findings and detector versions, captured as a
