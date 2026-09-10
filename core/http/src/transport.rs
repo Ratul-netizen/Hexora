@@ -24,10 +24,11 @@ use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
 use hexora_types::error::{HexoraError, NetworkError, Result, TimeoutPhase};
 use hexora_types::http::{HttpRequest, HttpResponse};
 use hexora_types::limits::Limits;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::parse::{find_head_end, parse_response_head, BodyFraming, Quirk, ResponseHead};
+use crate::tls::TlsConfig;
 use crate::write::serialize_request;
 
 /// Reads from the socket in chunks of this size.
@@ -38,15 +39,27 @@ const READ_CHUNK: usize = 16 * 1024;
 /// Opens a fresh connection per request. Connection reuse is M1.4; doing it now would
 /// mean building a pool before there is a parser proven to find message boundaries
 /// correctly, and a pool that mis-frames one response corrupts the next.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TcpTransport {
-    _private: (),
+    tls: TlsConfig,
 }
 
 impl TcpTransport {
-    /// Creates a transport.
+    /// A transport that verifies TLS against the platform trust store.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            tls: TlsConfig::verified(),
+        }
+    }
+
+    /// A transport with explicit TLS settings.
+    ///
+    /// Settings live on the transport rather than on each request because a tester
+    /// works against one estate at a time: relaxing verification is a decision about
+    /// *this engagement*, and building a second transport is how you say the next one
+    /// is different. It is never a process-wide toggle.
+    pub fn with_tls(tls: TlsConfig) -> Self {
+        Self { tls }
     }
 }
 
@@ -61,21 +74,24 @@ struct RawExchange {
 #[async_trait]
 impl HttpTransport for TcpTransport {
     async fn send(&self, request: HttpRequest, options: SendOptions) -> Result<Exchange> {
-        if request.service.secure {
-            return Err(HexoraError::NotImplemented(
-                "TLS transport (M1.2); this build can only send plaintext HTTP",
-            ));
-        }
-
         let started = Instant::now();
         let limits = &options.limits;
-
-        let mut stream = connect(&request.service.host, request.service.port, limits).await?;
-
         let wire = serialize_request(&request);
-        write_all(&mut stream, &wire, limits).await?;
 
-        let raw = read_response(&mut stream, &request.method, limits).await?;
+        let tcp = connect(&request.service.host, request.service.port, limits).await?;
+
+        let (raw, tls) = if request.service.secure {
+            let (mut stream, tls) =
+                crate::tls::handshake(tcp, &request.service.host, &self.tls, limits).await?;
+            write_all(&mut stream, &wire, limits).await?;
+            let raw = read_response(&mut stream, &request.method, limits).await?;
+            (raw, Some(tls))
+        } else {
+            let mut stream = tcp;
+            write_all(&mut stream, &wire, limits).await?;
+            let raw = read_response(&mut stream, &request.method, limits).await?;
+            (raw, None)
+        };
 
         let response = HttpResponse {
             status: raw.head.status,
@@ -106,6 +122,7 @@ impl HttpTransport for TcpTransport {
             request,
             response,
             duration: started.elapsed(),
+            tls,
         })
     }
 }
@@ -149,7 +166,11 @@ fn classify_connect_error(e: std::io::Error, peer: &str) -> HexoraError {
     })
 }
 
-async fn write_all(stream: &mut TcpStream, bytes: &[u8], limits: &Limits) -> Result<()> {
+async fn write_all<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    bytes: &[u8],
+    limits: &Limits,
+) -> Result<()> {
     tokio::time::timeout(limits.total_timeout, stream.write_all(bytes))
         .await
         .map_err(|_| {
@@ -162,8 +183,8 @@ async fn write_all(stream: &mut TcpStream, bytes: &[u8], limits: &Limits) -> Res
     Ok(())
 }
 
-async fn read_response(
-    stream: &mut TcpStream,
+async fn read_response<S: AsyncRead + Unpin>(
+    stream: &mut S,
     request_method: &str,
     limits: &Limits,
 ) -> Result<RawExchange> {
@@ -209,8 +230,8 @@ async fn read_response(
 
 /// Reads until the head terminator, returning the head and any body bytes that
 /// arrived in the same read.
-async fn read_head(
-    stream: &mut TcpStream,
+async fn read_head<S: AsyncRead + Unpin>(
+    stream: &mut S,
     request_method: &str,
     limits: &Limits,
 ) -> Result<(ResponseHead, BytesMut)> {
@@ -251,8 +272,8 @@ async fn read_head(
     }
 }
 
-async fn read_exactly(
-    stream: &mut TcpStream,
+async fn read_exactly<S: AsyncRead + Unpin>(
+    stream: &mut S,
     buf: &mut BytesMut,
     wanted: usize,
     limits: &Limits,
@@ -284,8 +305,8 @@ async fn read_exactly(
 }
 
 /// Reads until EOF. Returns whether the body was cut short by a limit.
-async fn read_until_close(
-    stream: &mut TcpStream,
+async fn read_until_close<S: AsyncRead + Unpin>(
+    stream: &mut S,
     buf: &mut BytesMut,
     limits: &Limits,
 ) -> Result<bool> {
@@ -311,7 +332,7 @@ async fn read_until_close(
     }
 }
 
-async fn read_more(stream: &mut TcpStream, buf: &mut BytesMut) -> Result<usize> {
+async fn read_more<S: AsyncRead + Unpin>(stream: &mut S, buf: &mut BytesMut) -> Result<usize> {
     let before = buf.len();
     buf.resize(before + READ_CHUNK, 0);
     let read = stream.read(&mut buf[before..]).await.map_err(|e| {
@@ -610,15 +631,162 @@ mod tests {
         assert!(err.to_string().contains("M1.5"), "{err}");
     }
 
+    // ------------------------------------------------------------------- TLS
+
+    /// Serves one HTTPS connection with a throwaway self-signed certificate.
+    ///
+    /// Local rather than hitting a real site: a test suite that needs the internet
+    /// fails for reasons that have nothing to do with the code.
+    async fn serve_tls(response: &'static [u8], dns_name: &str) -> u16 {
+        use tokio_rustls::TlsAcceptor;
+
+        let issued = rcgen::generate_simple_self_signed(vec![dns_name.to_string()]).unwrap();
+        let cert = rustls::pki_types::CertificateDer::from(issued.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(issued.key_pair.serialize_der().into());
+
+        let mut config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .unwrap();
+        // ALPN is a negotiation, so the server has to offer it too. Without this the
+        // client's preference simply goes unanswered and `alpn` comes back as None.
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let acceptor = TlsAcceptor::from(std::sync::Arc::new(config));
+
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            if let Ok(mut tls) = acceptor.accept(socket).await {
+                let mut scratch = vec![0u8; 4096];
+                let _ = tls.read(&mut scratch).await;
+                let _ = tls.write_all(response).await;
+                let _ = tls.shutdown().await;
+            }
+        });
+        port
+    }
+
+    fn https_request(port: u16) -> HttpRequest {
+        HttpRequest::get(HttpService::new("localhost", port, true), "/")
+    }
+
     #[tokio::test]
-    async fn https_is_refused_until_the_tls_milestone() {
-        let request = HttpRequest::get(HttpService::new("example.com", 443, true), "/");
+    async fn a_tls_request_completes_and_records_the_handshake() {
+        let port = serve_tls(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecure",
+            "localhost",
+        )
+        .await;
+
+        // Self-signed, so verification must be relaxed — exactly the staging case.
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
+        let exchange = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(exchange.response.status, 200);
+        assert_eq!(exchange.response.body.as_ref(), b"secure");
+
+        let tls = exchange
+            .tls
+            .expect("an https exchange records its handshake");
+        assert!(tls.protocol.starts_with("TLSv1"), "{}", tls.protocol);
+        assert!(!tls.cipher_suite.is_empty());
+        assert_eq!(
+            tls.alpn.as_deref(),
+            Some("http/1.1"),
+            "ALPN must be negotiated"
+        );
+        assert!(
+            !tls.peer_authenticated(),
+            "accept-any does not authenticate"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_peer_certificate_is_captured_for_evidence() {
+        let port = serve_tls(b"HTTP/1.1 204 No Content\r\n\r\n", "localhost").await;
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
+        let exchange = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+
+        let tls = exchange.tls.unwrap();
+        let leaf = tls.peer_certificates.first().expect("a leaf certificate");
+        assert!(leaf.self_signed, "{leaf:?}");
+        assert!(
+            leaf.subject_alt_names
+                .iter()
+                .any(|n| n.contains("localhost")),
+            "{leaf:?}"
+        );
+        assert!(
+            tls.observations().iter().any(|o| o.contains("self-signed")),
+            "a self-signed peer is worth telling the tester about"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_untrusted_certificate_is_refused_when_verification_is_on() {
+        let port = serve_tls(
+            b"HTTP/1.1 200 OK\r\n\r\nContent-Length: 0\r\n\r\n\r\n\r\n",
+            "localhost",
+        )
+        .await;
+
+        // Default transport verifies against the platform store, which will not
+        // contain a certificate generated moments ago.
         let err = TcpTransport::new()
-            .send(request, SendOptions::interactive(Origin::Repeater))
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
             .await
             .unwrap_err();
-        assert_eq!(err.code(), "not_implemented");
-        assert!(err.to_string().contains("M1.2"), "{err}");
+
+        assert_eq!(err.code(), "network", "{err}");
+        assert!(err.to_string().to_lowercase().contains("tls"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn plaintext_exchanges_record_no_tls() {
+        let (port, _server) =
+            serve(b"HTTP/1.1 200 OK\r\n\r\nContent-Length: 0\r\n\r\n\r\n\r\n").await;
+        let exchange = send(port, "/").await.unwrap();
+        assert!(exchange.tls.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_invalid_sni_name_is_rejected_before_connecting() {
+        let mut settings = crate::tls::TlsConfig::accept_any();
+        settings.sni_override = Some("not a valid dns name!".to_string());
+
+        // Port 9 discards; the SNI check must fail before any handshake matters.
+        let request = HttpRequest::get(HttpService::new("127.0.0.1", 9, true), "/");
+        let mut options = SendOptions::interactive(Origin::Repeater);
+        options.limits.connect_timeout = Duration::from_millis(300);
+
+        let err = TcpTransport::with_tls(settings)
+            .send(request, options)
+            .await
+            .unwrap_err();
+        // Either the connection never happened or the name was rejected; both are
+        // failures before any data could be exchanged.
+        assert!(matches!(err.code(), "invalid_input" | "network"), "{err}");
     }
 
     // ----------------------------------------------------------- smuggling eye

@@ -18,6 +18,7 @@
 //! | [`finding`]  | The evidence-driven vulnerability model |
 //! | [`limits`]   | Resource bounds against hostile targets |
 //! | [`redact`]   | Secret wrapping and redaction policy |
+//! | [`tls`]      | What a TLS handshake produced, as observations |
 //!
 //! ## Design rules
 //!
@@ -40,6 +41,7 @@ pub mod ids;
 pub mod limits;
 pub mod redact;
 pub mod scope;
+pub mod tls;
 
 pub use error::{HexoraError, Result};
 pub use finding::{Confidence, Evidence, Finding, Hypothesis, Severity};
@@ -48,6 +50,7 @@ pub use identity::{Credential, Identity, PrivilegeLevel};
 pub use limits::Limits;
 pub use redact::{RedactionPolicy, Secret};
 pub use scope::{Scope, ScopeRule};
+pub use tls::{CertificateSummary, TlsInfo, Verification};
 
 /// The version of this crate, exposed for the RPC handshake between UI and engine.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

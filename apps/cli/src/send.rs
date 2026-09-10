@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_http::TcpTransport;
+use hexora_http::{ClientIdentity, TcpTransport, TlsConfig};
 use hexora_types::http::{Header, HttpRequest, HttpService};
 use hexora_types::redact::{is_sensitive_header, RedactionPolicy, REDACTED};
 use hexora_types::scope::Scope;
@@ -27,6 +27,12 @@ pub struct SendArgs<'a> {
     pub json: bool,
     /// Show `Authorization`, `Cookie` and friends in full.
     pub show_secrets: bool,
+    /// Accept any TLS certificate. See [`hexora_types::tls::Verification::AcceptAny`].
+    pub insecure: bool,
+    /// Client certificate chain (PEM) for mTLS.
+    pub client_cert: Option<&'a std::path::Path>,
+    /// Client private key (PEM) for mTLS.
+    pub client_key: Option<&'a std::path::Path>,
 }
 
 /// Sends one request and prints the result.
@@ -36,7 +42,7 @@ pub fn run(args: SendArgs<'_>) -> Result<()> {
 
     // An empty scope blocks automated traffic but not a human's own request. The
     // decision is still computed so the user is told when they leave scope.
-    let guard = ScopeGuard::new(TcpTransport::new(), Arc::new(Scope::new()));
+    let guard = ScopeGuard::new(build_transport(&args)?, Arc::new(Scope::new()));
     let options = SendOptions::interactive(Origin::Repeater);
     let decision = guard.decide(&request, &options);
 
@@ -53,6 +59,29 @@ pub fn run(args: SendArgs<'_>) -> Result<()> {
         print_human(&exchange, decision, args.show_secrets);
     }
     Ok(())
+}
+
+fn build_transport(args: &SendArgs<'_>) -> Result<TcpTransport> {
+    let mut tls = if args.insecure {
+        TlsConfig::accept_any()
+    } else {
+        TlsConfig::verified()
+    };
+
+    tls.client_identity = match (args.client_cert, args.client_key) {
+        (Some(cert), Some(key)) => Some(ClientIdentity::from_pem_files(cert, key)?),
+        (None, None) => None,
+        // Half an identity is a misconfiguration, and silently ignoring it would look
+        // like the server rejected the certificate.
+        _ => {
+            return Err(HexoraError::invalid_input(
+                "client-cert",
+                "--client-cert and --client-key must be given together",
+            ))
+        }
+    };
+
+    Ok(TcpTransport::with_tls(tls))
 }
 
 fn build_request(
@@ -146,6 +175,23 @@ fn print_human(
     decision: ScopeDecision,
     show_secrets: bool,
 ) {
+    if let Some(tls) = &exchange.tls {
+        eprintln!(
+            "tls: {} · {} · alpn {}",
+            tls.protocol,
+            tls.cipher_suite,
+            tls.alpn.as_deref().unwrap_or("none")
+        );
+        if let Some(leaf) = tls.peer_certificates.first() {
+            eprintln!("     subject {}", leaf.subject);
+            eprintln!("     expires {}", leaf.not_after);
+        }
+        for observation in tls.observations() {
+            eprintln!("     ! {observation}");
+        }
+        eprintln!();
+    }
+
     if decision == ScopeDecision::AllowedOutOfScope {
         eprintln!(
             "note: {} is not in the project scope",
@@ -221,6 +267,7 @@ fn print_json(exchange: &hexora_engine::transport::Exchange, show_secrets: bool)
         "body": String::from_utf8_lossy(&response.body),
         "truncated": response.truncated,
         "duration_ms": exchange.duration.as_millis(),
+        "tls": exchange.tls,
     });
     println!("{payload}");
 }

@@ -71,6 +71,12 @@ pub struct Exchange {
     pub response: HttpResponse,
     /// Wall-clock time from first byte written to last byte read.
     pub duration: Duration,
+    /// What the TLS handshake produced, for `https` exchanges.
+    ///
+    /// Part of the exchange record rather than a side channel: how the peer was
+    /// authenticated is a property of what happened, and a finding derived from an
+    /// unverified connection has to be able to disclose that.
+    pub tls: Option<hexora_types::tls::TlsInfo>,
 }
 
 /// Per-request options.
@@ -188,6 +194,7 @@ impl HttpTransport for RecordingTransport {
                 truncated: false,
             },
             duration: Duration::from_millis(0),
+            tls: None,
         })
     }
 }

@@ -278,8 +278,23 @@ fn strip_query(path: &str) -> &str {
 /// Percent-encoded `/` (`%2f`) is decoded *before* segment splitting deliberately:
 /// the aim is to see through the encoding, not to reproduce any one server's
 /// behaviour exactly.
+///
+/// # Why decoding runs to a fixed point
+///
+/// Decoding once is not enough. `/%2541dmin` decodes to `/%41dmin`, and again to
+/// `/Admin`; `/%252e%252e/` reaches `/../`. Any chain that decodes twice — and plenty
+/// do, where a gateway forwards to a back-end that decodes again — would route such a
+/// path straight past an exclusion that had only checked the single-decoded form.
+///
+/// So decoding repeats until the result stops changing. This deliberately
+/// over-decodes relative to a single-pass server, and that bias is the safe one: the
+/// consequence is that exclusions match *more* paths, and an over-broad exclusion
+/// refuses to send a request rather than sending one that should have been refused.
+///
+/// Found by the `normalization_is_idempotent` property test, which is exactly what it
+/// was written for.
 fn normalize_path(path: &str) -> String {
-    let decoded = percent_decode(path);
+    let decoded = percent_decode_to_fixed_point(path);
     let mut segments: Vec<&str> = Vec::new();
     for segment in decoded.split(['/', '\\']) {
         match segment {
@@ -304,7 +319,25 @@ fn normalize_path(path: &str) -> String {
     out
 }
 
-/// Decodes `%XX` escapes. Invalid escapes are left as literal text, which is what
+/// Repeatedly percent-decodes until the result stops changing.
+///
+/// Terminates because each pass either shortens the string or leaves it unchanged.
+/// The pass cap is belt-and-braces against an input that somehow fails to converge.
+fn percent_decode_to_fixed_point(input: &str) -> String {
+    const MAX_PASSES: usize = 8;
+
+    let mut current = percent_decode(input);
+    for _ in 1..MAX_PASSES {
+        let next = percent_decode(&current);
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
+/// Decodes `%XX` escapes once. Invalid escapes are left as literal text, which is what
 /// permissive servers do and is the conservative choice for a security control.
 fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
@@ -501,6 +534,34 @@ mod tests {
     #[test]
     fn normalization_cannot_escape_above_the_root() {
         assert_eq!(normalize_path("/../../etc/passwd"), "/etc/passwd");
+    }
+
+    #[test]
+    fn an_exclusion_cannot_be_bypassed_by_double_encoding() {
+        // A gateway that decodes once and a back-end that decodes again would route
+        // /%2561dmin to /admin. Found by the idempotence property test, not by hand.
+        let scope = Scope::new()
+            .include(ScopeRule::host("example.com"))
+            .exclude(ScopeRule::host("example.com").with_prefix("/admin"));
+        for path in ["/%61dmin", "/%2561dmin", "/%25252561dmin"] {
+            assert!(
+                !scope.contains(&https("example.com"), path),
+                "{path} slipped past the carve-out"
+            );
+        }
+    }
+
+    #[test]
+    fn double_encoded_traversal_is_resolved() {
+        assert_eq!(normalize_path("/public/%252e%252e/admin"), "/admin");
+    }
+
+    #[test]
+    fn decoding_reaches_a_fixed_point() {
+        // The minimal case proptest shrank to.
+        let once = normalize_path("/%%30a");
+        assert_eq!(normalize_path(&once), once);
+        assert_eq!(percent_decode_to_fixed_point("/%2541dmin"), "/Admin");
     }
 
     #[test]

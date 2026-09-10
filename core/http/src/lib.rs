@@ -32,8 +32,10 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod parse;
+pub mod tls;
 pub mod transport;
 pub mod write;
 
 pub use parse::{BodyFraming, Quirk, ResponseHead};
+pub use tls::{ClientIdentity, TlsConfig};
 pub use transport::TcpTransport;

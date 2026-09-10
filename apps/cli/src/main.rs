@@ -25,9 +25,9 @@ mod send;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M1.1. Project management and single-request \
-                  sending over plaintext HTTP/1.x work. TLS, the proxy, scanner and \
-                  fuzzer are not implemented yet and are therefore not offered."
+                  Development status: M1.2. Project management and single-request \
+                  sending over HTTP and HTTPS work. Chunked responses, the proxy, \
+                  scanner and fuzzer are not implemented yet."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -71,6 +71,22 @@ enum Command {
         /// Print Authorization, Cookie and other sensitive headers in full.
         #[arg(long)]
         show_secrets: bool,
+
+        /// Accept any TLS certificate.
+        ///
+        /// Needed for staging systems with self-signed or expired certificates. The
+        /// connection stays encrypted but the peer is NOT authenticated, so it offers
+        /// no protection against interception. Every use is reported.
+        #[arg(short = 'k', long)]
+        insecure: bool,
+
+        /// Client certificate chain (PEM) for mTLS. Requires --client-key.
+        #[arg(long, value_name = "FILE")]
+        client_cert: Option<PathBuf>,
+
+        /// Client private key (PEM) for mTLS. Requires --client-cert.
+        #[arg(long, value_name = "FILE")]
+        client_key: Option<PathBuf>,
     },
 
     /// Print version and build information.
@@ -133,6 +149,9 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             headers,
             data,
             show_secrets,
+            insecure,
+            client_cert,
+            client_key,
         } => send::run(send::SendArgs {
             url,
             method,
@@ -140,6 +159,9 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             body: data.as_deref(),
             json: cli.json,
             show_secrets: *show_secrets,
+            insecure: *insecure,
+            client_cert: client_cert.as_deref(),
+            client_key: client_key.as_deref(),
         }),
     }
 }
@@ -153,14 +175,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M0",
+            "milestone": "M1.2",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M0 (architecture foundation)");
+        println!("  milestone:               M1.2 (HTTP/1.x engine with TLS)");
     }
 }
 
@@ -219,7 +241,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M1.1"),
+            help.contains("M1.2"),
             "users must not mistake this for a finished tool"
         );
     }

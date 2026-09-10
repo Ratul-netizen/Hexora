@@ -45,6 +45,16 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 
+# TLS. Pinned to the `ring` provider rather than rustls 0.23's aws-lc-rs default:
+# aws-lc-rs needs cmake and NASM at build time, which would make a Windows checkout
+# fail for reasons that have nothing to do with Hexora.
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12", "ring"] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2.2"
+rustls-pki-types = "1.10"
+x509-parser = "0.16"
+
 # Hashing (content-addressed blob store)
 sha2 = "0.10"
 
@@ -63,6 +73,9 @@ tauri-build = { version = "2.0", features = [] }
 
 # Testing
 tempfile = "3.14"
+# Generates throwaway certificates so the TLS path is tested against a real local
+# handshake rather than the internet.
+rcgen = "0.13"
 proptest = "1.6"
 
 [profile.release]
