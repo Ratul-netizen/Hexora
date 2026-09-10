@@ -8,8 +8,8 @@ use hexora_engine::guard::ScopeDecision;
 use hexora_engine::transport::Exchange;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_proxy::{
-    trust, CertificateAuthority, ExchangeObserver, InterceptionPolicy, ProjectCapture, ProxyConfig,
-    ProxyServer, TrustState,
+    trust, CertificateAuthority, ExchangeObserver, Fanout, InterceptionPolicy, ProjectCapture,
+    ProxyConfig, ProxyServer, TrustState,
 };
 use hexora_types::scope::Scope;
 use hexora_types::{HexoraError, Result};
@@ -63,21 +63,6 @@ impl ExchangeObserver for ConsoleObserver {
     }
 }
 
-/// Sends every exchange to several observers.
-///
-/// Printing and recording are separate concerns and both are wanted at once: the
-/// console line is what tells a tester the proxy is working, and the project is what
-/// survives the session.
-struct Fanout(Vec<Box<dyn ExchangeObserver>>);
-
-impl ExchangeObserver for Fanout {
-    fn observe(&self, exchange: &Exchange, decision: ScopeDecision) {
-        for observer in &self.0 {
-            observer.observe(exchange, decision);
-        }
-    }
-}
-
 /// Runs the proxy until interrupted.
 pub fn run(args: ProxyArgs<'_>) -> Result<()> {
     let bind: SocketAddr = args
@@ -113,7 +98,10 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         None => None,
     };
 
-    let mut observers: Vec<Box<dyn ExchangeObserver>> = vec![Box::new(ConsoleObserver)];
+    // Printing and recording are separate concerns and both are wanted at once: the
+    // console line tells a tester the proxy is working, the project is what survives
+    // the session.
+    let mut observers = Fanout::new().with(ConsoleObserver);
     if let Some(project) = &project {
         let capture = ProjectCapture::new(Arc::new(project.traffic()));
         let capture = if args.in_scope_only {
@@ -136,7 +124,7 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
             // asked for it, and the proxy has to see a host before it can be scoped.
             Arc::new(Scope::new()),
             transport,
-            Arc::new(Fanout(observers)),
+            Arc::new(observers),
             ca,
         )
         .await?;

@@ -134,7 +134,17 @@ endings are deliberately non-conforming.
 > **At M4 Hexora is a usable tool rather than a foundation.** Everything after this is
 > making it a *better* tool than the alternatives.
 
-**M5 — Protocol and target breadth** · PLANNED
+**M5 — Desktop UI** · DONE
+
+The Tauri window over the same crates the CLI drives: project management, certificate
+authority and trust, proxy control, live traffic, exchange inspection, and the
+repeater with response comparison.
+
+State lives in Rust rather than in React, so the window and the CLI cannot disagree
+about what a project contains. The visual result has not been reviewed on any
+platform — see STATUS.md.
+
+**M5.1 — Protocol and target breadth** · PLANNED
 
 HTTP/2 (proxying, not just client), invisible proxying, upstream proxy chaining, mTLS,
 site map / target tree.

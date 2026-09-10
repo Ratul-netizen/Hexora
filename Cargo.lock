@@ -1523,13 +1523,20 @@ dependencies = [
 name = "hexora-desktop"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "chrono",
  "hexora-engine",
+ "hexora-http",
+ "hexora-proxy",
+ "hexora-repeater",
  "hexora-storage",
  "hexora-types",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

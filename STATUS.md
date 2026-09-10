@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M2.5 (trust installation and first run)
+- **Last updated:** M5 (desktop UI)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -26,21 +26,39 @@ milestone.
 | **M3** — Traffic storage | Proxied exchanges persist into a project: metadata in SQLite, bodies content-addressed and deduplicated, both the wire and decoded forms kept, TLS details and framing quirks recorded, keyset-paginated `hexora history` |
 | **M4** — Repeater | Load a request from history, edit it in `$EDITOR`, resend it, diff the responses. Nothing is auto-corrected — a wrong `Content-Length` is reported and sent as written. Sends keep a link to what they derived from, so `--tree` answers "which edit caused this?" |
 | **M2.5** — Trust and first run | `hexora setup` gets a machine ready in one command. The CA installs into the *user* trust store (no admin), is verified by asking the platform rather than trusting an exit code, and removes cleanly. Firefox is detected and called out because it ignores the system store |
+| **M5** — Desktop UI | The Tauri window does the whole loop: open a project, install the CA, run the proxy, watch traffic arrive live, inspect an exchange, send it to the repeater, edit, resend, diff. Same crates as the CLI — there is no second engine |
 
 ## Next
 
-**M5 — the desktop UI.** Everything works headless and the first run is one command,
-but the Tauri shell still does nothing. Most people who would pay for this will not
-adopt a CLI-only tool, so this is now the shortest path from "works" to "someone else
-can use it".
+**Hexora is now usable by someone who never opens a terminal.** Capture, browse,
+inspect, edit, resend, compare — all of it in a window, over the same crates the CLI
+drives.
 
-The CLI stays the reference implementation: the UI calls the same crates, so anything
-the UI can do is scriptable and reproducible in CI.
+The open question is which direction to take next, and it depends on the customer
+question below:
 
-**Verified on Windows only.** The macOS and Linux trust paths in `core/proxy/src/trust.rs`
-are written and unit-tested but have never been run on those platforms. Treat them as
-unproven until someone executes `hexora setup` there — the module documents what each
-one shells out to.
+- **M13 — the scanner.** The thing buyers compare on. Also the thing most likely to be
+  wrong in ways that waste a tester's day, so it needs the evidence model to carry its
+  weight first — which it now does.
+- **M12 — authorization testing and reporting.** The gap nobody fills well: identity
+  matrices, "can role A reach role B's object", and a report that cites the exact
+  exchange. Fits the evidence architecture better than a scanner does.
+- **Sanding down what exists.** History filtering beyond text matching, saved
+  collections, keyboard-first navigation. Unglamorous, and the difference between a
+  demo and a tool.
+
+Recommendation: **M12**, because it plays to what has been built rather than competing
+head-on with two decades of scanner signature work.
+
+**Two honesty notes carried forward:**
+
+The macOS and Linux trust paths in `core/proxy/src/trust.rs` are written, unit-tested
+and type-checked, but have never been *run* on those platforms. Only Windows is
+verified end to end.
+
+The desktop UI compiles, launches and its logic is unit-tested, but its visual result
+has not been inspected on any platform — nobody has looked at the window and said "that
+reads correctly". Treat the layout as unreviewed.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -139,6 +157,9 @@ cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --dry-run
 cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --edit
 cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --tree
 cargo run -p hexora-cli -- repeat ./scratch/demo req_A --diff req_B
+
+# The desktop window. Same engine, no terminal.
+pnpm -C frontend build && cargo run -p hexora-desktop
 ```
 
 ---

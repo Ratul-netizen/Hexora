@@ -23,6 +23,7 @@
 
 pub mod ca;
 pub mod capture;
+pub mod fanout;
 pub mod hook;
 pub mod intercept;
 pub mod server;
@@ -30,6 +31,7 @@ pub mod trust;
 
 pub use ca::{CertificateAuthority, LeafCertificate};
 pub use capture::ProjectCapture;
+pub use fanout::Fanout;
 pub use hook::{
     InterceptDirections, InterceptHandle, Interceptor, ManualInterceptor, PassThrough,
     RequestVerdict, ResponseVerdict,

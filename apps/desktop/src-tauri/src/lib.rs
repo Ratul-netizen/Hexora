@@ -12,13 +12,24 @@
 //! React ──invoke()──→ Tauri IPC ──→ commands ──→ hexora-engine / hexora-storage
 //! ```
 //!
-//! At M0 that surface is one command, [`commands::engine_info`]. The window it opens
-//! reports the build's status rather than a mock interface, because a dashboard full
-//! of non-functional panels is worse than an honest empty one.
+//! Commands are added only as the milestone that implements them lands, so the
+//! surface never advertises capability that does not exist. At M5 it covers projects,
+//! the proxy, history, the repeater and the certificate authority — everything the
+//! CLI can do, calling exactly the same crates.
+//!
+//! # State lives in Rust
+//!
+//! [`state::AppState`] holds the open project and the running proxy. The frontend
+//! holds only what it is currently rendering, and re-asks after anything that could
+//! change the answer.
 
 pub mod commands;
+pub mod preview;
+pub mod state;
 
 pub use commands::EngineInfo;
+pub use preview::{BodyPreview, Rendering};
+pub use state::AppState;
 
 /// Builds and runs the desktop application.
 pub fn run() {
@@ -30,7 +41,23 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::engine_info])
+        .manage(state::AppState::new())
+        .invoke_handler(tauri::generate_handler![
+            commands::engine_info,
+            commands::project_open,
+            commands::project_current,
+            commands::proxy_start,
+            commands::proxy_stop,
+            commands::proxy_status,
+            commands::history_list,
+            commands::history_detail,
+            commands::repeater_draft,
+            commands::repeater_send,
+            commands::repeater_tree,
+            commands::ca_status,
+            commands::ca_install,
+            commands::ca_untrust,
+        ])
         .run(tauri::generate_context!())
         .expect("failed to start the Hexora desktop shell");
 }

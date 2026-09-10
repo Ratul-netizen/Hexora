@@ -253,10 +253,46 @@ since a typed URL is a human decision.
   "certificate is absent" markers were never seen and every Windows check reported
   `unknown` forever. Classification now searches the whole output of both streams.
 
+### Added — M5, the desktop UI
+
+- The Tauri window does the whole loop: open a project, install the certificate
+  authority, start and stop the proxy, watch traffic arrive live, inspect an exchange,
+  send it to the repeater, edit it, resend it and see the diff.
+- **The same crates as the CLI.** There is no second engine, no second proxy and no
+  UI-only code path — anything the window can do is scriptable and reproducible.
+- Application state lives in Rust (`state::AppState`), not in React. A frontend store
+  that believed something different about a project than the engine did would
+  eventually render a request that was never sent.
+- Captured exchanges are pushed to the window as they happen, as summaries rather than
+  whole exchanges: shipping bodies through IPC for traffic nobody has clicked on would
+  stall the window during a crawl.
+- Bodies are prepared for display rather than handed over raw (`preview::BodyPreview`).
+  Anything containing a NUL or not valid UTF-8 is shown as a hex dump, never as lossy
+  text — characters that were never on the wire have no business on screen in a
+  security tool. Large bodies are truncated and say so.
+- Framing quirks are surfaced in the history table rather than buried in a detail pane,
+  because a smuggling signal is worth noticing while scrolling.
+- Installing the CA from the window states the consequences at the moment of the
+  decision and requires a second confirmation.
+- `hexora_proxy::Fanout` replaces the CLI's private observer fan-out and is now shared.
+  An observer that panics no longer stops the ones after it: a UI event channel that
+  has gone away must not take down the capture producing the evidence.
+
+### Fixed
+
+- **CI failed on Linux** after M2.5: `CommandError::tool_missing` was dead code there,
+  because the Linux trust-status path never called it. It now distinguishes a missing
+  `certutil` — which on Debian and Ubuntu ships in `libnss3-tools` and is often simply
+  absent — from a certificate that is genuinely untrusted, which is the behaviour the
+  other platforms already had. `docs/development.md` now describes how to check
+  `cfg`-gated code locally instead of discovering it in CI.
+
 ### Not implemented
 
-The macOS and Linux trust-store paths are written and unit-tested but have not been run
-on those platforms; only Windows has been verified end to end. Connection reuse and
+The macOS and Linux trust-store paths are written, unit-tested and type-checked but
+have not been run on those platforms; only Windows has been verified end to end. The
+desktop UI compiles, launches and its logic is unit-tested, but its visual result has
+not been inspected — treat the layout as unreviewed. Connection reuse and
 redirects return `NotImplemented` naming the milestone that will provide them. The traffic store keeps both body forms, but the transport still returns
 only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
 the M1.5 gap. A repeater request edited to bare-LF line endings is re-serialized with

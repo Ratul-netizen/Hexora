@@ -113,6 +113,35 @@ pnpm -C frontend install
 cargo run -p hexora-desktop
 ```
 
+## Platform-gated code is only checked by CI
+
+Anything behind `#[cfg(windows)]`, `#[cfg(target_os = "macos")]` or
+`#[cfg(not(any(...)))]` is invisible to the local gate: your compiler only builds the
+branch for the machine you are on. `core/proxy/src/trust.rs` has three such branches,
+and a dead-code warning in the Linux one passed every local check and failed CI.
+
+Cross-checking with `cargo check --target` does not work here either — `ring` needs a C
+toolchain for the target, which a Windows machine does not have.
+
+What does work, when you have touched a `cfg`-gated path and want to know before
+pushing: temporarily flip the gates so the branch you care about compiles natively.
+
+```rust
+// Disable the branch for this machine...
+#[cfg(all(windows, target_os = "none"))]
+fn platform_install(..)
+
+// ...and enable the one you want checked in its place.
+#[cfg(windows)]
+fn platform_install(..)
+```
+
+Then `cargo clippy -p <crate> --all-targets -- -D warnings`, and revert. It takes a
+minute and catches exactly the class of failure that otherwise costs a CI round trip.
+
+Otherwise: push and read the CI result. The matrix covers Linux, macOS and Windows for
+that reason.
+
 ## Conventions
 
 ### Rust

@@ -530,6 +530,13 @@ fn platform_status(fingerprint: &Fingerprints) -> TrustState {
                 TrustState::NotTrusted
             }
         }
+        // A missing certutil is not the same as an untrusted certificate: on Debian
+        // and Ubuntu it ships in libnss3-tools and is often simply absent, and
+        // reporting "not trusted" would send a tester to reinstall a CA that is
+        // already there.
+        Err(e) if e.tool_missing() => {
+            TrustState::Unknown("certutil is not installed (libnss3-tools)")
+        }
         Err(_) => TrustState::NotTrusted,
     }
 }
