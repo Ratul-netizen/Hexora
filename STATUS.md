@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M4 (repeater)
+- **Last updated:** M2.5 (trust installation and first run)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -25,23 +25,22 @@ milestone.
 | **M2.4** — Interception hooks | Forward / replace / drop / respond on requests, forward / replace / drop on responses, with a queue that cannot wedge the browser |
 | **M3** — Traffic storage | Proxied exchanges persist into a project: metadata in SQLite, bodies content-addressed and deduplicated, both the wire and decoded forms kept, TLS details and framing quirks recorded, keyset-paginated `hexora history` |
 | **M4** — Repeater | Load a request from history, edit it in `$EDITOR`, resend it, diff the responses. Nothing is auto-corrected — a wrong `Content-Length` is reported and sent as written. Sends keep a link to what they derived from, so `--tree` answers "which edit caused this?" |
+| **M2.5** — Trust and first run | `hexora setup` gets a machine ready in one command. The CA installs into the *user* trust store (no admin), is verified by asking the platform rather than trusting an exit code, and removes cleanly. Firefox is detected and called out because it ignores the system store |
 
 ## Next
 
-**Hexora is now a usable tool rather than a foundation.** Capture, browse, edit, resend,
-compare — the loop a tester actually works in is closed, from the CLI.
+**M5 — the desktop UI.** Everything works headless and the first run is one command,
+but the Tauri shell still does nothing. Most people who would pay for this will not
+adopt a CLI-only tool, so this is now the shortest path from "works" to "someone else
+can use it".
 
-Two candidates for what comes next:
+The CLI stays the reference implementation: the UI calls the same crates, so anything
+the UI can do is scriptable and reproducible in CI.
 
-- **M5 — the desktop UI.** Everything above works headless. The Tauri shell exists and
-  does nothing. Most people who would pay for this will not adopt a CLI-only tool, so
-  this is the shortest path from "works" to "usable by someone else".
-- **M2.5 — trust installation and first-run.** The CLI prints per-platform CA
-  instructions; what remains is making the first ten minutes not require reading them.
-  Smaller than M5, and a prerequisite for it being pleasant.
-
-Recommendation: **M2.5 then M5** — first-run is the cheapest thing that decides whether
-anyone gets far enough to see the rest.
+**Verified on Windows only.** The macOS and Linux trust paths in `core/proxy/src/trust.rs`
+are written and unit-tested but have never been run on those platforms. Treat them as
+unproven until someone executes `hexora setup` there — the module documents what each
+one shells out to.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -114,11 +113,18 @@ unmaintained-crate warnings, all transitive through Tauri and recorded in
 ## Try it
 
 ```bash
+# Everything at once, on a machine you control.
+cargo run -p hexora-cli -- setup ./engagement
+
 cargo run -p hexora-cli -- send http://example.com/
 cargo run -p hexora-cli -- send https://example.com/ --insecure   # self-signed targets
 cargo run -p hexora-cli -- project init ./scratch/demo
 
-# The proxy. Export and install the CA first, then point a browser at it.
+# The CA, a step at a time.
+cargo run -p hexora-cli -- ca --status      # does this machine trust it?
+cargo run -p hexora-cli -- ca --install     # asks first
+cargo run -p hexora-cli -- ca --untrust     # remove from the store, keep the files
+cargo run -p hexora-cli -- ca --delete      # untrust and remove everything
 cargo run -p hexora-cli -- ca --export hexora-ca.crt
 cargo run -p hexora-cli -- proxy --listen 127.0.0.1:8080
 cargo run -p hexora-cli -- proxy --only target.example.com   # leave your own traffic alone

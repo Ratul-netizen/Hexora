@@ -6,8 +6,11 @@ use hexora_storage::migrations;
 use hexora_storage::rusqlite::{self, params};
 use hexora_types::{HexoraError, Result};
 
-/// Creates a new project directory.
-pub fn init(path: &Path, name: Option<&str>, json: bool) -> Result<()> {
+/// Creates a new project directory, printing nothing.
+///
+/// Split from [`init`] so `hexora setup` can create a project as one step of a longer
+/// sequence without emitting its own report in the middle of setup's.
+pub fn create(path: &Path, name: Option<&str>) -> Result<String> {
     if path.join("project.db").exists() {
         return Err(HexoraError::invalid_input(
             "path",
@@ -32,6 +35,13 @@ pub fn init(path: &Path, name: Option<&str>, json: bool) -> Result<()> {
             params!["prj_default", name, now],
         )
         .map_err(|e| HexoraError::Storage(e.to_string()))?;
+
+    Ok(name)
+}
+
+/// Creates a new project directory and reports it.
+pub fn init(path: &Path, name: Option<&str>, json: bool) -> Result<()> {
+    let name = create(path, name)?;
 
     if json {
         let payload = serde_json::json!({

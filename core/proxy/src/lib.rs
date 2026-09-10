@@ -9,8 +9,8 @@
 //! interception hooks that can rewrite, replace, drop or answer a message; and
 //! [`ProjectCapture`], which persists every exchange into a project.
 //!
-//! Not implemented yet: trust installation as a first-run flow (M2.5). The CLI prints
-//! per-platform instructions in the meantime.
+//! [`trust`] installs and removes the CA from the platform trust store, and asks the
+//! platform whether it is trusted rather than assuming.
 //!
 //! ## The CA is the security-critical part
 //!
@@ -26,6 +26,7 @@ pub mod capture;
 pub mod hook;
 pub mod intercept;
 pub mod server;
+pub mod trust;
 
 pub use ca::{CertificateAuthority, LeafCertificate};
 pub use capture::ProjectCapture;
@@ -35,3 +36,4 @@ pub use hook::{
 };
 pub use intercept::{InterceptionPolicy, TunnelOutcome};
 pub use server::{ExchangeObserver, NoObserver, ProxyConfig, ProxyServer};
+pub use trust::{Fingerprints, Installed, ManualStep, Store, TrustState};

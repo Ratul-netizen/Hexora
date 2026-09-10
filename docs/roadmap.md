@@ -99,11 +99,12 @@ returning a wrong body.
 | M2.2 | Plain HTTP proxy, absolute-form requests | **DONE** |
 | M2.3 | `CONNECT` tunnelling and TLS interception | **DONE** |
 | M2.4 | Intercept / forward / drop / modify hooks | **DONE** |
-| M2.5 | Trust installation and first-run experience | PLANNED · **next** |
+| M2.5 | Trust installation and first-run experience | **DONE** (Windows verified; macOS and Linux written but unrun) |
 
 HTTP proxy, `CONNECT` tunnelling, per-install interception CA with generated leaf
 certificates, intercept/forward/drop/modify, certificate export and browser trust
-instructions for Windows and Linux.
+instructions for Windows and Linux, and one-command setup that installs the CA into
+the user trust store and verifies it by asking the platform.
 
 The CA is the security-critical part: per-installation, never shipped, easy to
 regenerate and remove. See [`threat-model.md`](threat-model.md).

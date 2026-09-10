@@ -98,6 +98,24 @@ impl std::fmt::Debug for LeafCertificate {
     }
 }
 
+/// Decodes the first certificate in a PEM file to DER.
+fn decode_certificate_pem(pem: &str, path: &Path) -> Result<CertificateDer<'static>> {
+    let mut reader = std::io::BufReader::new(pem.as_bytes());
+    let certificate = rustls_pemfile::certs(&mut reader)
+        .next()
+        .transpose()
+        .map_err(|e| {
+            HexoraError::invalid_input(
+                "ca",
+                format!("{} is not a readable certificate: {e}", path.display()),
+            )
+        })?
+        .ok_or_else(|| {
+            HexoraError::invalid_input("ca", format!("{} contains no certificate", path.display()))
+        })?;
+    Ok(certificate.into_owned())
+}
+
 impl CertificateAuthority {
     /// Loads the CA from `directory`, generating one if it is not there yet.
     ///
@@ -188,13 +206,26 @@ impl CertificateAuthority {
             KeyPair::from_pem(&key_pem).map_err(rcgen_error("parsing the CA private key"))?;
         let params = CertificateParams::from_ca_cert_pem(&cert_pem)
             .map_err(rcgen_error("parsing the CA certificate"))?;
+
+        // rcgen has no way to rebuild a `Certificate` from stored bytes, so one is
+        // re-signed from the parsed parameters. It is used *only* as the issuer handle
+        // when signing leaves, which is safe: the key and the distinguished name are
+        // the ones from disk, so leaves chain to the real CA.
         let certificate = params
             .self_signed(&key_pair)
             .map_err(rcgen_error("reconstructing the CA certificate"))?;
 
+        // The DER, however, must come from the file rather than from that re-signed
+        // certificate. Re-signing mints a fresh serial number, so its bytes differ
+        // from the certificate the user actually installed — and `der` is what gets
+        // sent to the browser as the chain's root, and what identifies the CA to a
+        // trust store. Using the re-signed copy would mean presenting a certificate
+        // nobody ever trusted and reporting a fingerprint that matches nothing.
+        let der = decode_certificate_pem(&cert_pem, cert_path)?;
+
         Ok(Self {
             certificate_pem: cert_pem,
-            der: CertificateDer::from(certificate.der().to_vec()),
+            der,
             certificate,
             key_pair,
             cache: Mutex::new(HashMap::new()),
@@ -227,6 +258,54 @@ impl CertificateAuthority {
     /// The CA certificate in DER form.
     pub fn certificate_der(&self) -> &CertificateDer<'static> {
         &self.der
+    }
+
+    /// The SHA-256 fingerprint of the certificate, uppercase hex without separators.
+    ///
+    /// This is how a CA is named to a platform trust store: the store holds many
+    /// certificates and a subject name is neither unique nor stable, but the digest of
+    /// the DER encoding identifies exactly this certificate. Removing "the Hexora CA"
+    /// by name could remove a different one — by fingerprint it cannot.
+    ///
+    /// The same value a user sees in their browser's certificate viewer, so it can be
+    /// checked by eye before trusting it.
+    pub fn fingerprint_sha256(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(self.der.as_ref());
+        digest.iter().map(|b| format!("{b:02X}")).collect()
+    }
+
+    /// The SHA-1 thumbprint, uppercase hex.
+    ///
+    /// **Not a security property.** SHA-1 is broken for collision resistance and is
+    /// used here for exactly one reason: the Windows certificate store indexes
+    /// certificates by SHA-1 thumbprint, so it is the only key `certutil` accepts when
+    /// looking one up. Every trust *decision* is still made on the SHA-256 digest —
+    /// [`crate::trust`] looks a certificate up by this value and then confirms the
+    /// result against [`Self::fingerprint_sha256`].
+    pub fn fingerprint_sha1(&self) -> String {
+        use sha1::{Digest, Sha1};
+        let digest = Sha1::digest(self.der.as_ref());
+        digest.iter().map(|b| format!("{b:02X}")).collect()
+    }
+
+    /// Both digests, in the form [`crate::trust`] takes.
+    pub fn fingerprints(&self) -> crate::trust::Fingerprints {
+        crate::trust::Fingerprints {
+            sha256: self.fingerprint_sha256(),
+            sha1: self.fingerprint_sha1(),
+        }
+    }
+
+    /// The fingerprint grouped into colon-separated pairs, as certificate viewers
+    /// display it.
+    pub fn fingerprint_display(&self) -> String {
+        let raw = self.fingerprint_sha256();
+        raw.as_bytes()
+            .chunks(2)
+            .map(|pair| String::from_utf8_lossy(pair).into_owned())
+            .collect::<Vec<_>>()
+            .join(":")
     }
 
     /// Where the CA lives on disk, if it was loaded from or written to a directory.
@@ -406,6 +485,111 @@ mod tests {
         let pem = ca.certificate_pem();
         assert!(pem.starts_with("-----BEGIN CERTIFICATE-----"), "{pem:.40}");
         assert!(pem.contains("END CERTIFICATE"));
+    }
+
+    #[test]
+    fn a_fingerprint_is_64_hex_characters_and_stable() {
+        // The handle a trust store is asked to remove things by. If it were not
+        // stable across loads, uninstalling would silently miss.
+        let ca = CertificateAuthority::generate().unwrap();
+        let fingerprint = ca.fingerprint_sha256();
+
+        assert_eq!(fingerprint.len(), 64, "{fingerprint}");
+        assert!(fingerprint.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert!(
+            fingerprint.bytes().all(|b| !b.is_ascii_lowercase()),
+            "trust-store tools expect uppercase: {fingerprint}"
+        );
+        assert_eq!(fingerprint, ca.fingerprint_sha256());
+    }
+
+    #[test]
+    fn the_sha1_thumbprint_is_well_formed_and_distinct_from_the_sha256() {
+        // The Windows store's lookup key. Wrong length here means every Windows
+        // trust check silently reports "not trusted".
+        let ca = CertificateAuthority::generate().unwrap();
+        let sha1 = ca.fingerprint_sha1();
+
+        assert_eq!(sha1.len(), 40, "{sha1}");
+        assert!(sha1.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert!(sha1.bytes().all(|b| !b.is_ascii_lowercase()));
+        assert_ne!(sha1, ca.fingerprint_sha256());
+    }
+
+    #[test]
+    fn both_fingerprints_survive_a_reload_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = CertificateAuthority::load_or_create(dir.path()).unwrap();
+        let again = CertificateAuthority::load_or_create(dir.path()).unwrap();
+
+        assert_eq!(first.fingerprints().sha256, again.fingerprints().sha256);
+        assert_eq!(first.fingerprints().sha1, again.fingerprints().sha1);
+    }
+
+    #[test]
+    fn two_certificate_authorities_have_different_fingerprints() {
+        // Otherwise removing one would remove the other.
+        let a = CertificateAuthority::generate().unwrap();
+        let b = CertificateAuthority::generate().unwrap();
+        assert_ne!(a.fingerprint_sha256(), b.fingerprint_sha256());
+    }
+
+    #[test]
+    fn the_ca_served_in_the_chain_is_the_one_written_to_disk() {
+        // The invariant behind the whole trust story: the certificate a browser is
+        // asked to accept must be the certificate the user installed.
+        //
+        // It was not. `load` rebuilt the CA by re-signing it from parsed parameters,
+        // which mints a fresh serial number, so a reloaded CA served a root nobody had
+        // ever trusted and reported a fingerprint matching nothing in the trust store.
+        let dir = tempfile::tempdir().unwrap();
+        CertificateAuthority::load_or_create(dir.path()).unwrap();
+
+        let on_disk = std::fs::read_to_string(dir.path().join(CERT_FILE)).unwrap();
+        let reloaded = CertificateAuthority::load_or_create(dir.path()).unwrap();
+        let expected = decode_certificate_pem(&on_disk, Path::new("test")).unwrap();
+
+        assert_eq!(
+            reloaded.certificate_der(),
+            &expected,
+            "the served CA must be byte-identical to the installed one"
+        );
+
+        let leaf = reloaded.leaf_for("example.com").unwrap();
+        assert_eq!(
+            leaf.chain.last(),
+            Some(&expected),
+            "and so must the root of every chain the proxy presents"
+        );
+    }
+
+    #[test]
+    fn a_certificate_file_that_is_not_a_certificate_is_refused_clearly() {
+        let err =
+            decode_certificate_pem("this is not a certificate", Path::new("ca.crt")).unwrap_err();
+        assert_eq!(err.code(), "invalid_input");
+        assert!(err.to_string().contains("ca.crt"), "{err}");
+    }
+
+    #[test]
+    fn a_reloaded_ca_keeps_its_fingerprint() {
+        // A tester installs the CA once. If reloading changed the fingerprint, every
+        // later `--status` would report it untrusted and every removal would miss.
+        let dir = tempfile::tempdir().unwrap();
+        let first = CertificateAuthority::load_or_create(dir.path()).unwrap();
+        let reloaded = CertificateAuthority::load_or_create(dir.path()).unwrap();
+        assert_eq!(first.fingerprint_sha256(), reloaded.fingerprint_sha256());
+    }
+
+    #[test]
+    fn the_display_fingerprint_matches_what_a_certificate_viewer_shows() {
+        // So a user can compare it by eye before trusting a root CA.
+        let ca = CertificateAuthority::generate().unwrap();
+        let display = ca.fingerprint_display();
+
+        assert_eq!(display.len(), 64 + 31, "{display}");
+        assert_eq!(display.matches(':').count(), 31);
+        assert_eq!(display.replace(':', ""), ca.fingerprint_sha256());
     }
 
     #[test]

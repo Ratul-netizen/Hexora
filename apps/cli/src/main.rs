@@ -19,6 +19,7 @@ mod project;
 mod proxy;
 mod repeat;
 mod send;
+mod setup;
 
 /// Hexora — the modern offensive security workbench.
 #[derive(Debug, Parser)]
@@ -141,18 +142,61 @@ enum Command {
     },
 
     /// Manage the interception certificate authority.
+    ///
+    /// With no flags, prints the CA, its fingerprint and whether the platform
+    /// currently trusts it.
     Ca {
         /// Directory holding the CA.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
 
+        /// Install the CA into this user's trust store.
+        ///
+        /// Asks first. This is the most consequential thing Hexora will ask you to
+        /// do, and it never happens as a side effect of anything else.
+        #[arg(long, conflicts_with_all = ["delete", "untrust", "status"])]
+        install: bool,
+
+        /// Remove the CA from the trust store, leaving the files in place.
+        #[arg(long, conflicts_with_all = ["delete", "status"])]
+        untrust: bool,
+
+        /// Report whether this machine currently trusts the CA.
+        #[arg(long, conflicts_with = "delete")]
+        status: bool,
+
+        /// Do not ask before installing. For scripts and disposable machines.
+        #[arg(short = 'y', long, requires = "install")]
+        yes: bool,
+
         /// Write the CA certificate here and print trust instructions.
         #[arg(long, value_name = "FILE")]
         export: Option<PathBuf>,
 
-        /// Delete the CA. Does not untrust it — remove it from trust stores too.
+        /// Untrust and delete the CA.
         #[arg(long)]
         delete: bool,
+    },
+
+    /// Set up a machine for testing: a project, the CA, and trust.
+    ///
+    /// The first-run path. Everything it does can also be done a command at a time.
+    Setup {
+        /// Directory for the project to create.
+        #[arg(default_value = "./engagement")]
+        path: PathBuf,
+
+        /// Directory holding the CA.
+        #[arg(long, value_name = "DIR")]
+        ca_dir: Option<PathBuf>,
+
+        /// Do not ask before installing the CA.
+        #[arg(short = 'y', long)]
+        yes: bool,
+
+        /// Set everything up but do not touch the trust store.
+        #[arg(long, conflicts_with = "yes")]
+        no_trust: bool,
     },
 
     /// Browse traffic captured into a project.
@@ -340,12 +384,33 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }),
         Command::Ca {
             dir,
+            install,
+            untrust,
+            status,
+            yes,
             export,
             delete,
         } => proxy::ca(proxy::CaArgs {
             dir: dir.as_deref(),
             export: export.as_deref(),
             delete: *delete,
+            install: *install,
+            untrust: *untrust,
+            status: *status,
+            yes: *yes,
+            json: cli.json,
+        }),
+        Command::Setup {
+            path,
+            ca_dir,
+            yes,
+            no_trust,
+        } => setup::run(setup::SetupArgs {
+            project: path,
+            ca_dir: ca_dir.as_deref(),
+            yes: *yes,
+            trust: !*no_trust,
+            json: cli.json,
         }),
         Command::Send {
             url,

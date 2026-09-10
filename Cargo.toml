@@ -71,6 +71,9 @@ brotli = "7.0"
 
 # Hashing (content-addressed blob store)
 sha2 = "0.10"
+# Only ever a lookup key for the Windows certificate store, never a security
+# decision. See core/proxy/src/trust.rs.
+sha1 = "0.10"
 
 # Utility
 thiserror = "2.0"

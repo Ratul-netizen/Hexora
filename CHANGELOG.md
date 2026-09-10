@@ -216,10 +216,48 @@ since a typed URL is a human decision.
   receives what the tester meant to send. Found by reading what a real target actually
   received during an M4 smoke test, not by reading the code.
 
+### Added — M2.5, trust installation and first run
+
+- **`hexora setup`**: one command creates a project, generates the CA, installs it and
+  says what is left to do. Every step is also available on its own, and the output
+  names the command for each.
+- **`hexora ca --install`** installs into the *user* trust store on every platform that
+  has one — the Windows user Root store, the macOS login keychain, the per-user NSS
+  database on Linux. No administrator rights, and the blast radius is one account.
+- **`--status`** asks the platform whether the certificate is trusted instead of
+  assuming a zero exit code meant success. `unknown` is a distinct answer from
+  `not trusted`, because reporting the wrong one sends a tester to reinstall a CA that
+  is already there.
+- **`--untrust`** removes it from the store and leaves the files; `--delete` now
+  untrusts *before* deleting. The other order leaves a still-trusted certificate whose
+  files are gone — the worst state to leave a root CA in.
+- Installing always asks first, and a non-interactive stdin answers no. `--yes` is how
+  to agree deliberately; silence is not consent for a root certificate.
+- Firefox is detected and reported, because it ships its own store and ignores the
+  system one — the single most common first-run confusion.
+- The CA now exposes SHA-256 and SHA-1 fingerprints. SHA-256 is the identity and is
+  what every trust decision is made on; SHA-1 exists only because the Windows store
+  indexes by thumbprint and `certutil` accepts no other lookup key.
+
+### Fixed
+
+- **A reloaded CA served a certificate nobody had trusted.** `load` rebuilt the CA by
+  re-signing it from parsed parameters, which mints a fresh serial number, so the DER
+  differed from the file on disk. That DER is what the proxy puts in the TLS chain as
+  the root and what identifies the CA to a trust store — meaning after the first
+  restart, browsers were being shown a root certificate that was never installed. The
+  certificate is now decoded from the stored PEM. Found by a test asserting that a
+  fingerprint survives a reload.
+- **Trust-store lookups were classified from the wrong line of output.** `certutil`
+  opens with a banner naming the store and puts the real error two lines below, so the
+  "certificate is absent" markers were never seen and every Windows check reported
+  `unknown` forever. Classification now searches the whole output of both streams.
+
 ### Not implemented
 
-Connection reuse and redirects return `NotImplemented` naming the milestone that will
-provide them. The traffic store keeps both body forms, but the transport still returns
+The macOS and Linux trust-store paths are written and unit-tested but have not been run
+on those platforms; only Windows has been verified end to end. Connection reuse and
+redirects return `NotImplemented` naming the milestone that will provide them. The traffic store keeps both body forms, but the transport still returns
 only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
 the M1.5 gap. A repeater request edited to bare-LF line endings is re-serialized with
 CRLF, and says so. See `docs/roadmap.md`.

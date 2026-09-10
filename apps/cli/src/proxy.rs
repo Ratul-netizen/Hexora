@@ -8,8 +8,8 @@ use hexora_engine::guard::ScopeDecision;
 use hexora_engine::transport::Exchange;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_proxy::{
-    CertificateAuthority, ExchangeObserver, InterceptionPolicy, ProjectCapture, ProxyConfig,
-    ProxyServer,
+    trust, CertificateAuthority, ExchangeObserver, InterceptionPolicy, ProjectCapture, ProxyConfig,
+    ProxyServer, TrustState,
 };
 use hexora_types::scope::Scope;
 use hexora_types::{HexoraError, Result};
@@ -30,6 +30,15 @@ pub struct CaArgs<'a> {
     pub dir: Option<&'a Path>,
     pub export: Option<&'a Path>,
     pub delete: bool,
+    /// Install the CA into this user's trust store.
+    pub install: bool,
+    /// Remove the CA from the trust store, leaving the files alone.
+    pub untrust: bool,
+    /// Report whether the platform currently trusts it.
+    pub status: bool,
+    /// Skip the confirmation prompt before installing.
+    pub yes: bool,
+    pub json: bool,
 }
 
 /// Prints every exchange as a one-line summary.
@@ -170,15 +179,54 @@ pub fn ca(args: CaArgs<'_>) -> Result<()> {
     let dir = resolve_ca_dir(args.dir)?;
 
     if args.delete {
+        // Untrust before deleting. The other order leaves a trusted certificate in the
+        // store with its files gone — still trusted, and now harder to find and remove,
+        // which is the worst possible state to leave a root CA in.
+        let fingerprint = CertificateAuthority::load_or_create(&dir)
+            .ok()
+            .map(|ca| ca.fingerprints());
+        if let Some(fingerprint) = &fingerprint {
+            match trust::uninstall(fingerprint) {
+                Ok(()) => println!("Removed the CA from this user's trust store."),
+                Err(e) => {
+                    // Reported, not fatal: the files should still go, and the user is
+                    // told exactly what is left behind.
+                    eprintln!("warning: could not remove it from the trust store: {e}");
+                    eprintln!(
+                        "         remove it by hand — fingerprint {}",
+                        fingerprint.sha256
+                    );
+                }
+            }
+        }
+
         CertificateAuthority::delete(&dir)?;
         println!("Removed the interception CA from {}", dir.display());
         println!();
-        println!("Remember to remove it from your browser and system trust stores too —");
-        println!("deleting the files here does not untrust the certificate.");
+        println!("Firefox keeps its own store; if you imported it there, remove it there too.");
         return Ok(());
     }
 
     let ca = CertificateAuthority::load_or_create(&dir)?;
+    let fingerprint = ca.fingerprints();
+
+    if args.untrust {
+        trust::uninstall(&fingerprint)?;
+        println!("Removed the CA from this user's trust store.");
+        println!(
+            "The files are still in {} — use --delete to remove them.",
+            dir.display()
+        );
+        return Ok(());
+    }
+
+    if args.status {
+        return print_status(&ca, &dir, args.json);
+    }
+
+    if args.install {
+        return install(&ca, &dir, args.yes, args.json);
+    }
 
     if let Some(path) = args.export {
         std::fs::write(path, ca.certificate_pem())
@@ -190,13 +238,150 @@ pub fn ca(args: CaArgs<'_>) -> Result<()> {
     }
 
     println!("CA directory: {}", dir.display());
+    println!("Fingerprint:  {}", ca.fingerprint_display());
+    println!("Trust state:  {}", trust::status(&fingerprint));
     println!();
     print!("{}", ca.certificate_pem());
     Ok(())
 }
 
+/// Reports whether the platform trusts this CA.
+fn print_status(ca: &CertificateAuthority, dir: &Path, json: bool) -> Result<()> {
+    let fingerprint = ca.fingerprints();
+    let state = trust::status(&fingerprint);
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "directory": dir.display().to_string(),
+                "fingerprint_sha256": fingerprint.sha256,
+                "trusted": state == TrustState::Trusted,
+                "state": state.to_string(),
+            })
+        );
+        return Ok(());
+    }
+
+    println!("CA directory: {}", dir.display());
+    println!("Fingerprint:  {}", ca.fingerprint_display());
+    println!("Trust state:  {state}");
+    if state == TrustState::NotTrusted {
+        println!();
+        println!("Install it with:  hexora ca --install");
+    }
+    Ok(())
+}
+
+/// Installs the CA into this user's trust store, after saying what that means.
+fn install(ca: &CertificateAuthority, dir: &Path, yes: bool, json: bool) -> Result<()> {
+    let fingerprint = ca.fingerprints();
+    let certificate = dir.join("hexora-ca.crt");
+
+    if trust::status(&fingerprint) == TrustState::Trusted {
+        println!("Already trusted — nothing to do.");
+        println!("Fingerprint: {}", ca.fingerprint_display());
+        return Ok(());
+    }
+
+    if !yes && !json {
+        // Trusting a root CA is the most consequential thing a Hexora user is asked to
+        // do, so it is never a side effect of anything and never silent.
+        println!("About to install a root certificate authority into your trust store.");
+        println!();
+        println!("  Fingerprint: {}", ca.fingerprint_display());
+        println!("  Private key: {}", dir.join("hexora-ca.key").display());
+        println!();
+        println!("This lets Hexora decrypt HTTPS on this machine. Anyone who obtains that");
+        println!("private key could impersonate any site to you, so do this only on a");
+        println!("machine you control, and remove it when you are done:");
+        println!("  hexora ca --delete");
+        println!();
+        if !confirm("Install it?")? {
+            println!("Not installed.");
+            return Ok(());
+        }
+        println!();
+    }
+
+    let installed = trust::install(&certificate, &fingerprint)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "store": installed.store.name,
+                "needed_elevation": installed.store.needed_elevation,
+                "verified": installed.verified.to_string(),
+                "fingerprint_sha256": fingerprint.sha256,
+                "manual": installed
+                    .manual
+                    .iter()
+                    .map(|step| serde_json::json!({
+                        "application": step.application,
+                        "instruction": step.instruction,
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        );
+        return Ok(());
+    }
+
+    println!("Installed into the {}.", installed.store.name);
+    match installed.verified {
+        TrustState::Trusted => println!("Verified: the platform reports it as trusted."),
+        // Said out loud rather than inferred from a zero exit code, because a tester
+        // who believes the CA is installed will blame Hexora for what follows.
+        TrustState::NotTrusted => {
+            println!("WARNING: the platform still does not report it as trusted.");
+            println!("         Check your trust store before relying on interception.");
+        }
+        TrustState::Unknown(why) => {
+            println!("Could not verify ({why}); check your trust store to be sure.");
+        }
+    }
+
+    for step in &installed.manual {
+        println!();
+        println!("{} still needs doing by hand:", step.application);
+        for line in step.instruction.lines() {
+            println!("  {line}");
+        }
+    }
+
+    println!();
+    println!("Now run:  hexora proxy --project ./engagement");
+    Ok(())
+}
+
+/// Asks a yes/no question on the terminal.
+///
+/// A non-interactive stdin answers "no": a script that pipes nothing must not be taken
+/// to have agreed to trusting a root CA. `--yes` is how to agree deliberately.
+pub fn confirm(question: &str) -> Result<bool> {
+    use std::io::{BufRead, Write};
+
+    print!("{question} [y/N] ");
+    std::io::stdout()
+        .flush()
+        .map_err(|e| HexoraError::Internal(format!("writing to the terminal: {e}")))?;
+
+    let mut answer = String::new();
+    let read = std::io::stdin()
+        .lock()
+        .read_line(&mut answer)
+        .map_err(|e| HexoraError::Internal(format!("reading from the terminal: {e}")))?;
+    if read == 0 {
+        return Ok(false);
+    }
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
 /// Where the CA lives when the user has not said otherwise.
-fn resolve_ca_dir(explicit: Option<&Path>) -> Result<PathBuf> {
+pub fn resolve_ca_dir(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(dir) = explicit {
         return Ok(dir.to_path_buf());
     }
@@ -295,6 +480,11 @@ mod tests {
             dir: Some(dir.path()),
             export: Some(&export),
             delete: false,
+            install: false,
+            untrust: false,
+            status: false,
+            yes: false,
+            json: false,
         })
         .unwrap();
 
@@ -313,6 +503,11 @@ mod tests {
             dir: Some(dir.path()),
             export: None,
             delete: false,
+            install: false,
+            untrust: false,
+            status: false,
+            yes: false,
+            json: false,
         })
         .unwrap();
         assert!(dir.path().join("hexora-ca.crt").exists());
@@ -321,6 +516,11 @@ mod tests {
             dir: Some(dir.path()),
             export: None,
             delete: true,
+            install: false,
+            untrust: false,
+            status: false,
+            yes: false,
+            json: false,
         })
         .unwrap();
         assert!(!dir.path().join("hexora-ca.crt").exists());
