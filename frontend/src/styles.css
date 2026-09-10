@@ -928,3 +928,58 @@ tr.violation td {
 .signals td.weight.against {
   color: var(--text-muted);
 }
+
+/* ---------------------------------------------------------------- *
+ * Engagement snapshots
+ * ---------------------------------------------------------------- */
+
+.snapshots {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.snapshots td.actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.snapshots h3 {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* A claim is read as a sentence, not scanned as a row, so it wraps. */
+.claims,
+.delta {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.claims li {
+  line-height: 1.5;
+}
+
+.delta li {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.delta li.added {
+  color: var(--ok, #6bbf6b);
+}
+
+/* Removed reads as neutral rather than as good news: a rule leaving scope, or a
+ * finding count falling, is not by itself progress. */
+.delta li.removed {
+  color: var(--text-muted);
+}

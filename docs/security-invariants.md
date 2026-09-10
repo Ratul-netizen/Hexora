@@ -347,6 +347,64 @@ is *this object belongs to somebody else*.
 
 ---
 
+## 11. The absence of a finding is never evidence that it was fixed
+
+Invariant 6 says a finding requires evidence. This is its dual, and it exists because
+the second visit to an engagement is where a security tool is most tempted to lie.
+
+A finding is what a test *produced*. When a later run does not produce it, what has
+been established is that one test did not raise one claim — which is a fact about a
+test run, not about an application. So `hexora snapshot diff` never says *fixed*.
+It says the claim is **gone**, and it says why, from a vocabulary in which only one
+answer is about the application at all:
+
+| `WhyGone` | What it means | About the application? |
+| --------- | ------------- | ---------------------- |
+| `ToolChanged` | The two snapshots were taken by different builds | No |
+| `SourceSilent` | Nothing from that check appears in the later snapshot | No |
+| `NotReproduced` | The same build ran, the same check raised other claims, this one did not come back | As much as anything here can be |
+
+Even `NotReproduced` is named for what was observed rather than what it might imply.
+The test may not have covered the same request; the application may now fail
+differently rather than correctly. `WhyGone::is_about_the_application` returns true for
+that one variant and there is deliberately no `is_fixed`.
+
+**The failure mode this closes, found by running a real retest.** The demo application
+was repaired, the authorization matrix re-run, and it reported nothing — and the
+comparison said only "+3 exchanges". The old claim was still standing at
+`medium/confirmed`, looking exactly like a current result, because a run that produces
+no claim never writes to the claim it did not produce. A snapshot therefore records
+when each claim was **last written to**, and a claim nothing has touched between two
+snapshots is reported as *standing, but nothing re-tested it* rather than silently
+counted as unchanged. Unknown — a snapshot taken before that field existed — is
+treated the same way: not re-tested.
+
+**Other things that are not fixes, and are labelled as such.**
+
+- A host that left scope stopped being tested. The comparison prints removed scope
+  rules and says so in words.
+- A finding count that fell is a count, printed as a count. It is never a headline.
+- Hexora has no registry of which checks ran; that arrives with the verification
+  framework (M13.1). Until then "the check ran and found nothing" and "the check never
+  ran" are the same picture, and `SourceSilent` says exactly that rather than guessing.
+
+**Tests.** `core/types/src/snapshot.rs` —
+`a_claim_the_later_side_does_not_hold_is_gone_and_never_fixed`,
+`a_disappearance_says_nothing_when_the_source_raised_nothing_at_all`,
+`a_different_build_makes_every_disappearance_inconclusive`,
+`two_passive_checks_are_two_different_sources`,
+`a_claim_nobody_re_tested_is_not_a_claim_that_survived_a_retest`,
+`a_snapshot_written_before_a_field_existed_still_loads`;
+`apps/cli/src/snapshot.rs` — `a_disappearance_is_never_described_as_fixed`,
+`the_two_inconclusive_reasons_say_so_in_the_first_word`,
+`a_comparison_holding_only_untested_claims_does_not_print_nothing_changed`;
+`core/storage/src/snapshots.rs` —
+`a_snapshot_survives_the_findings_it_copied_being_rewritten`,
+`a_retest_that_no_longer_produces_a_claim_reads_as_not_reproduced`,
+`capturing_records_labels_and_privilege_and_never_a_credential`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

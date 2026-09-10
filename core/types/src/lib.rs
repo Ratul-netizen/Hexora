@@ -47,6 +47,7 @@ pub mod object;
 pub mod raw;
 pub mod redact;
 pub mod scope;
+pub mod snapshot;
 pub mod tls;
 
 pub use candidate::{CandidateStatus, IdentifierCandidate, Signal, SignalKind, Strength};
@@ -59,6 +60,7 @@ pub use object::{ObjectDeclaration, ObjectLocation};
 pub use raw::{RawRequest, RequestMode, RequestSource};
 pub use redact::{RedactionPolicy, Secret};
 pub use scope::{Scope, ScopeRule};
+pub use snapshot::{Comparison, Contents as SnapshotContents, Snapshot};
 pub use tls::{CertificateSummary, TlsInfo, Verification};
 
 /// The version of this crate, exposed for the RPC handshake between UI and engine.
@@ -69,4 +71,4 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped whenever the UI/engine boundary changes shape. The desktop client refuses
 /// to talk to an engine reporting a different major value rather than misinterpreting
 /// messages.
-pub const RPC_CONTRACT_VERSION: u32 = 5;
+pub const RPC_CONTRACT_VERSION: u32 = 6;

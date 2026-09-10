@@ -138,6 +138,11 @@ define_id!(
     "cnd"
 );
 define_id!(
+    /// Identifies a point-in-time record of an engagement.
+    SnapshotId,
+    "snp"
+);
+define_id!(
     /// Identifies an installed extension instance.
     ExtensionId,
     "ext"

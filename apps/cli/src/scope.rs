@@ -128,30 +128,12 @@ pub fn remove(project: &Path, host: &str, json: bool) -> Result<()> {
 }
 
 /// One rule, as a line a tester can read back.
+///
+/// Delegates to the type, which is where it belongs: the desktop had its own copy and
+/// the two had drifted, so the window rendered a port-restricted rule as though it
+/// covered every port.
 fn describe(rule: &ScopeRule) -> String {
-    let scheme = match rule.scheme {
-        SchemeMatch::Any => "",
-        SchemeMatch::HttpOnly => "http://",
-        SchemeMatch::HttpsOnly => "https://",
-    };
-    let path = match &rule.path {
-        PathMatch::Any => String::new(),
-        PathMatch::Prefix { value } => format!("{value}*"),
-        PathMatch::Exact { value } => value.clone(),
-    };
-    let ports = if rule.ports.is_empty() {
-        String::new()
-    } else {
-        format!(
-            ":{}",
-            rule.ports
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    };
-    format!("{scheme}{}{ports}{path}", rule.host)
+    rule.to_string()
 }
 
 #[cfg(test)]

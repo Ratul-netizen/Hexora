@@ -508,6 +508,76 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M12.8, engagement snapshots
+
+A consultant tests in March, the client fixes through April, the consultant comes back
+in May — and the only question in May is *what changed*. Every store in a project is
+live: findings are refreshed in place when a test is re-run, candidates re-scored,
+scope edited. Without a record of what was true in March there is nothing to compare
+against.
+
+**A snapshot copies rather than references.** Pointing at `findings.id` would let a
+re-run rewrite the project's own past. It records the claims as they stood, their
+severity, confidence and triage state, the scope, the identities and the declared
+objects. It does not copy traffic: bodies are the largest thing in a project by orders
+of magnitude, and a snapshot exists to be diffed, not restored.
+
+Immutable structurally rather than by convention — `SnapshotStore` has no update
+method, which is what makes the summary columns on the row safe: they are computed
+from the contents at insert time and nothing can change one without the other.
+
+**It never says *fixed*.** A finding is what a test produced; its absence from a later
+snapshot is the absence of a result. `hexora snapshot diff` reports the claim as
+**gone**, with a reason, and only one of the three reasons is about the application:
+
+```text
+tool changed    the two snapshots were taken by different builds
+source silent   nothing from that check appears in the later snapshot, and Hexora
+                cannot tell "ran and found nothing" from "never ran"
+not reproduced  the same build ran, the same check raised other claims, and this one
+                did not come back — which is still not proof it is fixed
+```
+
+New security invariant 11 states this with its tests. A tool-version change is
+reported first, because it makes the other two unsafe to rely on.
+
+**A claim nobody re-tested is reported as such.** Found by running an actual retest:
+the demo application was repaired, the authorization matrix re-run, it raised nothing —
+and the comparison said only "+3 exchanges" while the old `medium/confirmed` claim sat
+there looking like a current result. A run that produces no claim never writes to the
+claim it did not produce, so a snapshot records when each claim was last written to,
+and one nothing has touched is listed under *standing, but nothing re-tested them*
+rather than counted as unchanged. Claims that **were** re-tested and came back the same
+are listed separately, because "re-tested and still stands" is a result and reads very
+differently from silence.
+
+**Also compared:** scope rules added and removed (a host that left scope stopped being
+tested, and the output says so), identities, declared objects, and the exchange,
+suggestion and finding counts.
+
+- `hexora snapshot take|list|show|diff|remove`. With one id, `diff` compares a
+  snapshot with the project as it stands — the comparison a retest actually asks, and
+  it does not require saving a second snapshot first.
+- A **Snapshots** tab in the desktop window with the same comparison.
+- Credentials never reach a snapshot: an identity is recorded as its label and
+  privilege, field by field rather than by copying the struct.
+- Migration 6. `Contents` is stored as one JSON document and carries
+  `#[serde(default)]`, so a snapshot taken by an older build stays readable when a
+  later one adds a field — with the default chosen to be the cautious answer, because
+  that is what an old snapshot silently supplies.
+
+Verified end to end against the IDOR demo: captured and tested against the vulnerable
+build, snapshotted, restarted on a repaired build, re-ran the matrix (which reported
+nothing), and read the comparison — then re-ran against the vulnerable build again and
+watched the same claim move to *re-tested and unchanged*.
+
+### Fixed
+
+- **The window rendered a port-restricted scope rule as though it covered every
+  port.** The CLI and the desktop each had their own copy of "render a `ScopeRule` as a
+  line" and they had drifted; the desktop's dropped the port list. There is now one
+  `Display` impl on the type and both call it.
+
 ### Added — M12.7, persisted identifier suggestions
 
 Every object identifier was declared by hand, so constructed authorization testing was

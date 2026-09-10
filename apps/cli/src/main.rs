@@ -27,6 +27,7 @@ mod report;
 mod scope;
 mod send;
 mod setup;
+mod snapshot;
 
 /// Hexora — the modern offensive security workbench.
 #[derive(Debug, Parser)]
@@ -36,7 +37,7 @@ mod setup;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.7. The proxy, HTTP/1.x engine \
+                  Development status: M12.8. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -318,6 +319,14 @@ enum Command {
     #[command(subcommand)]
     Object(ObjectCommand),
 
+    /// Record what the engagement looks like now, and compare two moments.
+    ///
+    /// A consultant tests, the client fixes, the consultant comes back — and the only
+    /// question on the second visit is what changed. Every other store in a project is
+    /// live, so without a snapshot there is nothing to compare against.
+    #[command(subcommand)]
+    Snapshot(SnapshotCommand),
+
     /// Show and change what this engagement is authorized to touch.
     ///
     /// Scope is not cosmetic: automated components refuse to send traffic to hosts
@@ -568,6 +577,61 @@ enum ObjectCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum SnapshotCommand {
+    /// Record the project as it stands.
+    ///
+    /// Reads the project and writes one row: scope, identities, declared objects and
+    /// every claim as it stands. The traffic itself is not copied — a snapshot is a
+    /// record to compare against, not a backup.
+    Take {
+        /// Project directory.
+        path: PathBuf,
+
+        /// What to call it, e.g. "before the fix".
+        #[arg(long, value_name = "NAME")]
+        label: Option<String>,
+
+        /// Anything worth saying that the label could not hold.
+        #[arg(long, value_name = "TEXT")]
+        note: Option<String>,
+    },
+    /// List the snapshots a project holds, newest first.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Print one snapshot in full.
+    Show {
+        /// Project directory.
+        path: PathBuf,
+        /// The snapshot's id.
+        id: String,
+    },
+    /// Say what changed between two moments.
+    ///
+    /// With one id, compares that snapshot with the project as it stands, which is
+    /// what a retest actually asks. A claim missing from the later side is reported
+    /// with the reason it is missing, and only one of those reasons is about the
+    /// application at all.
+    Diff {
+        /// Project directory.
+        path: PathBuf,
+        /// The earlier snapshot.
+        from: String,
+        /// The later snapshot. Defaults to the project as it stands.
+        #[arg(long, value_name = "ID")]
+        against: Option<String>,
+    },
+    /// Delete a snapshot, for one that was mislabelled.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// The snapshot's id.
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ScopeCommand {
     /// Print the project's scope.
     List {
@@ -710,6 +774,19 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }),
         Command::Object(ObjectCommand::List { path }) => object::list(path, cli.json),
         Command::Object(ObjectCommand::Remove { path, id }) => object::remove(path, id, cli.json),
+        Command::Snapshot(SnapshotCommand::Take { path, label, note }) => {
+            snapshot::take(path, label.as_deref(), note.as_deref(), cli.json)
+        }
+        Command::Snapshot(SnapshotCommand::List { path }) => snapshot::list(path, cli.json),
+        Command::Snapshot(SnapshotCommand::Show { path, id }) => snapshot::show(path, id, cli.json),
+        Command::Snapshot(SnapshotCommand::Diff {
+            path,
+            from,
+            against,
+        }) => snapshot::diff(path, from, against.as_deref(), cli.json),
+        Command::Snapshot(SnapshotCommand::Remove { path, id }) => {
+            snapshot::remove(path, id, cli.json)
+        }
         Command::Scope(ScopeCommand::List { path }) => scope::list(path, cli.json),
         Command::Scope(ScopeCommand::Add {
             path,
@@ -933,14 +1010,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.7",
+            "milestone": "M12.8",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.7 (identifier suggestions)");
+        println!("  milestone:               M12.8 (engagement snapshots)");
     }
 }
 
@@ -1011,7 +1088,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.7"),
+            help.contains("M12.8"),
             "users must not mistake this for a finished tool"
         );
     }

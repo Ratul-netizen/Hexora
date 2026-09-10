@@ -24,6 +24,7 @@
 //! and no host pattern containing a wildcard matches a bare address. Authorization
 //! for a hostname does not extend to whatever address it currently resolves to.
 
+use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use serde::{Deserialize, Serialize};
@@ -181,6 +182,32 @@ impl ScopeRule {
                 }
                 host == pattern
             }
+        }
+    }
+}
+
+impl fmt::Display for ScopeRule {
+    /// One line a tester can read back, and retype.
+    ///
+    /// Lived in two copies — one in the CLI, one in the desktop — and they had drifted:
+    /// the window's version dropped the port list, so a rule covering only `:8443`
+    /// displayed as though it covered every port. A rule is shown in enough places
+    /// that its rendering belongs with the type.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.scheme {
+            SchemeMatch::Any => {}
+            SchemeMatch::HttpOnly => write!(f, "http://")?,
+            SchemeMatch::HttpsOnly => write!(f, "https://")?,
+        }
+        write!(f, "{}", self.host)?;
+        if !self.ports.is_empty() {
+            let ports: Vec<String> = self.ports.iter().map(ToString::to_string).collect();
+            write!(f, ":{}", ports.join(","))?;
+        }
+        match &self.path {
+            PathMatch::Any => Ok(()),
+            PathMatch::Prefix { value } => write!(f, "{value}*"),
+            PathMatch::Exact { value } => write!(f, "{value}"),
         }
     }
 }

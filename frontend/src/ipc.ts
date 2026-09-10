@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 5;
+export const EXPECTED_RPC_CONTRACT_VERSION = 6;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -409,6 +409,103 @@ export const addObject = (declaration: {
 
 export const removeObject = (id: string): Promise<ObjectView[]> =>
   invoke<ObjectView[]>("object_remove", { id });
+
+/* ------------------------------------------------------------------ *
+ * Engagement snapshots
+ * ------------------------------------------------------------------ */
+
+/** A snapshot's header, as the list shows it. */
+export interface SnapshotView {
+  id: string;
+  label: string;
+  note: string | null;
+  taken_at: string;
+  tool_version: string;
+  exchanges: number;
+  candidates: number;
+  findings: number;
+  identities: number;
+  objects: number;
+}
+
+/** How a claim stood at a moment. */
+export interface FindingState {
+  severity: string;
+  confidence: string;
+  status: string;
+  evidence: number;
+}
+
+/**
+ * Why a claim present earlier is absent later.
+ *
+ * None of these means "fixed". A finding is what a test produced; its absence is the
+ * absence of a result, and only `not_reproduced` is evidence about the application at
+ * all — even that one says only that it did not come back.
+ */
+export type WhyGone =
+  | { kind: "not_reproduced" }
+  | { kind: "source_silent" }
+  | { kind: "tool_changed"; from: string; to: string };
+
+/** What became of a claim between two snapshots. */
+export type Change =
+  | { kind: "appeared"; state: FindingState }
+  | { kind: "unchanged"; state: FindingState; restated: boolean }
+  | { kind: "changed"; before: FindingState; after: FindingState }
+  | { kind: "gone"; before: FindingState; because: WhyGone };
+
+export interface ClaimChange {
+  claim: { target: string; title: string; location: unknown };
+  source: { kind: string };
+  change: Change;
+}
+
+export interface ScopeLine {
+  rule: {
+    host: string;
+    ports: number[];
+    scheme: string;
+    path: { kind?: string; value?: string };
+  };
+  excluded: boolean;
+}
+
+export interface Count {
+  before: number;
+  after: number;
+}
+
+export interface Comparison {
+  from: { id: string; label: string; taken_at: string; tool_version: string };
+  to: { id: string; label: string; taken_at: string; tool_version: string };
+  /** False means every disappearance below is inconclusive. */
+  same_tool: boolean;
+  findings: ClaimChange[];
+  scope: { added: ScopeLine[]; removed: ScopeLine[] };
+  identities: { added: string[]; removed: string[] };
+  objects: { added: string[]; removed: string[] };
+  counts: { exchanges: Count; candidates: Count; findings: Count };
+}
+
+export const listSnapshots = (): Promise<SnapshotView[]> =>
+  invoke<SnapshotView[]>("snapshots_list");
+
+/** Reads the project and writes one row. Sends nothing, copies no traffic. */
+export const takeSnapshot = (
+  label: string | null,
+  note: string | null,
+): Promise<SnapshotView[]> =>
+  invoke<SnapshotView[]>("snapshot_take", { label, note });
+
+export const deleteSnapshot = (id: string): Promise<SnapshotView[]> =>
+  invoke<SnapshotView[]>("snapshot_delete", { id });
+
+/** `to` of null compares against the project as it stands. */
+export const compareSnapshots = (
+  from: string,
+  to: string | null,
+): Promise<Comparison> => invoke<Comparison>("snapshot_compare", { from, to });
 
 /* ------------------------------------------------------------------ *
  * Identifier suggestions

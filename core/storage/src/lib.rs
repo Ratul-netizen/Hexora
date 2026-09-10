@@ -62,6 +62,7 @@ pub mod migrations;
 pub mod objects;
 pub mod repository;
 pub mod settings;
+pub mod snapshots;
 pub mod traffic;
 
 use std::path::{Path, PathBuf};
@@ -82,6 +83,7 @@ pub use crate::findings::{FindingFilter, FindingStore, Recorded};
 pub use crate::identities::IdentityStore;
 pub use crate::objects::{ConstructedAttempt, ObjectStore};
 pub use crate::settings::Settings;
+pub use crate::snapshots::{capture, SnapshotStore, SnapshotSummary};
 pub use crate::traffic::{CapturedExchange, StoredRequest, StoredTraffic, TrafficStore};
 
 /// A handle to a project's relational metadata database.
@@ -269,6 +271,11 @@ impl Project {
     /// The findings recorded against this project.
     pub fn findings(&self) -> FindingStore {
         FindingStore::new(self.metadata.clone())
+    }
+
+    /// Point-in-time records of this engagement, for answering "what changed?".
+    pub fn snapshots(&self) -> SnapshotStore {
+        SnapshotStore::new(self.metadata.clone())
     }
 
     /// The project's settings, including the scope every automated subsystem is held

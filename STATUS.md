@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.7 (persisted identifier suggestions)
+- **Last updated:** M12.8 (engagement snapshots)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -34,8 +34,15 @@ milestone.
 | **M12.5** — Constructed attempts | The matrix replays; this builds. Declare which identifiers are objects and who owns them, and a run substitutes one into the object slot of a captured request and sends it as each identity — the request nobody captured, which is the only way to ask "can User B reach *User A's* invoice?" from User B's own traffic. Nothing is guessed, a 200 is not a finding, every generated request records the substitution behind it, and the substitution touches nothing else in the message |
 | **M12.6** — Wire-exact traffic | Response bodies are kept in both forms — the bytes that arrived and the bytes they decode to — so `--wire` returns the gzip stream and `--body` the JSON inside it. Requests can be sent byte for byte: `RequestSource::{Structured, Raw}`, a `--raw` flag and a mode switch in the window. Bare LF stays bare LF, casing and duplicates survive, a wrong `Content-Length` is sent wrong. Raw mode still goes through the same scope guard, and Hexora no longer claims byte-preservation it does not have |
 | **M12.7** — Identifier suggestions | Hexora reads a project's own traffic and offers the values that behave like object identifiers. It stops there: a candidate has no owner field, accepting one declares nothing, and the analyzer takes no transport so it cannot send. A value is offered because it *varies where an identifier would* against a path that is holding still — not because it looks numeric — so `v2` is never suggested and `/status` against `/profile` suggests neither. Each suggestion carries the signed signals behind it rather than a confidence number, so "why did it suggest this?" has an answer you can disagree with. Suggestions persist across sessions; a decision survives re-analysis. `hexora identifiers` and an Identifiers tab in the window |
+| **M12.8** — Engagement snapshots | A retest can finally answer *what changed*. `hexora snapshot take` records the project as it stood — claims, scope, identities, declared objects — as copies rather than references, so a later run cannot rewrite its own past. `snapshot diff` compares two moments, or one moment against the project as it stands, and it never says *fixed*: a claim that stopped appearing is reported as gone **with the reason**, and only one of the three reasons is about the application at all. A claim nothing re-tested between the two is listed as standing-but-untested rather than counted as unchanged, which is the failure a real retest run exposed. Credentials never reach a snapshot |
 
 ## Next
+
+**A second visit is now answerable.** M12.8 gives the engagement a memory: what was
+true then, frozen, so what is true now can be compared against it. The discipline is
+the same one the rest of the tool runs on — Hexora will say a claim is *gone* and say
+why, and it will not say *fixed*, because a test that produced nothing has established
+nothing about an application.
 
 **Every object identifier no longer has to be typed by somebody.** M12.5 could build
 the request nobody captured, but only from identifiers a human had already declared,
@@ -55,7 +62,6 @@ making every automated result explainable, reproducible and safe.* Full detail i
 [`docs/roadmap.md`](docs/roadmap.md).
 
 ```text
-M12.8  Engagement snapshots          what changed since the last assessment
 M13.1  Verification framework        detector ≠ finding, enforced by the type system
 M13.2  Passive scanner               observations over captured traffic, no new requests
 M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
@@ -67,13 +73,12 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
-- **M12.8 — engagement snapshots.** A consultant tests, the client fixes, the
-  consultant re-tests, and the question on the second visit is *what changed*. Scope,
-  identities, traffic, declared objects, findings and detector versions, captured as a
-  point in time, so Hexora can say "this existed last time and is fixed" rather than
-  producing a second report nobody can diff against the first.
+- **M13.1 — the verification framework.** Everything after it is a scanner, and a
+  scanner is only worth having if a detector's suspicion and a finding's claim are
+  different things the type system will not let anybody confuse. That is the gate the
+  passive and active scanners are built behind, not a refactor to do afterwards.
 
-- **Attack chains** that retain evidence at every step, later in M12.
+Still open in M12: **attack chains** that retain evidence at every step.
 
 **Not before those, however tempting:** HTTP/2 or HTTP/3 fuzzing, WebSocket fuzzing,
 large payload generators, autonomous AI exploitation, hundreds of vulnerability

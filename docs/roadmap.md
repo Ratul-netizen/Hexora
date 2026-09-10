@@ -62,7 +62,7 @@ top of them rather than beside them.
 
 ```text
 M12.7  Identifier suggestions        candidates a human confirms, never assertions  ✔
-M12.8  Engagement snapshots          what changed since the last assessment
+M12.8  Engagement snapshots          what changed since the last assessment  ✔
 M13.1  Verification framework        detector ≠ finding, enforced by the type system
 M13.2  Passive scanner               observations over captured traffic, no new requests
 M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
@@ -332,7 +332,7 @@ Built as described, with three decisions worth recording:
 - **`IdentifierCandidate` has no owner field**, and neither does its table. Security
   invariant 10 records this, with the tests that hold it.
 
-**M12.8 — Engagement snapshots** · PLANNED
+**M12.8 — Engagement snapshots** · DONE
 
 An engagement is not one moment. A consultant tests, the client fixes, the consultant
 re-tests — and the question that matters on the second visit is *what changed*.
@@ -350,6 +350,20 @@ of it; the other half is being able to say which run a claim belonged to.
 Detector versions are in the list deliberately. A finding that disappeared because the
 application was fixed and one that disappeared because a check was changed are not the
 same event, and a regression report that cannot tell them apart is worse than none.
+
+Built as described, with four decisions worth recording:
+
+- **A snapshot copies rather than references.** The findings store updates a claim in
+  place on a re-run, so a snapshot that pointed at rows would rewrite its own past.
+- **It never says *fixed*.** Every disappearance carries a reason, and only one of the
+  three is about the application at all. Security invariant 11.
+- **A claim nobody re-tested is reported as such.** Found by running an actual retest:
+  the application was repaired, the matrix re-ran and raised nothing, and the old claim
+  sat there looking like a current result — because a run that produces no claim never
+  writes to the claim it did not produce.
+- **Detector versions are the tool version, honestly labelled.** Hexora has no registry
+  of which checks ran until M13.1, so "ran and found nothing" and "never ran" are
+  reported as one inconclusive answer rather than guessed apart.
 
 ---
 

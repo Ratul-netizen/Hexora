@@ -26,7 +26,7 @@ influenced part of the process.
 | Crate | Role | Status |
 | ----- | ---- | ------ |
 | `core/types` | Domain model: HTTP messages, IDs, scope, identities, findings, limits, secrets, errors | **Implemented** |
-| `core/storage` | SQLite metadata database, migrations, content-addressed blob store, traffic, identities, findings, project settings | **Implemented** |
+| `core/storage` | SQLite metadata database, migrations, content-addressed blob store, traffic, identities, findings, identifier candidates, engagement snapshots, project settings | **Implemented** |
 | `core/engine` | Transport boundary, scope enforcement, extension permissions, AI tool gate | **Implemented** |
 | `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
@@ -186,6 +186,35 @@ captured traffic → candidate → (accept) → still a candidate
 Accepting a candidate records that it is an identifier and nothing else. Nothing
 promotes a candidate to a declaration automatically, and `IdentifierCandidate` has no
 field an owner could be written into. See invariant 10.
+
+## Live stores and one that is not
+
+Every store in `core/storage` is live except one. Findings are refreshed in place when
+a test is re-run, candidates re-scored, scope edited — which is right for a working
+project and useless for the question a retest asks.
+
+```text
+live      traffic · identities · objects · candidates · findings · settings
+frozen    snapshots
+```
+
+A `Snapshot` therefore holds **copies**, not references. Pointing at `findings.id`
+would let a re-run rewrite the project's own past, and a regression report built on
+that would be worse than none. It copies the claims, their severity, confidence and
+triage state, the scope, the identities (labels and privilege — never credentials) and
+the declared objects. It does not copy traffic: bodies are the largest thing in a
+project by orders of magnitude, and a snapshot exists to be diffed, not restored.
+
+The comparison itself is a pure function in `core/types` — two records in, one answer
+out — so it reads no project and can be re-run over exported snapshots years later with
+the same result. `SnapshotStore` has no update method, which is what makes the summary
+columns on the row safe: they are computed from the contents at insert time and nothing
+exists that could change one without the other.
+
+`Contents` is stored as one JSON document, so it carries `#[serde(default)]`: a
+snapshot taken by an older build must stay readable when a later one adds a field, and
+any field added there must default to *the cautious answer*, because that is what an
+old snapshot will silently supply.
 
 ## Storage
 

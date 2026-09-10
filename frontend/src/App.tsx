@@ -7,6 +7,7 @@ import { IdentifiersView } from "./views/IdentifiersView";
 import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
 import { SetupView } from "./views/SetupView";
+import { SnapshotsView } from "./views/SnapshotsView";
 import {
   currentProject,
   describeError,
@@ -32,7 +33,8 @@ type Tab =
   | "identifiers"
   | "authz"
   | "findings"
-  | "report";
+  | "report"
+  | "snapshots";
 
 /** The tab strip, in the order the work happens in. */
 const TABS: { id: Tab; label: string }[] = [
@@ -43,6 +45,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "authz", label: "Authorization" },
   { id: "findings", label: "Findings" },
   { id: "report", label: "Report" },
+  { id: "snapshots", label: "Snapshots" },
 ];
 
 export default function App() {
@@ -189,6 +192,9 @@ export default function App() {
           />
         )}
         {tab === "report" && <ReportView hasProject={project !== null} />}
+        {tab === "snapshots" && (
+          <SnapshotsView hasProject={project !== null} />
+        )}
       </main>
 
       <footer>

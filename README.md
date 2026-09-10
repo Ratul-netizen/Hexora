@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.7 — the bytes are the bytes, and the ids are suggestions
+## Status: M12.8 — an engagement with a memory
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -79,11 +79,12 @@ work.
 | Declared object identifiers and constructed cross-identity attempts (`hexora object`, `authz --construct`) | **IMPLEMENTED** |
 | Findings persisted with their evidence, triage (`hexora findings`) | **IMPLEMENTED** |
 | Suggested identifiers with the reasoning behind each one, never an ownership claim (`hexora identifiers`) | **IMPLEMENTED** |
+| Engagement snapshots and retest comparison, which report why a claim is gone and never that it is fixed (`hexora snapshot`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
-| Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings and the report | **IMPLEMENTED** |
+| Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings, the report and snapshots | **IMPLEMENTED** |
 | Reports: Markdown / HTML / JSON, every claim citing its exchange (`hexora report`) | **IMPLEMENTED** |
-| Attack chains, engagement snapshots | **PLANNED (rest of M12)** |
+| Attack chains | **PLANNED (rest of M12)** |
 | Connection reuse | **DEFERRED (M1.4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
 

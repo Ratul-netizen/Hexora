@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.7",
+        milestone: "M12.8",
     }
 }
 
@@ -844,6 +844,129 @@ pub fn object_add(
 }
 
 // ---------------------------------------------------------------------------
+// Engagement snapshots
+// ---------------------------------------------------------------------------
+
+/// A snapshot's header, as the window lists it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotView {
+    pub id: String,
+    pub label: String,
+    pub note: Option<String>,
+    pub taken_at: String,
+    pub tool_version: String,
+    pub exchanges: u64,
+    pub candidates: u64,
+    pub findings: u64,
+    pub identities: u64,
+    pub objects: u64,
+}
+
+fn snapshot_view(snapshot: &hexora_storage::SnapshotSummary) -> SnapshotView {
+    SnapshotView {
+        id: snapshot.id.to_string(),
+        label: snapshot.label.clone(),
+        note: snapshot.note.clone(),
+        taken_at: snapshot.taken_at.to_rfc3339(),
+        tool_version: snapshot.tool_version.clone(),
+        exchanges: snapshot.exchanges,
+        candidates: snapshot.candidates,
+        findings: snapshot.findings,
+        identities: snapshot.identities,
+        objects: snapshot.objects,
+    }
+}
+
+/// Lists the snapshots a project holds, newest first.
+#[tauri::command]
+pub fn snapshots_list(state: State<'_, AppState>) -> CommandResult<Vec<SnapshotView>> {
+    let project = open(&state)?;
+    Ok(project
+        .snapshots()
+        .list()
+        .map_err(fail)?
+        .iter()
+        .map(snapshot_view)
+        .collect())
+}
+
+/// Records the project as it stands.
+///
+/// A read plus one row: nothing is sent, no captured traffic is altered, and no
+/// finding is created. The traffic itself is not copied — a snapshot is a record to
+/// compare against, not a backup.
+#[tauri::command]
+pub fn snapshot_take(
+    state: State<'_, AppState>,
+    label: Option<String>,
+    note: Option<String>,
+) -> CommandResult<Vec<SnapshotView>> {
+    let project = open(&state)?;
+    let store = project.snapshots();
+    let existing = store.count().map_err(fail)?;
+
+    let snapshot = hexora_types::snapshot::Snapshot {
+        id: hexora_types::ids::SnapshotId::new(),
+        label: label
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| format!("snapshot {}", existing + 1)),
+        note: note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        taken_at: chrono::Utc::now(),
+        tool_version: hexora_types::VERSION.to_string(),
+        schema_version: project.metadata().schema_version().map_err(fail)?,
+        contents: hexora_storage::capture(&project).map_err(fail)?,
+    };
+    store.put(&snapshot).map_err(fail)?;
+    snapshots_list(state)
+}
+
+/// Deletes a snapshot, for one that was mislabelled.
+#[tauri::command]
+pub fn snapshot_delete(state: State<'_, AppState>, id: String) -> CommandResult<Vec<SnapshotView>> {
+    let project = open(&state)?;
+    let snapshot_id: hexora_types::ids::SnapshotId = id.parse().map_err(fail)?;
+    if !project.snapshots().delete(snapshot_id).map_err(fail)? {
+        return Err(format!("no snapshot {id}"));
+    }
+    snapshots_list(state)
+}
+
+/// Compares a snapshot with a later one, or with the project as it stands.
+///
+/// Returns the domain type rather than a view struct: `Comparison` is already the
+/// shape a reader needs, carries no credential and nothing to redact, and a parallel
+/// struct here would be one more place for the vocabulary to drift. The word "fixed"
+/// does not appear in it, and that is enforced where it is produced.
+#[tauri::command]
+pub fn snapshot_compare(
+    state: State<'_, AppState>,
+    from: String,
+    to: Option<String>,
+) -> CommandResult<hexora_types::snapshot::Comparison> {
+    let project = open(&state)?;
+    let store = project.snapshots();
+
+    let from_id: hexora_types::ids::SnapshotId = from.parse().map_err(fail)?;
+    let earlier = store.get(from_id).map_err(fail)?;
+
+    let later = match to.as_deref().filter(|id| !id.trim().is_empty()) {
+        Some(id) => {
+            let to_id: hexora_types::ids::SnapshotId = id.parse().map_err(fail)?;
+            store.get(to_id).map_err(fail)?
+        }
+        // What a retest actually asks, and it must not require saving first.
+        None => hexora_types::snapshot::Snapshot::of_current(
+            hexora_storage::capture(&project).map_err(fail)?,
+            hexora_types::VERSION,
+            project.metadata().schema_version().map_err(fail)?,
+        ),
+    };
+
+    Ok(hexora_types::snapshot::compare(&earlier, &later))
+}
+
+// ---------------------------------------------------------------------------
 // Identifier suggestions
 // ---------------------------------------------------------------------------
 
@@ -1554,18 +1677,13 @@ fn scope_view(scope: &Scope) -> ScopeView {
 }
 
 /// One scope rule, as a line a tester can read back and recognise.
+/// One scope rule, as a line.
+///
+/// Delegates to the type. This had its own copy and had drifted from the CLI's: it
+/// dropped the port list, so a rule covering only `:8443` displayed in the window as
+/// though it covered every port.
 fn rule_line(rule: &ScopeRule) -> String {
-    let scheme = match rule.scheme {
-        SchemeMatch::Any => "",
-        SchemeMatch::HttpOnly => "http://",
-        SchemeMatch::HttpsOnly => "https://",
-    };
-    let path = match &rule.path {
-        PathMatch::Any => String::new(),
-        PathMatch::Prefix { value } => format!("{value}*"),
-        PathMatch::Exact { value } => value.clone(),
-    };
-    format!("{scheme}{}{path}", rule.host)
+    rule.to_string()
 }
 
 fn identity_view(identity: &Identity) -> IdentityView {
