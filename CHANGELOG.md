@@ -132,8 +132,56 @@ since a typed URL is a human decision.
   back-end that decodes again would route past an exclusion. Decoding now runs to a
   fixed point. Found by the `normalization_is_idempotent` property test.
 
+### Added — M1.3, streaming bodies
+
+- Incremental chunked state machine, so a response is decoded as it arrives rather than
+  after it is complete.
+- `BodyStream` borrows the connection, letting the proxy relay a body it never buffers.
+- `send_streaming()` returns at the response head, which is what makes interception on
+  large downloads possible at all.
+
+### Added — M2, the intercepting proxy
+
+- **M2.1** Per-installation certificate authority: generated on first use, never
+  shipped, RFC 1123 host validation before minting, and one command to remove it.
+- **M2.2** HTTP proxy: absolute-form forwarding, hop-by-hop header stripping, capture
+  through an `ExchangeObserver`, bound to loopback unless told otherwise.
+- **M2.3** TLS interception: `CONNECT` tunnelling, the double handshake, and selective
+  interception — `--exempt` for pinned applications, `--only` to decrypt one target and
+  leave the tester's own browsing alone.
+- **M2.4** Interception hooks: forward, replace, drop or answer a request without
+  contacting the server; forward, replace or drop a response. The queue tracks whether
+  a consumer is attached, so an interceptor nobody is watching cannot wedge a browser.
+
+### Added — M3, traffic storage
+
+- `TrafficStore`: the first real implementation over the metadata database and blob
+  store built in M0. One transaction per exchange, because a request recorded without
+  its response is evidence with a hole in it.
+- Bodies are content-addressed and deduplicated — ten identical 404s cost one blob.
+- **Both body forms are kept.** Schema revision 2 adds `encoded_body_hash`,
+  `encoded_body_size` and `content_encoding`, so a finding about a compression side
+  channel or a gzip parser differential remains examinable. As a separate migration:
+  a released migration is never edited.
+- Framing quirks and TLS handshake details are stored per exchange, so smuggling
+  signals can be searched for rather than noticed as they scroll past.
+- `ProjectCapture` connects the proxy to the store. Writes go to a blocking pool and a
+  failure logs rather than propagating: a full disk must not break a browsing session.
+  Out-of-scope traffic is captured by default — the proxy has to see a host before a
+  tester can decide it is in scope.
+- `hexora proxy --project DIR` records; `hexora history DIR` reads back, newest first,
+  with keyset pagination that stays stable while capture continues appending.
+- `hexora history DIR --body ID` writes one response body to stdout unmodified,
+  `--wire` asks for the form that arrived.
+
+### Fixed
+
+- `hexora project info` printed `@1789041608` where a timestamp belonged; it is now
+  RFC 3339, matching what the traffic store writes.
+
 ### Not implemented
 
-Streaming bodies, connection reuse and redirects return `NotImplemented` naming the
-milestone that will provide them. Compressed bodies are decoded in place and the
-original wire bytes are not yet retained — closed in M3. See `docs/roadmap.md`.
+Connection reuse and redirects return `NotImplemented` naming the milestone that will
+provide them. The traffic store keeps both body forms, but the transport still returns
+only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
+the M1.5 gap. See `docs/roadmap.md`.

@@ -2,15 +2,15 @@
 //!
 //! Hexora's intercepting proxy.
 //!
-//! ## Status (M2.2)
+//! ## Status (M3)
 //!
-//! Implemented: the interception certificate authority, and a plain-HTTP proxy that
-//! forwards absolute-form requests, strips hop-by-hop headers and reports every
-//! exchange to an observer.
+//! Implemented: the interception certificate authority; a proxy that forwards
+//! absolute-form requests and tunnels `CONNECT`, with selective TLS interception;
+//! interception hooks that can rewrite, replace, drop or answer a message; and
+//! [`ProjectCapture`], which persists every exchange into a project.
 //!
-//! Not implemented yet: `CONNECT` tunnelling and TLS interception (M2.3),
-//! interception hooks (M2.4) and trust installation (M2.5). A `CONNECT` is answered
-//! with a clear 501 rather than left to hang.
+//! Not implemented yet: trust installation as a first-run flow (M2.5). The CLI prints
+//! per-platform instructions in the meantime.
 //!
 //! ## The CA is the security-critical part
 //!
@@ -22,11 +22,13 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod ca;
+pub mod capture;
 pub mod hook;
 pub mod intercept;
 pub mod server;
 
 pub use ca::{CertificateAuthority, LeafCertificate};
+pub use capture::ProjectCapture;
 pub use hook::{
     InterceptDirections, InterceptHandle, Interceptor, ManualInterceptor, PassThrough,
     RequestVerdict, ResponseVerdict,

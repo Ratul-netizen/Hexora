@@ -8,13 +8,16 @@ use hexora_engine::guard::ScopeDecision;
 use hexora_engine::transport::Exchange;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_proxy::{
-    CertificateAuthority, ExchangeObserver, InterceptionPolicy, ProxyConfig, ProxyServer,
+    CertificateAuthority, ExchangeObserver, InterceptionPolicy, ProjectCapture, ProxyConfig,
+    ProxyServer,
 };
 use hexora_types::scope::Scope;
 use hexora_types::{HexoraError, Result};
 
 /// Options for `hexora proxy`.
 pub struct ProxyArgs<'a> {
+    pub project: Option<&'a Path>,
+    pub in_scope_only: bool,
     pub listen: &'a str,
     pub ca_dir: Option<&'a Path>,
     pub exempt: &'a [String],
@@ -51,6 +54,21 @@ impl ExchangeObserver for ConsoleObserver {
     }
 }
 
+/// Sends every exchange to several observers.
+///
+/// Printing and recording are separate concerns and both are wanted at once: the
+/// console line is what tells a tester the proxy is working, and the project is what
+/// survives the session.
+struct Fanout(Vec<Box<dyn ExchangeObserver>>);
+
+impl ExchangeObserver for Fanout {
+    fn observe(&self, exchange: &Exchange, decision: ScopeDecision) {
+        for observer in &self.0 {
+            observer.observe(exchange, decision);
+        }
+    }
+}
+
 /// Runs the proxy until interrupted.
 pub fn run(args: ProxyArgs<'_>) -> Result<()> {
     let bind: SocketAddr = args
@@ -79,6 +97,24 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         ..Default::default()
     };
 
+    // Opened before the runtime starts so a bad path fails immediately with a clear
+    // message, rather than after the listener is already advertised as ready.
+    let project = match args.project {
+        Some(path) => Some(crate::open_project(path)?),
+        None => None,
+    };
+
+    let mut observers: Vec<Box<dyn ExchangeObserver>> = vec![Box::new(ConsoleObserver)];
+    if let Some(project) = &project {
+        let capture = ProjectCapture::new(Arc::new(project.traffic()));
+        let capture = if args.in_scope_only {
+            capture.in_scope_only()
+        } else {
+            capture
+        };
+        observers.push(Box::new(capture));
+    }
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -91,7 +127,7 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
             // asked for it, and the proxy has to see a host before it can be scoped.
             Arc::new(Scope::new()),
             transport,
-            Arc::new(ConsoleObserver),
+            Arc::new(Fanout(observers)),
             ca,
         )
         .await?;
@@ -109,6 +145,19 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
             eprintln!("         targets are encrypted but NOT authenticated.");
             eprintln!();
         }
+        match args.project {
+            Some(path) => {
+                eprintln!("Recording into {}", path.display());
+                if args.in_scope_only {
+                    eprintln!("  only in-scope traffic is being recorded");
+                }
+                eprintln!("Browse it later with: hexora history {}", path.display());
+            }
+            None => {
+                eprintln!("NOT recording: pass --project DIR to keep what you capture.");
+            }
+        }
+        eprintln!();
         eprintln!("  + in scope   ? out of scope   - refused");
         eprintln!();
 
@@ -224,6 +273,8 @@ mod tests {
     #[test]
     fn a_bad_listen_address_is_rejected_with_the_value() {
         let err = run(ProxyArgs {
+            project: None,
+            in_scope_only: false,
             listen: "not-an-address",
             ca_dir: None,
             exempt: &[],

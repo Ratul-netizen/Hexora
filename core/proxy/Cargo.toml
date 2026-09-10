@@ -11,6 +11,7 @@ repository.workspace = true
 hexora-types.workspace = true
 hexora-engine.workspace = true
 hexora-http.workspace = true
+hexora-storage.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 tokio.workspace = true

@@ -26,11 +26,18 @@ pub struct Migration {
 /// Every migration, in application order.
 ///
 /// Appending here is the only supported way to change the schema.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    sql: include_str!("../migrations/0001_initial.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial",
+        sql: include_str!("../migrations/0001_initial.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "wire_bodies",
+        sql: include_str!("../migrations/0002_wire_bodies.sql"),
+    },
+];
 
 /// The schema version this build expects.
 pub fn target_version() -> u32 {
@@ -135,6 +142,39 @@ mod tests {
             matches!(err, StorageError::SchemaTooNew { found: 9999, .. }),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn a_v1_database_upgrades_in_place_without_losing_data() {
+        // The property that makes migrations safe: an existing project keeps its
+        // contents. A tester's evidence must survive a Hexora upgrade.
+        let mut conn = memory_db();
+        conn.execute_batch(MIGRATIONS[0].sql).unwrap();
+        conn.execute_batch("PRAGMA user_version = 1").unwrap();
+        conn.execute_batch(
+            "INSERT INTO targets (id, host, port, secure, first_seen_at, last_seen_at)
+             VALUES ('tgt_1', 'example.com', 443, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO requests (id, target_id, origin, method, path, http_version, headers_raw, sent_at)
+             VALUES ('req_1', 'tgt_1', 'proxy', 'GET', '/kept', 'HTTP/1.1', x'', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+
+        assert_eq!(migrate(&mut conn).unwrap(), target_version());
+
+        let path: String = conn
+            .query_row("SELECT path FROM requests WHERE id = 'req_1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(path, "/kept", "an upgrade must not lose captured traffic");
+
+        // And the new columns exist with their defaults.
+        let quirks: String = conn
+            .query_row("SELECT quirks FROM requests WHERE id = 'req_1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(quirks, "[]");
     }
 
     #[test]

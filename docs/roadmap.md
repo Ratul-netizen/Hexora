@@ -108,10 +108,14 @@ instructions for Windows and Linux.
 The CA is the security-critical part: per-installation, never shipped, easy to
 regenerate and remove. See [`threat-model.md`](threat-model.md).
 
-**M3 — Traffic history** · PLANNED
+**M3 — Traffic history** · DONE
 
-SQLite implementations of the repository traits, capture pipeline, history browsing
-with filtering and pagination, blob garbage collection.
+`TrafficStore` over SQLite and the content-addressed blob store, the proxy capture
+pipeline, and paginated history browsing from the CLI. Both the wire and decoded forms
+of every body are kept, along with framing quirks and TLS details.
+
+Still open here: filtering beyond pagination, blob garbage collection, and threading
+the encoded bytes out of the transport so `encoded_body` is populated rather than NULL.
 
 **M4 — Repeater** · PLANNED
 

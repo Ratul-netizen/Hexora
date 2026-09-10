@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M2.4 (interception hooks)
+- **Last updated:** M3 (traffic storage)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -23,13 +23,14 @@ milestone.
 | **M2.2** — HTTP proxy | Absolute-form forwarding, hop-by-hop stripping, capture via an observer, loopback by default |
 | **M2.3** — TLS interception | `CONNECT` tunnelling, double handshake, selective interception with exempt and only-mode |
 | **M2.4** — Interception hooks | Forward / replace / drop / respond on requests, forward / replace / drop on responses, with a queue that cannot wedge the browser |
+| **M3** — Traffic storage | Proxied exchanges persist into a project: metadata in SQLite, bodies content-addressed and deduplicated, both the wire and decoded forms kept, TLS details and framing quirks recorded, keyset-paginated `hexora history` |
 
 ## Next
 
-**M3 — traffic storage.** Captured exchanges currently scroll past in the console and
-are then gone. M3 connects them to the SQLite metadata store and content-addressed blob
-store built in M0, which have been sitting unused since — and closes the M1.5 gap where
-compressed bodies are decoded in place without the original wire bytes being kept.
+**M4 — the repeater.** Traffic is now captured and browsable, so the obvious next move
+is to send it again: take an exchange out of history, edit it, resend it, and diff the
+two responses. Everything it needs already exists — the wire-preserving message model,
+the transport, and now the store to read from and write back to.
 
 M2.5 (trust installation and first-run) can follow; the CLI already prints per-platform
 instructions, so what remains there is desktop UX rather than mechanism.
@@ -37,9 +38,12 @@ instructions, so what remains there is desktop UX rather than mechanism.
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
 
-**Known gap to close in M3:** compressed responses are decoded in place, so the
-original wire bytes are not retained. That is at odds with "preserve the wire" and is
-only acceptable until the traffic store keeps both forms.
+**Debt carried out of M3:** the schema and the store keep both body forms, and the
+proxy records the `Content-Encoding` that was applied — but the transport still hands
+back only the decoded bytes, so `encoded_body` is written as NULL in practice. The
+column, the migration and the read path (`hexora history --body --wire`) are all in
+place; what remains is threading the encoded bytes out of `BodyStream::collect`. Until
+that lands, `--wire` returns the decoded body for compressed responses.
 
 Full plan: [`docs/roadmap.md`](docs/roadmap.md).
 
@@ -105,6 +109,11 @@ cargo run -p hexora-cli -- project init ./scratch/demo
 cargo run -p hexora-cli -- ca --export hexora-ca.crt
 cargo run -p hexora-cli -- proxy --listen 127.0.0.1:8080
 cargo run -p hexora-cli -- proxy --only target.example.com   # leave your own traffic alone
+
+# Capture into a project, then read it back.
+cargo run -p hexora-cli -- proxy --project ./scratch/demo
+cargo run -p hexora-cli -- history ./scratch/demo
+cargo run -p hexora-cli -- history ./scratch/demo --body req_01a08b… > response.bin
 ```
 
 ---

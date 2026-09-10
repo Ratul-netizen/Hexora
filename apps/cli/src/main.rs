@@ -14,6 +14,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
+mod history;
 mod project;
 mod proxy;
 mod send;
@@ -26,9 +27,9 @@ mod send;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M2.3. The intercepting proxy, HTTP/1.x engine \
-                  with TLS, and project management all work. The scanner, fuzzer and \
-                  repeater are not implemented yet."
+                  Development status: M3. The intercepting proxy, HTTP/1.x engine \
+                  with TLS, project management and traffic capture all work. The \
+                  scanner, fuzzer and repeater are not implemented yet."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -95,6 +96,20 @@ enum Command {
     /// Point a browser at it, install the CA, and Hexora sees the traffic. Every
     /// exchange is printed as it happens.
     Proxy {
+        /// Record every exchange into this project.
+        ///
+        /// Without it the proxy prints traffic and keeps nothing, which is fine for a
+        /// quick look and useless for an engagement.
+        #[arg(short, long, value_name = "DIR")]
+        project: Option<PathBuf>,
+
+        /// Record only in-scope traffic.
+        ///
+        /// Off by default: the proxy has to see a host before you can decide it is in
+        /// scope, so discarding out-of-scope exchanges would make scoping impossible.
+        #[arg(long, requires = "project")]
+        in_scope_only: bool,
+
         /// Address to listen on.
         #[arg(short, long, default_value = "127.0.0.1:8080")]
         listen: String,
@@ -137,6 +152,28 @@ enum Command {
         /// Delete the CA. Does not untrust it — remove it from trust stores too.
         #[arg(long)]
         delete: bool,
+    },
+
+    /// Browse traffic captured into a project.
+    History {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Maximum exchanges to list.
+        #[arg(short, long, default_value_t = 50)]
+        limit: u32,
+
+        /// Continue from the cursor printed by a previous page.
+        #[arg(long, value_name = "CURSOR", conflicts_with = "body")]
+        after: Option<String>,
+
+        /// Write one exchange's response body to stdout, by request id.
+        #[arg(long, value_name = "ID")]
+        body: Option<String>,
+
+        /// With --body, print the body as it arrived, before content decoding.
+        #[arg(long, requires = "body")]
+        wire: bool,
     },
 
     /// Print version and build information.
@@ -193,13 +230,36 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             project::init(path, name.as_deref(), cli.json)
         }
         Command::Project(ProjectCommand::Info { path }) => project::info(path, cli.json),
+        Command::History {
+            path,
+            limit,
+            after,
+            body,
+            wire,
+        } => match body {
+            Some(id) => history::body(history::BodyArgs {
+                project: path,
+                id,
+                wire: *wire,
+            }),
+            None => history::list(history::HistoryArgs {
+                project: path,
+                limit: *limit,
+                after: after.as_deref(),
+                json: cli.json,
+            }),
+        },
         Command::Proxy {
+            project,
+            in_scope_only,
             listen,
             ca_dir,
             exempt,
             only,
             insecure_upstream,
         } => proxy::run(proxy::ProxyArgs {
+            project: project.as_deref(),
+            in_scope_only: *in_scope_only,
             listen,
             ca_dir: ca_dir.as_deref(),
             exempt,
@@ -247,14 +307,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M2.3",
+            "milestone": "M3",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M2.3 (intercepting proxy)");
+        println!("  milestone:               M3 (traffic capture)");
     }
 }
 
@@ -313,7 +373,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M2.3"),
+            help.contains("M3"),
             "users must not mistake this for a finished tool"
         );
     }

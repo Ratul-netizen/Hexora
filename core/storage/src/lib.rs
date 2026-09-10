@@ -38,11 +38,12 @@
 //! Everything here is synchronous, because SQLite is. The async engine calls it via
 //! `tokio::task::spawn_blocking`.
 //!
-//! ## Status at M0
+//! ## Status at M3
 //!
-//! Implemented and tested: connection management, pragmas, migrations, the blob
-//! store. The repository traits in [`repository`] have no SQLite implementation yet —
-//! that lands with M3 (traffic history). Nothing here pretends otherwise.
+//! Implemented and tested: connection management, pragmas, migrations, the blob store
+//! and [`TrafficStore`] — captured exchanges, both body forms, and keyset-paginated
+//! history. The remaining traits in [`repository`] (findings, scope, sessions) still
+//! have no implementation; nothing here pretends otherwise.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
@@ -51,8 +52,10 @@ pub mod blob;
 pub mod error;
 pub mod migrations;
 pub mod repository;
+pub mod traffic;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -64,6 +67,7 @@ pub use rusqlite;
 
 pub use crate::blob::{BlobRef, BlobStore, FsBlobStore, MemoryBlobStore};
 pub use crate::error::{Result, StorageError};
+pub use crate::traffic::{CapturedExchange, StoredTraffic, TrafficStore};
 
 /// A handle to a project's relational metadata database.
 #[derive(Clone)]
@@ -171,7 +175,9 @@ impl MetadataDb {
 /// directory be excluded from a quick backup or moved to a different volume.
 pub struct Project {
     metadata: MetadataDb,
-    blobs: Box<dyn BlobStore>,
+    // `Arc` rather than `Box` so a `TrafficStore` can share the same store instead of
+    // opening a second handle onto the same directory.
+    blobs: Arc<dyn BlobStore>,
     root: Option<PathBuf>,
 }
 
@@ -198,7 +204,7 @@ impl Project {
         let blobs = FsBlobStore::open(root.join("blobs"))?;
         Ok(Self {
             metadata,
-            blobs: Box::new(blobs),
+            blobs: Arc::new(blobs),
             root: Some(root),
         })
     }
@@ -207,7 +213,7 @@ impl Project {
     pub fn in_memory() -> Result<Self> {
         Ok(Self {
             metadata: MetadataDb::in_memory()?,
-            blobs: Box::new(MemoryBlobStore::new()),
+            blobs: Arc::new(MemoryBlobStore::new()),
             root: None,
         })
     }
@@ -220,6 +226,14 @@ impl Project {
     /// The body store.
     pub fn blobs(&self) -> &dyn BlobStore {
         self.blobs.as_ref()
+    }
+
+    /// A traffic store over this project's metadata database and body store.
+    ///
+    /// Cheap: both halves are shared handles, so callers that need one per task make
+    /// one per task rather than passing a `&Project` around.
+    pub fn traffic(&self) -> TrafficStore {
+        TrafficStore::new(self.metadata.clone(), self.blobs.clone())
     }
 
     /// The project directory, or `None` for an in-memory project.

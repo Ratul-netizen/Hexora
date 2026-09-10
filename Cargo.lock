@@ -1504,6 +1504,7 @@ name = "hexora-cli"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chrono",
  "clap",
  "hexora-engine",
  "hexora-http",
@@ -1573,6 +1574,7 @@ dependencies = [
  "bytes",
  "hexora-engine",
  "hexora-http",
+ "hexora-storage",
  "hexora-types",
  "rcgen",
  "rustls",
@@ -1590,11 +1592,14 @@ dependencies = [
 name = "hexora-storage"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "chrono",
  "hexora-types",
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",
  "serde",
+ "serde_json",
  "sha2",
  "tempfile",
  "thiserror 2.0.20",

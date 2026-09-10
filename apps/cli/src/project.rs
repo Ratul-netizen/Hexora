@@ -105,12 +105,9 @@ fn count(conn: &rusqlite::Connection, table: &str) -> Result<i64> {
 }
 
 fn now_rfc3339() -> String {
-    // Kept dependency-free at M0; the engine uses `chrono` where formatting matters.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("@{now}")
+    // RFC 3339 in UTC, matching what the traffic store writes, so timestamps from
+    // different parts of a project sort and compare against each other.
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 #[cfg(test)]
