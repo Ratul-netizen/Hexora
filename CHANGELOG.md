@@ -179,9 +179,47 @@ since a typed URL is a human decision.
 - `hexora project info` printed `@1789041608` where a timestamp belonged; it is now
   RFC 3339, matching what the traffic store writes.
 
+### Added — M4, the repeater
+
+- **`hexora repeat`**: load a request from history, optionally open it in `$EDITOR`,
+  send it, and see what changed. The editing loop is the shell's, not a bespoke one —
+  a tester already has an editor they are fast in.
+- **Nothing is auto-corrected.** A `Content-Length` that disagrees with the body is
+  sent as written; a missing `Host` stays missing; duplicate `Transfer-Encoding`
+  headers survive. Every inconsistency is *reported* instead, with smuggling signals
+  listed first. Correcting these is how a tool turns a smuggling test into a test of
+  itself.
+- Editing `Host` does not redirect the TCP connection — that is a virtual-host routing
+  test, and following it could send the request somewhere never in scope. An
+  absolute-form request line does redirect it, because there the text is stating a
+  destination.
+- **Request branching.** Every send records what it derived from, so `--tree` shows a
+  request and its variants, and "which edit caused the 403?" is a query rather than a
+  memory. `requests.parent_id` has carried this since M0.
+- **Response comparison.** Status, headers, body length, first differing byte offset
+  and round-trip time. `is_interesting()` filters the noise a tester does not care
+  about: a `Date` that moved on or a rotated session cookie is listed but not flagged.
+- A byte-identical response that arrived seconds later **is** flagged — that is the
+  entire signal in a time-based blind injection, and a diff that called it "identical"
+  would hide the finding.
+- `hexora repeat --diff` compares two stored exchanges without sending anything, and
+  `--dry-run` prints exactly what would leave the machine.
+- Storage grew `TrafficStore::request`, `response_head` and `children`, so a stored
+  exchange can be reconstituted and resent. Header casing, order and duplicates
+  survive the round trip through the database.
+
+### Fixed
+
+- **The proxy forwarded `Proxy-Connection` to origin servers.** It is a de-facto
+  hop-by-hop header addressed to the proxy itself, so an origin was seeing a field the
+  client never intended it to see — directly at odds with the claim that a target
+  receives what the tester meant to send. Found by reading what a real target actually
+  received during an M4 smoke test, not by reading the code.
+
 ### Not implemented
 
 Connection reuse and redirects return `NotImplemented` naming the milestone that will
 provide them. The traffic store keeps both body forms, but the transport still returns
 only the decoded bytes, so `encoded_body` is NULL in practice — the remaining half of
-the M1.5 gap. See `docs/roadmap.md`.
+the M1.5 gap. A repeater request edited to bare-LF line endings is re-serialized with
+CRLF, and says so. See `docs/roadmap.md`.

@@ -1509,6 +1509,7 @@ dependencies = [
  "hexora-engine",
  "hexora-http",
  "hexora-proxy",
+ "hexora-repeater",
  "hexora-storage",
  "hexora-types",
  "serde_json",
@@ -1585,6 +1586,20 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
+ "tracing",
+]
+
+[[package]]
+name = "hexora-repeater"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "hexora-engine",
+ "hexora-http",
+ "hexora-storage",
+ "hexora-types",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 

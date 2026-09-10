@@ -42,7 +42,8 @@ pub mod transport;
 pub mod write;
 
 pub use body::{BodyStream, CollectedBody};
-pub use parse::{BodyFraming, Quirk, ResponseHead};
+pub use parse::{find_head_end, BodyFraming, Quirk, ResponseHead};
 pub use request::{parse_request_head, RequestHead, RequestTarget};
 pub use tls::{ClientIdentity, TlsConfig};
 pub use transport::{StreamingExchange, TcpTransport};
+pub use write::serialize_request;

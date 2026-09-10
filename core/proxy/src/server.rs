@@ -48,11 +48,17 @@ const READ_CHUNK: usize = 16 * 1024;
 ///
 /// Forwarding `Connection` in particular would let a client dictate the framing of the
 /// upstream connection, which is a smuggling primitive handed over for free.
+/// `Proxy-Connection` is not in the RFC — it is a de-facto header from the HTTP/1.0
+/// era that clients still send when they are configured to use a proxy. It is listed
+/// because it is addressed to *this* proxy: forwarding it means the origin sees a
+/// header the client never intended it to see, and Hexora's whole claim is that the
+/// target receives what the tester meant to send. Every other proxy strips it too.
 const HOP_BY_HOP: &[&str] = &[
     "connection",
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
+    "proxy-connection",
     "te",
     "trailer",
     "transfer-encoding",
@@ -840,6 +846,9 @@ mod tests {
         .await;
 
         let upstream_saw = received.lock().unwrap().clone();
+        // Covers Proxy-Connection too: it is addressed to this proxy, and an origin
+        // that sees it is seeing a header the client never meant it to have. Found by
+        // reading what a real target received during an M4 smoke test.
         assert!(
             !upstream_saw.to_lowercase().contains("connection:"),
             "hop-by-hop header leaked upstream: {upstream_saw}"

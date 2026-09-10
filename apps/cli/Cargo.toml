@@ -17,6 +17,7 @@ hexora-storage.workspace = true
 hexora-engine.workspace = true
 hexora-http.workspace = true
 hexora-proxy.workspace = true
+hexora-repeater.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 chrono.workspace = true

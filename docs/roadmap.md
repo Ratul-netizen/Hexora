@@ -117,11 +117,18 @@ of every body are kept, along with framing quirks and TLS details.
 Still open here: filtering beyond pagination, blob garbage collection, and threading
 the encoded bytes out of the transport so `encoded_body` is populated rather than NULL.
 
-**M4 — Repeater** · PLANNED
+**M4 — Repeater** · DONE
 
-Request tabs, editing, resend, collections, response comparison, and **request
-branching** — variants that retain their parent relationship, which neither competitor
-offers.
+Load from history, raw editing through `$EDITOR`, resend, response comparison, and
+**request branching** — variants retain their parent relationship, which neither
+competitor offers. `requests.parent_id` has carried this since M0.
+
+Nothing is auto-corrected: a `Content-Length` that disagrees with the body is reported
+and sent as written, because correcting it is how a tool turns a smuggling test into a
+test of itself.
+
+Still open here: collections, and byte-exact raw sending for requests whose line
+endings are deliberately non-conforming.
 
 > **At M4 Hexora is a usable tool rather than a foundation.** Everything after this is
 > making it a *better* tool than the alternatives.

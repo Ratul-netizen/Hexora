@@ -67,7 +67,7 @@ pub use rusqlite;
 
 pub use crate::blob::{BlobRef, BlobStore, FsBlobStore, MemoryBlobStore};
 pub use crate::error::{Result, StorageError};
-pub use crate::traffic::{CapturedExchange, StoredTraffic, TrafficStore};
+pub use crate::traffic::{CapturedExchange, StoredRequest, StoredTraffic, TrafficStore};
 
 /// A handle to a project's relational metadata database.
 #[derive(Clone)]

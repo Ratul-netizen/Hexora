@@ -49,6 +49,11 @@ pub struct CapturedExchange {
     pub content_encoding: Option<String>,
     /// Which subsystem produced the request.
     pub origin: &'static str,
+    /// The request this one was derived from, for repeater branching.
+    ///
+    /// A variant that keeps its parent is what makes "which edit caused the change?"
+    /// answerable weeks later, when the tab it was edited in is long gone.
+    pub parent: Option<RequestId>,
     /// Framing anomalies observed, as quirk names.
     pub quirks: Vec<String>,
     /// What the TLS handshake produced, for `https` exchanges.
@@ -80,6 +85,44 @@ pub struct StoredTraffic {
     pub quirks: Vec<String>,
     /// Whether the connection was TLS.
     pub secure: bool,
+}
+
+/// A stored request, read back in full.
+///
+/// The header block stays raw rather than being parsed here. Storage is a byte store:
+/// it is `hexora-http` that knows how to read a header block, and re-parsing on the
+/// way out is also what proves the bytes survived the round trip unaltered.
+#[derive(Debug, Clone)]
+pub struct StoredRequest {
+    /// The request's identifier.
+    pub id: RequestId,
+    /// The request this one was derived from, if any.
+    pub parent: Option<RequestId>,
+    /// Which subsystem sent it.
+    pub origin: String,
+    /// The method, verbatim.
+    pub method: String,
+    /// The request target as sent.
+    pub path: String,
+    /// The protocol version token, e.g. `HTTP/1.1`.
+    pub http_version: String,
+    /// The header block exactly as sent, CRLF-separated, without the trailing blank
+    /// line.
+    pub headers_raw: Vec<u8>,
+    /// The request body.
+    pub body: Vec<u8>,
+    /// Host, port and scheme it was sent to.
+    pub service: hexora_types::http::HttpService,
+    /// When it was sent, RFC 3339.
+    pub sent_at: String,
+}
+
+/// A `requests` row before its blob-backed body and parsed parent are filled in.
+struct RequestRow {
+    request: StoredRequest,
+    parent: Option<String>,
+    body_hash: Option<String>,
+    body_size: i64,
 }
 
 /// Reads and writes captured traffic.
@@ -169,9 +212,9 @@ impl TrafficStore {
 
         tx.execute(
             "INSERT INTO requests
-                (id, target_id, origin, method, path, http_version, headers_raw,
-                 body_hash, body_size, sent_at, quirks, tls_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                (id, target_id, origin, parent_id, method, path, http_version,
+                 headers_raw, body_hash, body_size, sent_at, quirks, tls_json)
+             VALUES (?1, ?2, ?3, ?13, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 request_id.to_string(),
                 target.to_string(),
@@ -185,6 +228,7 @@ impl TrafficStore {
                 now,
                 quirks,
                 tls_json,
+                exchange.parent.map(|p| p.to_string()),
             ],
         )?;
 
@@ -318,6 +362,112 @@ impl TrafficStore {
         }
     }
 
+    /// Reads back a stored request in full, ready to be resent.
+    pub fn request(&self, id: RequestId) -> Result<StoredRequest> {
+        let conn = self.db.connection()?;
+
+        // The row is assembled into the result type inside the closure rather than
+        // returned as a wide tuple: twelve positional columns is exactly the shape
+        // that gets silently mis-ordered during a later edit.
+        let row = conn
+            .query_row(
+                "SELECT r.parent_id, r.origin, r.method, r.path, r.http_version,
+                        r.headers_raw, r.body_hash, r.body_size, r.sent_at,
+                        t.host, t.port, t.secure
+                 FROM requests r
+                 JOIN targets t ON t.id = r.target_id
+                 WHERE r.id = ?1",
+                params![id.to_string()],
+                |row| {
+                    let host: String = row.get(9)?;
+                    let port: i64 = row.get(10)?;
+                    let secure: i64 = row.get(11)?;
+                    Ok(RequestRow {
+                        // Parsed after the query: the id types return `HexoraError`,
+                        // which is not a `rusqlite::Error` and cannot surface here.
+                        parent: row.get(0)?,
+                        body_hash: row.get(6)?,
+                        body_size: row.get(7)?,
+                        request: StoredRequest {
+                            id,
+                            parent: None,
+                            origin: row.get(1)?,
+                            method: row.get(2)?,
+                            path: row.get(3)?,
+                            http_version: row.get(4)?,
+                            headers_raw: row.get(5)?,
+                            body: Vec::new(),
+                            service: hexora_types::http::HttpService::new(
+                                &host,
+                                port as u16,
+                                secure != 0,
+                            ),
+                            sent_at: row.get(8)?,
+                        },
+                    })
+                },
+            )
+            .optional()?;
+
+        let row = row.ok_or_else(|| StorageError::Decode {
+            entity: "request",
+            reason: format!("no request stored with id {id}"),
+        })?;
+
+        let mut stored = row.request;
+        stored.parent = row.parent.map(|p| p.parse()).transpose()?;
+        stored.body = match row.body_hash {
+            None => Vec::new(),
+            Some(hash) => {
+                let reference = BlobRef::from_parts(hash, row.body_size as u64)?;
+                self.blobs.get(&reference)?
+            }
+        };
+        Ok(stored)
+    }
+
+    /// Reads back a stored response's status line and headers.
+    ///
+    /// Returned as `(status, reason, version, headers_raw)`. The body comes from
+    /// [`Self::response_body`], because it can be enormous and is often not wanted.
+    pub fn response_head(
+        &self,
+        request: RequestId,
+    ) -> Result<(u16, Option<String>, String, Vec<u8>)> {
+        let conn = self.db.connection()?;
+        let row: Option<(i64, Option<String>, String, Vec<u8>)> = conn
+            .query_row(
+                "SELECT status, reason, http_version, headers_raw
+                 FROM responses WHERE request_id = ?1",
+                params![request.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+
+        let (status, reason, version, headers) = row.ok_or_else(|| StorageError::Decode {
+            entity: "response",
+            reason: format!("no response stored for {request}"),
+        })?;
+        Ok((status as u16, reason, version, headers))
+    }
+
+    /// Every request derived from `parent`, oldest first.
+    ///
+    /// Oldest first because a branch is read as a sequence of edits: what was tried,
+    /// in the order it was tried.
+    pub fn children(&self, parent: RequestId) -> Result<Vec<RequestId>> {
+        let conn = self.db.connection()?;
+        let mut statement =
+            conn.prepare("SELECT id FROM requests WHERE parent_id = ?1 ORDER BY id ASC")?;
+        let rows =
+            statement.query_map(params![parent.to_string()], |row| row.get::<_, String>(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?.parse()?);
+        }
+        Ok(ids)
+    }
+
     /// How many exchanges are stored.
     pub fn count(&self) -> Result<u64> {
         let conn = self.db.connection()?;
@@ -404,10 +554,103 @@ mod tests {
             encoded_body: None,
             content_encoding: None,
             origin: "proxy",
+            parent: None,
             quirks: Vec::new(),
             tls: None,
             duration_ms: 42,
         }
+    }
+
+    #[test]
+    fn a_stored_request_can_be_read_back_in_full() {
+        // The repeater's whole premise: an exchange from history can be reconstituted
+        // and sent again. If any part of this is lossy, the resend is not a resend.
+        let (store, _project) = store();
+        let mut captured = exchange("/login?next=%2Fadmin", 200, b"ok");
+        captured.request.method = "POST".into();
+        captured.request.body = Bytes::from_static(b"user=admin&pass=hunter2");
+        captured
+            .request
+            .headers
+            .append(Header::new("content-length", "23"));
+        let id = store.record(&captured).unwrap();
+
+        let read = store.request(id).unwrap();
+        assert_eq!(read.method, "POST");
+        assert_eq!(read.path, "/login?next=%2Fadmin");
+        assert_eq!(read.body, b"user=admin&pass=hunter2");
+        assert_eq!(read.service.host, "example.com");
+        assert_eq!(read.service.port, 443);
+        assert!(read.service.secure);
+        assert_eq!(read.origin, "proxy");
+        assert!(read.parent.is_none());
+        // Lower-case as written: a resend must not silently re-case a header.
+        let headers = String::from_utf8(read.headers_raw).unwrap();
+        assert!(headers.contains("content-length: 23"), "{headers}");
+    }
+
+    #[test]
+    fn reading_an_unknown_request_is_an_error_not_an_empty_one() {
+        let (store, _project) = store();
+        assert!(store.request(RequestId::new()).is_err());
+    }
+
+    #[test]
+    fn a_request_with_no_body_reads_back_empty() {
+        let (store, _project) = store();
+        let id = store.record(&exchange("/", 200, b"")).unwrap();
+        assert!(store.request(id).unwrap().body.is_empty());
+    }
+
+    #[test]
+    fn a_variant_keeps_the_request_it_was_derived_from() {
+        // Branching is the point: weeks later, "which edit caused the change?" has to
+        // still be answerable, long after the tab it was edited in is gone.
+        let (store, _project) = store();
+        let original = store.record(&exchange("/item/1", 200, b"a")).unwrap();
+
+        let mut variant = exchange("/item/2", 403, b"denied");
+        variant.origin = "repeater";
+        variant.parent = Some(original);
+        let variant = store.record(&variant).unwrap();
+
+        assert_eq!(store.request(variant).unwrap().parent, Some(original));
+        assert_eq!(store.children(original).unwrap(), vec![variant]);
+        assert!(store.children(variant).unwrap().is_empty());
+    }
+
+    #[test]
+    fn siblings_are_returned_in_the_order_they_were_tried() {
+        let (store, _project) = store();
+        let original = store.record(&exchange("/", 200, b"a")).unwrap();
+
+        let mut ids = Vec::new();
+        for path in ["/a", "/b", "/c"] {
+            let mut variant = exchange(path, 200, b"x");
+            variant.origin = "repeater";
+            variant.parent = Some(original);
+            ids.push(store.record(&variant).unwrap());
+        }
+        assert_eq!(store.children(original).unwrap(), ids);
+    }
+
+    #[test]
+    fn a_response_head_is_readable_without_fetching_the_body() {
+        // Bodies can be enormous; a diff of status and headers must not require one.
+        let (store, _project) = store();
+        let mut captured = exchange("/", 301, b"redirecting");
+        captured.response.reason = Some("Moved Permanently".into());
+        captured
+            .response
+            .headers
+            .append(Header::new("Location", "/elsewhere"));
+        let id = store.record(&captured).unwrap();
+
+        let (status, reason, version, headers) = store.response_head(id).unwrap();
+        assert_eq!(status, 301);
+        assert_eq!(reason.as_deref(), Some("Moved Permanently"));
+        assert_eq!(version, "HTTP/1.1");
+        assert!(String::from_utf8(headers).unwrap().contains("/elsewhere"));
     }
 
     #[test]

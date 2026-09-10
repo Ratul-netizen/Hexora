@@ -104,6 +104,8 @@ fn to_captured(exchange: &Exchange) -> CapturedExchange {
         encoded_body: None,
         content_encoding,
         origin: "proxy",
+        // Proxied traffic has no parent: nobody derived it from an earlier request.
+        parent: None,
         quirks: Vec::new(),
         tls: exchange.tls.clone(),
         duration_ms: exchange.duration.as_millis().min(u128::from(u32::MAX)) as u32,

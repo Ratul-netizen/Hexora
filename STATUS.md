@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M3 (traffic storage)
+- **Last updated:** M4 (repeater)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -24,16 +24,24 @@ milestone.
 | **M2.3** — TLS interception | `CONNECT` tunnelling, double handshake, selective interception with exempt and only-mode |
 | **M2.4** — Interception hooks | Forward / replace / drop / respond on requests, forward / replace / drop on responses, with a queue that cannot wedge the browser |
 | **M3** — Traffic storage | Proxied exchanges persist into a project: metadata in SQLite, bodies content-addressed and deduplicated, both the wire and decoded forms kept, TLS details and framing quirks recorded, keyset-paginated `hexora history` |
+| **M4** — Repeater | Load a request from history, edit it in `$EDITOR`, resend it, diff the responses. Nothing is auto-corrected — a wrong `Content-Length` is reported and sent as written. Sends keep a link to what they derived from, so `--tree` answers "which edit caused this?" |
 
 ## Next
 
-**M4 — the repeater.** Traffic is now captured and browsable, so the obvious next move
-is to send it again: take an exchange out of history, edit it, resend it, and diff the
-two responses. Everything it needs already exists — the wire-preserving message model,
-the transport, and now the store to read from and write back to.
+**Hexora is now a usable tool rather than a foundation.** Capture, browse, edit, resend,
+compare — the loop a tester actually works in is closed, from the CLI.
 
-M2.5 (trust installation and first-run) can follow; the CLI already prints per-platform
-instructions, so what remains there is desktop UX rather than mechanism.
+Two candidates for what comes next:
+
+- **M5 — the desktop UI.** Everything above works headless. The Tauri shell exists and
+  does nothing. Most people who would pay for this will not adopt a CLI-only tool, so
+  this is the shortest path from "works" to "usable by someone else".
+- **M2.5 — trust installation and first-run.** The CLI prints per-platform CA
+  instructions; what remains is making the first ten minutes not require reading them.
+  Smaller than M5, and a prerequisite for it being pleasant.
+
+Recommendation: **M2.5 then M5** — first-run is the cheapest thing that decides whether
+anyone gets far enough to see the rest.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -44,6 +52,11 @@ back only the decoded bytes, so `encoded_body` is written as NULL in practice. T
 column, the migration and the read path (`hexora history --body --wire`) are all in
 place; what remains is threading the encoded bytes out of `BodyStream::collect`. Until
 that lands, `--wire` returns the decoded body for compressed responses.
+
+**Debt carried out of M4:** a request edited to bare-LF line endings is re-serialized
+with CRLF, because `HttpRequest` stores fields rather than bytes. The warning says so
+explicitly rather than hiding it. Byte-exact raw sending needs a send path that
+bypasses the message model.
 
 Full plan: [`docs/roadmap.md`](docs/roadmap.md).
 
@@ -114,6 +127,12 @@ cargo run -p hexora-cli -- proxy --only target.example.com   # leave your own tr
 cargo run -p hexora-cli -- proxy --project ./scratch/demo
 cargo run -p hexora-cli -- history ./scratch/demo
 cargo run -p hexora-cli -- history ./scratch/demo --body req_01a08b… > response.bin
+
+# The repeater: resend, edit, compare, and see what descended from what.
+cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --dry-run
+cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --edit
+cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --tree
+cargo run -p hexora-cli -- repeat ./scratch/demo req_A --diff req_B
 ```
 
 ---

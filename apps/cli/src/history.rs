@@ -170,6 +170,7 @@ mod tests {
                     encoded_body: None,
                     content_encoding: None,
                     origin: "proxy",
+                    parent: None,
                     quirks: Vec::new(),
                     tls: None,
                     duration_ms: 5,

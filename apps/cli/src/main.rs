@@ -17,6 +17,7 @@ use hexora_storage::{migrations, Project};
 mod history;
 mod project;
 mod proxy;
+mod repeat;
 mod send;
 
 /// Hexora — the modern offensive security workbench.
@@ -27,9 +28,9 @@ mod send;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M3. The intercepting proxy, HTTP/1.x engine \
-                  with TLS, project management and traffic capture all work. The \
-                  scanner, fuzzer and repeater are not implemented yet."
+                  Development status: M4. The intercepting proxy, HTTP/1.x engine \
+                  with TLS, project management, traffic capture and the repeater \
+                  all work. The scanner and fuzzer are not implemented yet."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -176,6 +177,42 @@ enum Command {
         wire: bool,
     },
 
+    /// Resend a request from history, optionally editing it first.
+    ///
+    /// The request opens in $EDITOR when --edit is given, and is sent exactly as
+    /// saved: a wrong Content-Length is reported, never corrected.
+    Repeat {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The request to resend, from `hexora history`.
+        id: String,
+
+        /// Open the request in $EDITOR before sending.
+        #[arg(short, long)]
+        edit: bool,
+
+        /// Print the request that would be sent, and stop.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Print the response body as well as the head.
+        #[arg(long)]
+        show_body: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(short = 'k', long)]
+        insecure: bool,
+
+        /// Compare this request against another instead of sending anything.
+        #[arg(long, value_name = "OTHER_ID", conflicts_with_all = ["edit", "dry_run"])]
+        diff: Option<String>,
+
+        /// Show every variant derived from this request.
+        #[arg(long, conflicts_with_all = ["edit", "dry_run", "diff"])]
+        tree: bool,
+    },
+
     /// Print version and build information.
     Version,
 }
@@ -249,6 +286,41 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 json: cli.json,
             }),
         },
+        Command::Repeat {
+            path,
+            id,
+            edit,
+            dry_run,
+            show_body,
+            insecure,
+            diff,
+            tree,
+        } => {
+            if *tree {
+                repeat::tree(repeat::TreeArgs {
+                    project: path,
+                    id,
+                    json: cli.json,
+                })
+            } else if let Some(other) = diff {
+                repeat::diff(repeat::DiffArgs {
+                    project: path,
+                    before: id,
+                    after: other,
+                    json: cli.json,
+                })
+            } else {
+                repeat::run(repeat::RepeatArgs {
+                    project: path,
+                    id,
+                    edit: *edit,
+                    dry_run: *dry_run,
+                    show_body: *show_body,
+                    insecure: *insecure,
+                    json: cli.json,
+                })
+            }
+        }
         Command::Proxy {
             project,
             in_scope_only,
@@ -307,14 +379,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M3",
+            "milestone": "M4",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M3 (traffic capture)");
+        println!("  milestone:               M4 (repeater)");
     }
 }
 
@@ -361,7 +433,7 @@ mod tests {
     #[test]
     fn help_does_not_advertise_unimplemented_features() {
         let help = Cli::command().render_long_help().to_string().to_lowercase();
-        for absent in ["scan", "fuzz", "intruder", "repeater"] {
+        for absent in ["scan", "fuzz", "intruder"] {
             assert!(
                 !help.contains(&format!("  {absent}")),
                 "help offers a {absent} command that does not exist"
@@ -373,7 +445,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M3"),
+            help.contains("M4"),
             "users must not mistake this for a finished tool"
         );
     }

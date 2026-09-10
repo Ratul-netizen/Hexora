@@ -8,6 +8,7 @@ members = [
     "core/engine",
     "core/http",
     "core/proxy",
+    "core/repeater",
     "apps/cli",
     "apps/desktop/src-tauri",
 ]
@@ -26,6 +27,7 @@ hexora-storage = { path = "core/storage" }
 hexora-engine = { path = "core/engine" }
 hexora-http = { path = "core/http" }
 hexora-proxy = { path = "core/proxy" }
+hexora-repeater = { path = "core/repeater" }
 
 # Async runtime. Needed at M0 only for the engine trait signatures.
 tokio = { version = "1.43", features = [

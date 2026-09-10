@@ -1,0 +1,20 @@
+[package]
+name = "hexora-repeater"
+description = "Hexora's repeater: edit a captured request, send it again, compare the results"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-engine.workspace = true
+hexora-http.workspace = true
+hexora-storage.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
