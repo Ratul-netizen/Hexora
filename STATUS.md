@@ -132,9 +132,9 @@ cargo audit
 pnpm -C frontend typecheck && pnpm -C frontend build
 ```
 
-All six must pass. `cargo audit` currently reports **0 vulnerabilities** and 7
-unmaintained-crate warnings, all transitive through Tauri and recorded in
-[`docs/dependencies.md`](docs/dependencies.md).
+All six must pass. `cargo audit` currently reports **0 vulnerabilities** and 8
+warnings — 7 unmaintained crates and one unsoundness in `glib`, all transitive through
+Tauri and recorded in [`docs/dependencies.md`](docs/dependencies.md).
 
 ## Try it
 

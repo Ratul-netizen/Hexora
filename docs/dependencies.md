@@ -42,7 +42,26 @@ An empty section below means the audit is genuinely clean, not that nobody looke
 
 ### Currently accepted
 
-_None._
+**RUSTSEC-2024-0429** — unsoundness in `glib`'s `Iterator` and `DoubleEndedIterator`
+impls for `VariantStrIter` ([advisory](https://rustsec.org/advisories/RUSTSEC-2024-0429)).
+
+- **Path in:** `glib 0.18.5` ← `gtk` / `gdk` / `webkit2gtk` ← `tauri`. Linux desktop
+  only; the Windows and macOS builds do not link it.
+- **Reached?** No. The unsound code is `glib::VariantStrIter`, part of GVariant
+  handling inside the GTK stack. Hexora calls no `glib` API directly, and nothing in
+  the engine, proxy or storage path passes through it. No network input or credential
+  ever reaches it.
+- **Mitigation:** none needed beyond not calling it.
+- **Why not fixed:** the version is pinned by `tauri` 2.x's GTK bindings, not by this
+  workspace. Forcing a newer `glib` would break the binding crates that expect 0.18.
+- **Removed when:** Tauri's Linux stack moves to `glib` 0.20 or later, or the desktop
+  client stops using WebKitGTK.
+
+Seven further crates are flagged **unmaintained** — `proc-macro-error`,
+`rustls-pemfile`, and the five `unic-*` crates — all through Tauri's build-time and ICU
+dependencies. Per the policy above these are reported rather than accepted: none of
+them is a security advisory, and none sits on a path that handles network input or
+credentials.
 
 ## Secret scanning
 
