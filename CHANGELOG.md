@@ -287,7 +287,62 @@ since a typed URL is a human decision.
   other platforms already had. `docs/development.md` now describes how to check
   `cfg`-gated code locally instead of discovering it in CI.
 
+### Added — M12.1, authorization testing
+
+- **`hexora authz`**: take one captured request and replay it as every identity in the
+  project, then say what the differences prove. The highest-value manual work in most
+  engagements, and the part testers most often run out of time for.
+- **The baseline is replayed, never reused.** The captured response may be weeks old
+  and its session long expired; comparing against it would report differences that
+  belong to time rather than to authorization.
+- **An unauthenticated control is added by default.** If an anonymous request receives
+  the same resource then "User B can read it" proves nothing about User B — the
+  resource is public. The peer verdicts are demoted to inconclusive and the run reports
+  the one thing that is true, instead of six findings about a public page.
+- **Responses are compared structurally, not byte for byte.** JSON bodies reduce to
+  their key shape with array indices collapsed; other bodies to a token set with
+  digits, hashes and opaque ids masked. Two invoices for two customers are the same
+  *resource*; a rotating CSRF token is not a different page.
+- **Declared object identifiers decide the ambiguous cases both ways.** An id belonging
+  to the owner, found in somebody else's response, raises a finding to Firm — it is a
+  fact about the bytes, not a score. The mirror image exonerates: a response carrying
+  the *caller's own* ids is the application scoping a lookup to the session, and
+  `GET /profile` stops being reported as a violation despite scoring 1.00 similarity.
+- **Confidence is earned.** A similarity match is Tentative; a declared identifier makes
+  it Firm; only `--verify`, which replays each violation a second time, produces
+  Confirmed. Nothing is emitted at Critical — blast radius is a tester's judgement.
+- **Every replay is recorded as the identity that sent it**, with `origin = authz` and
+  a parent pointing at the request it derived from, so a finding cites two request ids
+  somebody else can open months later.
+- **`hexora identity`**: add, list and remove the principals a project tests as.
+  Credentials are read from an environment variable or a file, never from an argument —
+  `ps` and shell history both capture those — and are never printed back.
+- **`hexora scope`**: the project scope is now persisted (`project.scope_json`) and read
+  by every command. It had been accepted at the API boundary and thrown away, which
+  meant no automated subsystem could run twice in a row. An authorization matrix is
+  automated traffic, so it refuses to start against a host nobody declared, once,
+  before it sends anything.
+- **History says who a request was sent as.** The `requests.identity_id` column has
+  been in the schema since M0 and nothing wrote it; authorization replays now do, and
+  both `hexora history` and the desktop table show the label beside the row. A replay
+  the project cannot attribute is not evidence.
+- The engine RPC contract goes to version 2: `HistoryRow` gained the identity field.
+
+- A state-changing method is refused without `--yes`, naming how many times the request
+  would be sent. Hexora will still replay `DELETE` if told to — a tool that quietly
+  declined to test destructive endpoints would be hiding the worst authorization bugs
+  there are.
+
 ### Not implemented
+
+Authorization findings are printed, not filed: the `findings` table exists and the
+model validates, but nothing writes to it yet, so `hexora authz` reports and the
+project keeps only the traffic. There is no reporting or export, no desktop UI for the
+matrix, and no attack chains. The matrix replays a request verbatim — substituting one
+identity's object identifiers into another's request, to *construct* cross-identity
+attempts rather than only replaying captured ones, is not implemented. Credentials are
+stored in cleartext; encryption under a project passphrase is still only in the threat
+model.
 
 The macOS and Linux trust-store paths are written, unit-tested and type-checked but
 have not been run on those platforms; only Windows has been verified end to end. The

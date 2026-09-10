@@ -81,7 +81,8 @@ export function HistoryView({
           (row) =>
             row.url.toLowerCase().includes(needle) ||
             row.method.toLowerCase().includes(needle) ||
-            String(row.status ?? "").includes(needle),
+            String(row.status ?? "").includes(needle) ||
+            (row.identity ?? "").toLowerCase().includes(needle),
         );
 
   return (
@@ -133,6 +134,14 @@ export function HistoryView({
                     <span className="tag quirk" title={row.quirks.join(", ")}>
                       {row.quirks.length} quirk
                       {row.quirks.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  {/* Who the request was sent as, where somebody chose. A row an
+                      authorization run produced only means something next to the
+                      principal it was sent as. */}
+                  {row.identity !== null && (
+                    <span className="tag identity" title="sent as this identity">
+                      {row.identity}
                     </span>
                   )}
                 </td>

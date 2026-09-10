@@ -104,6 +104,7 @@ fn to_captured(exchange: &Exchange) -> CapturedExchange {
         encoded_body: None,
         content_encoding,
         origin: "proxy",
+        identity: None,
         // Proxied traffic has no parent: nobody derived it from an earlier request.
         parent: None,
         quirks: Vec::new(),

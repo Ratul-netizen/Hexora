@@ -65,6 +65,18 @@ pub enum StorageError {
     #[error("blob {hash} is referenced but not present in the blob store")]
     BlobMissing { hash: String },
 
+    /// Nothing is stored under the id or name that was asked for.
+    #[error("no {entity} stored as {id}")]
+    NotFound { entity: &'static str, id: String },
+
+    /// A lookup by name matched more than one row.
+    ///
+    /// Returned rather than resolved: picking one for the caller would mean, in the
+    /// authorization subsystem, replaying a request as a principal the tester did not
+    /// choose.
+    #[error("{id} matches more than one {entity}; use its id instead")]
+    Ambiguous { entity: &'static str, id: String },
+
     /// Filesystem failure opening or creating the project file.
     #[error("project file I/O error: {0}")]
     Io(#[from] std::io::Error),

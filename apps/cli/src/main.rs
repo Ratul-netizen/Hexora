@@ -14,10 +14,13 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
+mod authz;
 mod history;
+mod identity;
 mod project;
 mod proxy;
 mod repeat;
+mod scope;
 mod send;
 mod setup;
 
@@ -257,8 +260,144 @@ enum Command {
         tree: bool,
     },
 
+    /// Manage the identities a project tests as.
+    #[command(subcommand)]
+    Identity(IdentityCommand),
+
+    /// Show and change what this engagement is authorized to touch.
+    ///
+    /// Scope is not cosmetic: automated components refuse to send traffic to hosts
+    /// nobody has declared here.
+    #[command(subcommand)]
+    Scope(ScopeCommand),
+
+    /// Replay a captured request as several identities and compare what came back.
+    ///
+    /// The highest-value manual work in most engagements: does the application
+    /// actually check who is asking, or only that somebody is?
+    Authz {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The request to replay, from `hexora history`.
+        id: String,
+
+        /// The identity the captured request belongs to, by label or id.
+        #[arg(long, value_name = "IDENTITY")]
+        as_identity: String,
+
+        /// Replay as this identity. Repeatable. Defaults to every other identity.
+        #[arg(long = "identity", value_name = "IDENTITY")]
+        identities: Vec<String>,
+
+        /// Do not add an unauthenticated control request.
+        ///
+        /// The control is what separates "User B can read User A's data" from "that
+        /// URL is public". Leaving it out makes every other row weaker.
+        #[arg(long)]
+        no_anonymous: bool,
+
+        /// Replay each violation a second time before reporting it.
+        ///
+        /// Reproduction is the difference between a Tentative finding and a
+        /// Confirmed one.
+        #[arg(long)]
+        verify: bool,
+
+        /// Replay a request whose method may change data on the target.
+        #[arg(short = 'y', long)]
+        yes: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(short = 'k', long)]
+        insecure: bool,
+    },
+
     /// Print version and build information.
     Version,
+}
+
+#[derive(Debug, Subcommand)]
+enum IdentityCommand {
+    /// Add an identity.
+    ///
+    /// The credential is read from an environment variable or a file, never from an
+    /// argument: `ps` and shell history would both capture it.
+    Add {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Display name, e.g. "User B".
+        label: String,
+
+        /// How much authority this identity is expected to have.
+        #[arg(long, default_value = "user")]
+        privilege: String,
+
+        /// Credential kind: bearer, cookie, basic, none, or a header name.
+        #[arg(long, default_value = "bearer")]
+        kind: String,
+
+        /// Environment variable holding the credential.
+        #[arg(long, value_name = "VAR", conflicts_with = "from_file")]
+        from_env: Option<String>,
+
+        /// File holding the credential.
+        #[arg(long, value_name = "FILE")]
+        from_file: Option<PathBuf>,
+
+        /// An object identifier known to belong to this identity. Repeatable.
+        ///
+        /// This is what turns a similarity score into evidence: an id declared here,
+        /// found in somebody else's response, is a disclosure rather than a guess.
+        #[arg(long, value_name = "ID")]
+        owns: Vec<String>,
+
+        /// Extra header to send for this identity, in 'Name: Value' form.
+        #[arg(short = 'H', long = "header")]
+        headers: Vec<String>,
+    },
+    /// List the identities in a project. Never prints credentials.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Remove an identity by label or id.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// Label or id.
+        who: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ScopeCommand {
+    /// Print the project's scope.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Declare a host as authorized.
+    Add {
+        /// Project directory.
+        path: PathBuf,
+        /// Hostname, or a `*.example.com` wildcard.
+        host: String,
+        /// Limit the rule to paths starting with this prefix.
+        #[arg(long, value_name = "PREFIX")]
+        path_prefix: Option<String>,
+        /// Add to the exclusion list instead. Exclusions win over inclusions.
+        #[arg(long)]
+        exclude: bool,
+    },
+    /// Remove every rule for a host.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// Hostname.
+        host: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -307,6 +446,58 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             print_version(cli.json);
             Ok(())
         }
+        Command::Identity(IdentityCommand::Add {
+            path,
+            label,
+            privilege,
+            kind,
+            from_env,
+            from_file,
+            owns,
+            headers,
+        }) => identity::add(identity::AddArgs {
+            project: path,
+            label,
+            privilege,
+            kind,
+            from_env: from_env.as_deref(),
+            from_file: from_file.as_deref(),
+            owns,
+            headers,
+            json: cli.json,
+        }),
+        Command::Identity(IdentityCommand::List { path }) => identity::list(path, cli.json),
+        Command::Identity(IdentityCommand::Remove { path, who }) => {
+            identity::remove(path, who, cli.json)
+        }
+        Command::Scope(ScopeCommand::List { path }) => scope::list(path, cli.json),
+        Command::Scope(ScopeCommand::Add {
+            path,
+            host,
+            path_prefix,
+            exclude,
+        }) => scope::add(path, host, path_prefix.as_deref(), *exclude, cli.json),
+        Command::Scope(ScopeCommand::Remove { path, host }) => scope::remove(path, host, cli.json),
+        Command::Authz {
+            path,
+            id,
+            as_identity,
+            identities,
+            no_anonymous,
+            verify,
+            yes,
+            insecure,
+        } => authz::run(authz::AuthzArgs {
+            project: path,
+            id,
+            owner: as_identity,
+            identities,
+            no_anonymous: *no_anonymous,
+            verify: *verify,
+            yes: *yes,
+            insecure: *insecure,
+            json: cli.json,
+        }),
         Command::Project(ProjectCommand::Init { path, name }) => {
             project::init(path, name.as_deref(), cli.json)
         }

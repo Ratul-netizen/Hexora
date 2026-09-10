@@ -1,0 +1,8 @@
+# esbuild (via Vite) has a postinstall script that unpacks its platform binary.
+# pnpm 10+ refuses to run dependency build scripts unless they are named here, and
+# without it `pnpm build` fails on a fresh checkout with a missing binary rather than
+# with anything that points at the cause.
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true

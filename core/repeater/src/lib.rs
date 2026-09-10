@@ -43,6 +43,7 @@ use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
 use hexora_storage::{CapturedExchange, TrafficStore};
 use hexora_types::error::Result;
 use hexora_types::http::HttpRequest;
+use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
 
@@ -100,10 +101,46 @@ pub struct Sent {
     pub id: RequestId,
     /// The request this one derived from.
     pub parent: Option<RequestId>,
+    /// The principal it was sent as, when one was chosen.
+    pub identity: Option<hexora_types::ids::IdentityId>,
     /// What came back.
     pub exchange: hexora_engine::transport::Exchange,
     /// What the scope guard decided. Out-of-scope is flagged, never refused.
     pub decision: ScopeDecision,
+}
+
+/// Who a send is made as, and which subsystem is making it.
+///
+/// A separate type rather than two arguments because the pair must stay consistent:
+/// an authorization replay that recorded itself as ordinary repeater traffic would be
+/// indistinguishable, in the project, from a tester resending something by hand.
+#[derive(Debug, Clone, Copy)]
+pub struct SendAs<'a> {
+    /// The subsystem the request is attributed to.
+    pub origin: Origin,
+    /// The principal whose credential is applied before sending.
+    pub identity: Option<&'a Identity>,
+}
+
+impl SendAs<'_> {
+    /// A hand-driven repeater send, with whatever credential the draft already
+    /// carries.
+    pub fn repeater() -> Self {
+        Self {
+            origin: Origin::Repeater,
+            identity: None,
+        }
+    }
+}
+
+impl<'a> SendAs<'a> {
+    /// An authorization-matrix send, replayed as `identity`.
+    pub fn authz(identity: &'a Identity) -> Self {
+        Self {
+            origin: Origin::Authz,
+            identity: Some(identity),
+        }
+    }
 }
 
 /// Sends drafts and records them.
@@ -181,17 +218,55 @@ impl<T: HttpTransport> Repeater<T> {
     /// Exposed so a UI can offer "this is out of scope — add it?" before the request
     /// leaves, rather than after.
     pub fn decide(&self, draft: &Draft) -> ScopeDecision {
-        self.transport
-            .decide(&draft.request, &SendOptions::interactive(Origin::Repeater))
+        self.decide_as(draft, SendAs::repeater())
+    }
+
+    /// Decides what scope would do with a draft sent by a particular subsystem.
+    ///
+    /// The answer depends on who is asking: a hand-driven send to an out-of-scope
+    /// host is allowed and flagged, while the same request from an automated
+    /// subsystem is refused outright. A caller that is about to send several requests
+    /// in a row — an authorization matrix, say — should ask first, so a misconfigured
+    /// scope is one clear message rather than one failure per identity.
+    pub fn decide_as(&self, draft: &Draft, sender: SendAs<'_>) -> ScopeDecision {
+        let options = if sender.origin.is_automated() {
+            SendOptions::automated(sender.origin)
+        } else {
+            SendOptions::interactive(sender.origin)
+        };
+        self.transport.decide(&draft.request, &options)
     }
 
     /// Sends a draft and records the exchange against the project.
     pub async fn send(&self, draft: &Draft) -> Result<Sent> {
-        let mut options = SendOptions::interactive(Origin::Repeater);
+        self.send_as(draft, SendAs::repeater()).await
+    }
+
+    /// Sends a draft as a chosen principal, on behalf of a chosen subsystem.
+    ///
+    /// The identity's credential is applied to a *copy* of the draft, so a matrix that
+    /// replays one request as six identities leaves the tester's draft untouched and
+    /// each send carries exactly one credential.
+    ///
+    /// The identity is recorded against the stored request. Without that column an
+    /// authorization result is only an assertion: "this response reached User B" needs
+    /// the project to be able to say which principal sent it, months later, to someone
+    /// who was not in the room.
+    pub async fn send_as(&self, draft: &Draft, sender: SendAs<'_>) -> Result<Sent> {
+        let mut options = if sender.origin.is_automated() {
+            SendOptions::automated(sender.origin)
+        } else {
+            SendOptions::interactive(sender.origin)
+        };
         options.limits = self.limits.clone();
 
-        let decision = self.transport.decide(&draft.request, &options);
-        let exchange = self.transport.send(draft.request.clone(), options).await?;
+        let mut request = draft.request.clone();
+        if let Some(identity) = sender.identity {
+            identity.authenticate(&mut request.headers);
+        }
+
+        let decision = self.transport.decide(&request, &options);
+        let exchange = self.transport.send(request, options).await?;
 
         let content_encoding = exchange
             .response
@@ -204,7 +279,8 @@ impl<T: HttpTransport> Repeater<T> {
             response: exchange.response.clone(),
             encoded_body: None,
             content_encoding,
-            origin: "repeater",
+            origin: sender.origin.as_str(),
+            identity: sender.identity.map(|i| i.id),
             parent: draft.parent,
             quirks: draft.quirks.iter().map(|q| format!("{q:?}")).collect(),
             tls: exchange.tls.clone(),
@@ -219,6 +295,7 @@ impl<T: HttpTransport> Repeater<T> {
         Ok(Sent {
             id,
             parent: draft.parent,
+            identity: sender.identity.map(|i| i.id),
             exchange,
             decision,
         })
@@ -339,6 +416,7 @@ mod tests {
             encoded_body: None,
             content_encoding: None,
             origin: "proxy",
+            identity: None,
             parent: None,
             quirks: Vec::new(),
             tls: None,

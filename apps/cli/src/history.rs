@@ -50,6 +50,7 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
                     "sent_at": item.sent_at,
                     "quirks": item.quirks,
                     "secure": item.secure,
+                    "identity": item.identity,
                 })
             })
             .collect();
@@ -83,14 +84,21 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
             .duration_ms
             .map(|d| format!("{d}ms"))
             .unwrap_or_else(|| "—".into());
-        // A trailing marker rather than a column, so the common case stays narrow.
+        // Trailing markers rather than columns, so the common case stays narrow.
         let quirks = if item.quirks.is_empty() {
             String::new()
         } else {
             format!("  [{}]", item.quirks.join(","))
         };
+        // Which principal sent it, for the rows where somebody chose: an
+        // authorization replay is only evidence if the history says who it was sent
+        // as, next to what came back.
+        let identity = match &item.identity {
+            None => String::new(),
+            Some(label) => format!("  (as {label})"),
+        };
         println!(
-            "{:<38} {status:>3} {:<6} {:>8} {duration:>7}  {}{quirks}",
+            "{:<38} {status:>3} {:<6} {:>8} {duration:>7}  {}{identity}{quirks}",
             item.id.to_string(),
             item.method,
             item.response_bytes,
@@ -170,6 +178,7 @@ mod tests {
                     encoded_body: None,
                     content_encoding: None,
                     origin: "proxy",
+                    identity: None,
                     parent: None,
                     quirks: Vec::new(),
                     tls: None,

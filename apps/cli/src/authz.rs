@@ -1,0 +1,308 @@
+//! `hexora authz` — replay one captured request as everybody, and say what it proves.
+//!
+//! The output is a table, because the question is a table: identities down the side,
+//! what each of them got across it. Everything else the command prints exists to keep
+//! the table honest — the scope refusal before anything is sent, the warning about
+//! replaying a state-changing request, and the demotion note when an anonymous control
+//! shows the resource was public all along.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use hexora_authz::{analysis, AuthzTester, Cell, Matrix, Plan, Verdict};
+use hexora_engine::guard::ScopeGuard;
+use hexora_http::{TcpTransport, TlsConfig};
+use hexora_repeater::Repeater;
+use hexora_types::finding::Finding;
+use hexora_types::identity::Identity;
+use hexora_types::ids::RequestId;
+use hexora_types::{HexoraError, Result};
+
+/// Options for `hexora authz`.
+pub struct AuthzArgs<'a> {
+    pub project: &'a Path,
+    /// The captured request to replay, from `hexora history`.
+    pub id: &'a str,
+    /// The identity the request belongs to.
+    pub owner: &'a str,
+    /// Identities to replay it as. Empty means every other identity in the project.
+    pub identities: &'a [String],
+    /// Do not add an unauthenticated control.
+    pub no_anonymous: bool,
+    /// Replay each violation once more before reporting it.
+    pub verify: bool,
+    /// Replay a state-changing request without asking.
+    pub yes: bool,
+    /// Do not verify the target's TLS certificate.
+    pub insecure: bool,
+    pub json: bool,
+}
+
+/// Runs an authorization matrix and prints it.
+pub fn run(args: AuthzArgs<'_>) -> Result<()> {
+    let project = crate::open_project(args.project)?;
+    let base: RequestId = args.id.parse()?;
+    let identities_store = project.identities();
+    let store = Arc::new(project.traffic());
+
+    let owner = crate::identity::resolve(&identities_store, args.owner)?;
+    let others = choose(&identities_store, args.identities, &owner)?;
+    if others.is_empty() {
+        return Err(HexoraError::invalid_input(
+            "identities",
+            "there is nobody to compare against: add a second identity with \
+             `hexora identity add`",
+        ));
+    }
+
+    let transport = if args.insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    // The project's own scope, not an empty one. An authorization matrix is automated
+    // traffic, and the guard refuses automated traffic to undeclared hosts.
+    let scope = Arc::new(project.settings().scope()?);
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone());
+    let tester = AuthzTester::new(repeater, store, identities_store);
+
+    let method = tester.method_of(base)?;
+    if Plan::is_state_changing(&method) && !args.yes {
+        return Err(HexoraError::invalid_input(
+            "method",
+            format!(
+                "{method} may change data on the target, and this run would send it \
+                 {} times. Re-run with --yes if that is what you want.",
+                others.len() + 1
+            ),
+        ));
+    }
+
+    let mut plan = Plan::new(base, owner, others);
+    plan.anonymous_control = !args.no_anonymous;
+    plan.verify = args.verify;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+    let matrix = runtime.block_on(tester.run(&plan))?;
+
+    let target = target_of(&matrix);
+    let findings = analysis::findings(&matrix, target);
+
+    if args.json {
+        print_json(&matrix, &findings);
+    } else {
+        print_human(&matrix, &findings);
+    }
+    Ok(())
+}
+
+/// The identities to replay as: those named, or everybody except the owner.
+fn choose(
+    store: &hexora_storage::IdentityStore,
+    named: &[String],
+    owner: &Identity,
+) -> Result<Vec<Identity>> {
+    if named.is_empty() {
+        return Ok(store
+            .list()?
+            .into_iter()
+            .filter(|identity| identity.id != owner.id)
+            .collect());
+    }
+
+    named
+        .iter()
+        .map(|who| crate::identity::resolve(store, who))
+        .collect()
+}
+
+/// A placeholder target id for findings that are printed rather than stored.
+///
+/// Findings are not persisted yet — `hexora authz` reports, it does not file. The id
+/// is generated per run rather than looked up, and nothing downstream reads it,
+/// because writing findings into the project is its own piece of work (the schema is
+/// there; the store is not).
+fn target_of(_matrix: &Matrix) -> hexora_types::ids::TargetId {
+    hexora_types::ids::TargetId::new()
+}
+
+fn print_human(matrix: &Matrix, findings: &[Finding]) {
+    println!("{} {}", matrix.method, matrix.url);
+    println!(
+        "Baseline: {} → {}",
+        matrix.owner.label,
+        status(&matrix.owner)
+    );
+    println!();
+
+    println!(
+        "{:<22} {:<14} {:<7} {:<13} {:<6} VERDICT",
+        "IDENTITY", "PRIVILEGE", "STATUS", "OUTCOME", "SIM"
+    );
+    for cell in &matrix.cells {
+        println!(
+            "{:<22} {:<14} {:<7} {:<13} {:<6} {}",
+            truncate(&cell.label, 22),
+            crate::identity::privilege_name(cell.privilege),
+            status(cell),
+            cell.outcome.as_str(),
+            format!("{:.2}", cell.similarity),
+            verdict(cell),
+        );
+    }
+
+    if matrix.appears_public {
+        println!();
+        println!("An unauthenticated request received the same resource, so this endpoint");
+        println!("appears to be public. Per-identity results are inconclusive as a result —");
+        println!("the finding, if there is one, is that it needs no session at all.");
+    }
+
+    for cell in &matrix.cells {
+        if let Some(note) = &cell.note {
+            println!();
+            println!("{}: {note}", cell.label);
+        }
+        if let Some(error) = &cell.error {
+            println!();
+            println!("{}: could not be sent — {error}", cell.label);
+        }
+    }
+
+    println!();
+    if findings.is_empty() {
+        println!("No authorization violations found in this matrix.");
+        return;
+    }
+
+    println!("{} candidate finding(s):", findings.len());
+    for finding in findings {
+        println!();
+        println!(
+            "  [{:?}/{:?}] {}",
+            finding.severity, finding.confidence, finding.title
+        );
+        println!("  {}", finding.description);
+        if !finding.confidence.is_actionable() {
+            println!(
+                "  Not yet actionable at {:?} confidence — re-run with --verify to \
+                 attempt reproduction.",
+                finding.confidence
+            );
+        }
+        for line in finding.reproduction.lines() {
+            println!("  {line}");
+        }
+    }
+}
+
+fn print_json(matrix: &Matrix, findings: &[Finding]) {
+    let cells: Vec<_> = matrix
+        .cells
+        .iter()
+        .map(|cell| {
+            serde_json::json!({
+                "identity": cell.identity.to_string(),
+                "label": cell.label,
+                "privilege": crate::identity::privilege_name(cell.privilege),
+                "request": cell.request.map(|r| r.to_string()),
+                "status": cell.status,
+                "similarity": cell.similarity,
+                "outcome": cell.outcome.as_str(),
+                "verdict": cell.verdict.as_str(),
+                "leaked_object_ids": cell.leaked_object_ids,
+                "own_object_ids": cell.own_object_ids,
+                "reproduced": cell.reproduced,
+                "note": cell.note,
+                "error": cell.error,
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "base": matrix.base.to_string(),
+        "method": matrix.method,
+        "url": matrix.url,
+        "baseline": {
+            "label": matrix.owner.label,
+            "request": matrix.owner.request.map(|r| r.to_string()),
+            "status": matrix.owner.status,
+        },
+        "appears_public": matrix.appears_public,
+        "cells": cells,
+        "findings": findings,
+    });
+    println!("{payload}");
+}
+
+fn status(cell: &Cell) -> String {
+    cell.status
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn verdict(cell: &Cell) -> &'static str {
+    match cell.verdict {
+        Verdict::Violation => "VIOLATION",
+        Verdict::Expected => "ok",
+        Verdict::Inconclusive => "inconclusive",
+    }
+}
+
+fn truncate(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        value.to_string()
+    } else {
+        let kept: String = value.chars().take(width.saturating_sub(1)).collect();
+        format!("{kept}…")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hexora_authz::Outcome;
+    use hexora_types::identity::PrivilegeLevel;
+    use hexora_types::ids::IdentityId;
+
+    use super::*;
+
+    fn cell(verdict: Verdict) -> Cell {
+        Cell {
+            identity: IdentityId::new(),
+            label: "User B".into(),
+            privilege: PrivilegeLevel::User,
+            request: Some(RequestId::new()),
+            status: Some(200),
+            similarity: 0.97,
+            outcome: Outcome::Allowed,
+            verdict,
+            leaked_object_ids: Vec::new(),
+            own_object_ids: Vec::new(),
+            reproduced: false,
+            error: None,
+            note: None,
+        }
+    }
+
+    #[test]
+    fn a_violation_is_rendered_so_it_cannot_be_skimmed_past() {
+        assert_eq!(verdict(&cell(Verdict::Violation)), "VIOLATION");
+        assert_eq!(verdict(&cell(Verdict::Expected)), "ok");
+    }
+
+    #[test]
+    fn a_cell_that_never_got_a_response_shows_a_dash_rather_than_a_zero() {
+        let mut cell = cell(Verdict::Inconclusive);
+        cell.status = None;
+        assert_eq!(status(&cell), "—");
+    }
+
+    #[test]
+    fn long_labels_are_truncated_rather_than_breaking_the_table() {
+        assert_eq!(truncate("short", 22), "short");
+        assert_eq!(truncate(&"x".repeat(30), 22).chars().count(), 22);
+    }
+}

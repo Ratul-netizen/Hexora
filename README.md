@@ -12,21 +12,25 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M1.5 — the engine works against real sites
+## Status: M12.1 — it answers the authorization question
 
-Hexora **is not a proxy yet**, but it is no longer only a foundation. It can issue real
-HTTP requests over real sockets:
+Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
+an application actually checks *who* is asking:
 
 ```console
-$ hexora send http://127.0.0.1:8080/api/users?id=1
-HTTP/1.1 200 OK
-Content-Type: application/json
-Set-Cookie: <redacted> (use --show-secrets)
-Content-Length: 46
+$ hexora authz ./engagement req_01a08c30bf9d… --as-identity "User A" --verify
+GET https://api.example.com/accounts/acct-1000
+Baseline: User A → 200
 
-{"hexora":"it works","path":"/api/users?id=1"}
+IDENTITY               PRIVILEGE      STATUS  OUTCOME       SIM    VERDICT
+User B                 user           200     allowed       1.00   VIOLATION
+Anonymous              anonymous      401     denied        0.00   ok
 
-46 bytes in 2 ms
+1 candidate finding(s):
+
+  [High/Confirmed] Broken object-level authorization in GET /accounts/acct-1000
+  … was replayed as User B (ordinary user), an identity that should not be able to
+  reach User A's object, and the application served it anyway.
 ```
 
 Unimplemented paths return `NotImplemented` naming the milestone that will provide
@@ -37,18 +41,18 @@ work.
 | ---- | ------ |
 | Domain model (HTTP messages, scope, identities, findings, limits, secrets) | **IMPLEMENTED** |
 | HTTP/1.x engine over TCP — wire-preserving parser, per-phase timeouts | **IMPLEMENTED** |
-| `hexora send` — single request, nothing rewritten on the way out | **IMPLEMENTED** |
-| Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |
-| Scope enforcement at the transport boundary | **IMPLEMENTED** |
-| Extension permission model | **IMPLEMENTED** |
-| AI tool-permission gate | **IMPLEMENTED** |
-| CLI (`project init`, `project info`, `version`) | **IMPLEMENTED** |
-| Desktop shell (status window) | **IMPLEMENTED** |
 | TLS / HTTPS with certificate policy fit for testing | **IMPLEMENTED** |
-| Chunked transfer decoding, gzip / deflate / brotli | **IMPLEMENTED** |
-| Streaming bodies, connection reuse | **PLANNED (M1.3–M1.4)** |
-| Proxy, TLS interception | **PLANNED (M2)** |
-| Traffic history, Repeater | **PLANNED (M3–M4)** |
+| Chunked transfer decoding, gzip / deflate / brotli, streaming bodies | **IMPLEMENTED** |
+| Intercepting proxy, TLS interception, request/response hooks | **IMPLEMENTED** |
+| Interception CA, trust installation, `hexora setup` | **IMPLEMENTED** |
+| Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |
+| Traffic history, Repeater with diffing and branch trees | **IMPLEMENTED** |
+| Identities, project scope, authorization matrix (`hexora authz`) | **IMPLEMENTED** |
+| Scope enforcement at the transport boundary | **IMPLEMENTED** |
+| Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
+| Desktop UI: project, CA, proxy, history, repeater | **IMPLEMENTED** |
+| Persisting findings, reports, attack chains | **PLANNED (rest of M12)** |
+| Connection reuse | **DEFERRED (M1.4)** |
 | Scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
 
 Full detail: [`docs/roadmap.md`](docs/roadmap.md).

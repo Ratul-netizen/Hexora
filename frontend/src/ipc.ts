@@ -48,6 +48,8 @@ export interface HistoryRow {
   sent_at: string;
   secure: boolean;
   quirks: string[];
+  /** The identity the request was sent as, for rows an authorization run produced. */
+  identity: string | null;
 }
 
 export interface HistoryPage {
@@ -139,7 +141,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 1;
+export const EXPECTED_RPC_CONTRACT_VERSION = 2;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;

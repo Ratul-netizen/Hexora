@@ -1500,12 +1500,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hexora-authz"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "hexora-engine",
+ "hexora-repeater",
+ "hexora-storage",
+ "hexora-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "hexora-cli"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "hexora-authz",
  "hexora-engine",
  "hexora-http",
  "hexora-proxy",

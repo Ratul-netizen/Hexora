@@ -98,6 +98,11 @@ pnpm -C frontend typecheck
 pnpm -C frontend build
 ```
 
+`frontend/pnpm-workspace.yaml` exists only to allow esbuild's postinstall script. pnpm
+10 and newer refuse dependency build scripts by default, and esbuild's is what unpacks
+its platform binary — without the allowance `pnpm build` fails on a fresh checkout with
+an error that says nothing about the cause.
+
 Running the CLI:
 
 ```bash

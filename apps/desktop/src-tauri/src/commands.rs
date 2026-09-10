@@ -257,6 +257,9 @@ pub struct HistoryRow {
     pub sent_at: String,
     pub secure: bool,
     pub quirks: Vec<String>,
+    /// The identity the request was sent as, for rows an authorization run produced.
+    /// `None` for proxy traffic, which carries whatever credential the browser had.
+    pub identity: Option<String>,
 }
 
 /// A page of history.
@@ -604,6 +607,7 @@ fn row(item: hexora_storage::StoredTraffic) -> HistoryRow {
         sent_at: item.sent_at,
         secure: item.secure,
         quirks: item.quirks,
+        identity: item.identity,
     }
 }
 
@@ -706,6 +710,7 @@ mod tests {
             sent_at: "2026-01-01T00:00:00Z".into(),
             quirks: vec!["BareLf".into()],
             secure: true,
+            identity: Some("User B".into()),
         });
         let json = serde_json::to_value(&row).unwrap();
         for key in [

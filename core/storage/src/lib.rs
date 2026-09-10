@@ -50,8 +50,10 @@
 
 pub mod blob;
 pub mod error;
+pub mod identities;
 pub mod migrations;
 pub mod repository;
+pub mod settings;
 pub mod traffic;
 
 use std::path::{Path, PathBuf};
@@ -67,6 +69,8 @@ pub use rusqlite;
 
 pub use crate::blob::{BlobRef, BlobStore, FsBlobStore, MemoryBlobStore};
 pub use crate::error::{Result, StorageError};
+pub use crate::identities::IdentityStore;
+pub use crate::settings::Settings;
 pub use crate::traffic::{CapturedExchange, StoredRequest, StoredTraffic, TrafficStore};
 
 /// A handle to a project's relational metadata database.
@@ -234,6 +238,17 @@ impl Project {
     /// one per task rather than passing a `&Project` around.
     pub fn traffic(&self) -> TrafficStore {
         TrafficStore::new(self.metadata.clone(), self.blobs.clone())
+    }
+
+    /// The identities this project tests as.
+    pub fn identities(&self) -> IdentityStore {
+        IdentityStore::new(self.metadata.clone())
+    }
+
+    /// The project's settings, including the scope every automated subsystem is held
+    /// to.
+    pub fn settings(&self) -> Settings {
+        Settings::new(self.metadata.clone())
     }
 
     /// The project directory, or `None` for an in-memory project.

@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M5 (desktop UI)
+- **Last updated:** M12.1 (authorization testing)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -27,28 +27,30 @@ milestone.
 | **M4** — Repeater | Load a request from history, edit it in `$EDITOR`, resend it, diff the responses. Nothing is auto-corrected — a wrong `Content-Length` is reported and sent as written. Sends keep a link to what they derived from, so `--tree` answers "which edit caused this?" |
 | **M2.5** — Trust and first run | `hexora setup` gets a machine ready in one command. The CA installs into the *user* trust store (no admin), is verified by asking the platform rather than trusting an exit code, and removes cleanly. Firefox is detected and called out because it ignores the system store |
 | **M5** — Desktop UI | The Tauri window does the whole loop: open a project, install the CA, run the proxy, watch traffic arrive live, inspect an exchange, send it to the repeater, edit, resend, diff. Same crates as the CLI — there is no second engine |
+| **M12.1** — Authorization testing | Replay one captured request as every identity and say what the differences prove. Structural comparison, an unauthenticated control that stops a public page becoming six findings, declared object ids that both convict and exonerate, confidence that has to be earned by reproduction. Identities and scope now persist in the project |
 
 ## Next
 
-**Hexora is now usable by someone who never opens a terminal.** Capture, browse,
-inspect, edit, resend, compare — all of it in a window, over the same crates the CLI
-drives.
+**Hexora can now answer the question testers actually get paid for.** Capture a request
+once, and `hexora authz` will replay it as everyone else and tell you whether the
+application checks *who* is asking or only that somebody is — with the evidence
+attached, in the project, citable months later.
 
-The open question is which direction to take next, and it depends on the customer
-question below:
+What that leaves open, in the order it matters:
 
-- **M13 — the scanner.** The thing buyers compare on. Also the thing most likely to be
-  wrong in ways that waste a tester's day, so it needs the evidence model to carry its
-  weight first — which it now does.
-- **M12 — authorization testing and reporting.** The gap nobody fills well: identity
-  matrices, "can role A reach role B's object", and a report that cites the exact
-  exchange. Fits the evidence architecture better than a scanner does.
-- **Sanding down what exists.** History filtering beyond text matching, saved
-  collections, keyboard-first navigation. Unglamorous, and the difference between a
-  demo and a tool.
-
-Recommendation: **M12**, because it plays to what has been built rather than competing
-head-on with two decades of scanner signature work.
+- **File the findings.** `hexora authz` prints its findings; nothing writes them to the
+  `findings` table, which has been in the schema since M0. Until that lands a run's
+  conclusions live in a terminal, and the project holds only the traffic behind them.
+  Small, well-defined, and the prerequisite for everything below.
+- **The report.** The gap nobody fills well: a document that cites the exact exchange
+  behind every claim. The evidence model was built for this and now has real findings
+  to carry.
+- **Construct the attempts, do not only replay them.** The matrix replays a request as
+  written. Substituting one identity's object identifiers into another's request —
+  "can User B reach *User A's* invoice id?" — is the other half of M12 and finds bugs
+  a replay cannot.
+- **M13 — the scanner.** Still the thing buyers compare on, and still the thing most
+  likely to waste a tester's day if it is wrong.
 
 **Two honesty notes carried forward:**
 
@@ -59,6 +61,12 @@ verified end to end.
 The desktop UI compiles, launches and its logic is unit-tested, but its visual result
 has not been inspected on any platform — nobody has looked at the window and said "that
 reads correctly". Treat the layout as unreviewed.
+
+The authorization matrix has been exercised end to end against a local application
+with a deliberate IDOR: it found the bug at High/Confirmed, correctly cleared a
+per-identity endpoint that scores 1.00 on similarity, and correctly reduced a public
+page to a single finding. It has not been run against a large real application, where
+response noise is worse than any fixture.
 
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
@@ -158,6 +166,14 @@ cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --edit
 cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --tree
 cargo run -p hexora-cli -- repeat ./scratch/demo req_A --diff req_B
 
+# Authorization testing: is the application checking who is asking?
+cargo run -p hexora-cli -- scope add ./scratch/demo api.example.com
+export TOKEN_B=...                      # never on the command line: ps reads that
+cargo run -p hexora-cli -- identity add ./scratch/demo "User B"     --kind bearer --from-env TOKEN_B --owns acct-2000
+cargo run -p hexora-cli -- identity list ./scratch/demo
+cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User A"
+cargo run -p hexora-cli -- authz ./scratch/demo req_01a08b… --as-identity "User A" --verify
+
 # The desktop window. Same engine, no terminal.
 pnpm -C frontend build && cargo run -p hexora-desktop
 ```
@@ -210,3 +226,14 @@ Written down because they were learned the hard way and are easy to undo by acci
 | [`docs/storage.md`](docs/storage.md) | Why bodies are not in the database |
 | [`docs/development.md`](docs/development.md) | Building, testing, conventions |
 | [`docs/dependencies.md`](docs/dependencies.md) | Dependency, audit and secret-scanning policy |
+- **An anonymous control is what makes a matrix trustworthy.** Without it, a public
+  page produces one "violation" per identity, all of them true and all of them
+  worthless. With it, the run says the only thing that is actually the case.
+- **Declared object identifiers cut both ways.** They are what raises a similarity
+  match to a disclosure — and what clears an endpoint that returns each caller their
+  own record in an identical document shape. `GET /profile` scores 1.00 against the
+  owner's response and is not a bug; only the ids inside can say so.
+- **Scope is why `hexora authz` needs a project that has one.** Authorization replays
+  are automated traffic, and the guard refuses automated traffic to undeclared hosts.
+  The run asks once, before sending, so a misconfigured scope is one sentence rather
+  than one failure per identity.

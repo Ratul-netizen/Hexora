@@ -264,6 +264,13 @@ input[type="text"]:focus {
   color: var(--danger);
 }
 
+/* Which principal a request was sent as. Neutral rather than alarming: an identity
+   tag is context for reading the row, not a warning about it. */
+.tag.identity {
+  background: rgba(95, 165, 114, 0.16);
+  color: var(--ok);
+}
+
 .tag.interesting {
   background: rgba(217, 139, 58, 0.18);
   color: var(--accent);

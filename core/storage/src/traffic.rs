@@ -49,6 +49,13 @@ pub struct CapturedExchange {
     pub content_encoding: Option<String>,
     /// Which subsystem produced the request.
     pub origin: &'static str,
+    /// The identity the request was sent as, when one was chosen deliberately.
+    ///
+    /// Set by the authorization subsystem, which cannot produce evidence without it:
+    /// "this response reached User B" is only a claim if the row says which principal
+    /// sent the request. `None` for proxy traffic, where the credential is whatever
+    /// the browser already had.
+    pub identity: Option<hexora_types::ids::IdentityId>,
     /// The request this one was derived from, for repeater branching.
     ///
     /// A variant that keeps its parent is what makes "which edit caused the change?"
@@ -85,6 +92,12 @@ pub struct StoredTraffic {
     pub quirks: Vec<String>,
     /// Whether the connection was TLS.
     pub secure: bool,
+    /// The label of the identity the request was sent as, when it was sent as one.
+    ///
+    /// The label rather than the id: history is read by people, and an authorization
+    /// replay whose row says only `idn_01a08c…` cannot be checked at a glance against
+    /// the claim a finding makes about it.
+    pub identity: Option<String>,
 }
 
 /// A stored request, read back in full.
@@ -100,6 +113,8 @@ pub struct StoredRequest {
     pub parent: Option<RequestId>,
     /// Which subsystem sent it.
     pub origin: String,
+    /// The identity it was sent as, when one was chosen.
+    pub identity: Option<hexora_types::ids::IdentityId>,
     /// The method, verbatim.
     pub method: String,
     /// The request target as sent.
@@ -121,6 +136,7 @@ pub struct StoredRequest {
 struct RequestRow {
     request: StoredRequest,
     parent: Option<String>,
+    identity: Option<String>,
     body_hash: Option<String>,
     body_size: i64,
 }
@@ -213,8 +229,9 @@ impl TrafficStore {
         tx.execute(
             "INSERT INTO requests
                 (id, target_id, origin, parent_id, method, path, http_version,
-                 headers_raw, body_hash, body_size, sent_at, quirks, tls_json)
-             VALUES (?1, ?2, ?3, ?13, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 headers_raw, body_hash, body_size, sent_at, quirks, tls_json,
+                 identity_id)
+             VALUES (?1, ?2, ?3, ?13, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?14)",
             params![
                 request_id.to_string(),
                 target.to_string(),
@@ -229,6 +246,7 @@ impl TrafficStore {
                 quirks,
                 tls_json,
                 exchange.parent.map(|p| p.to_string()),
+                exchange.identity.map(|i| i.to_string()),
             ],
         )?;
 
@@ -271,10 +289,12 @@ impl TrafficStore {
         let sql = "
             SELECT r.id, r.target_id, r.method, r.path, r.sent_at, r.quirks,
                    t.host, t.port, t.secure,
-                   res.status, res.body_size, res.duration_ms
+                   res.status, res.body_size, res.duration_ms,
+                   i.label
             FROM requests r
             JOIN targets t ON t.id = r.target_id
             LEFT JOIN responses res ON res.request_id = r.id
+            LEFT JOIN identities i ON i.id = r.identity_id
             WHERE (?1 IS NULL OR r.id < ?1)
             ORDER BY r.id DESC
             LIMIT ?2";
@@ -295,13 +315,27 @@ impl TrafficStore {
                 row.get::<_, Option<i64>>(9)?,
                 row.get::<_, Option<i64>>(10)?,
                 row.get::<_, Option<i64>>(11)?,
+                row.get::<_, Option<String>>(12)?,
             ))
         })?;
 
         let mut items = Vec::new();
         for row in rows {
-            let (id, target, method, path, sent_at, quirks, host, port, secure, status, size, ms) =
-                row?;
+            let (
+                id,
+                target,
+                method,
+                path,
+                sent_at,
+                quirks,
+                host,
+                port,
+                secure,
+                status,
+                size,
+                ms,
+                identity,
+            ) = row?;
             let secure = secure != 0;
             let service = hexora_types::http::HttpService::new(&host, port as u16, secure);
             items.push(StoredTraffic {
@@ -315,6 +349,7 @@ impl TrafficStore {
                 sent_at,
                 quirks: serde_json::from_str(&quirks).unwrap_or_default(),
                 secure,
+                identity,
             });
         }
 
@@ -373,7 +408,7 @@ impl TrafficStore {
             .query_row(
                 "SELECT r.parent_id, r.origin, r.method, r.path, r.http_version,
                         r.headers_raw, r.body_hash, r.body_size, r.sent_at,
-                        t.host, t.port, t.secure
+                        t.host, t.port, t.secure, r.identity_id
                  FROM requests r
                  JOIN targets t ON t.id = r.target_id
                  WHERE r.id = ?1",
@@ -382,7 +417,9 @@ impl TrafficStore {
                     let host: String = row.get(9)?;
                     let port: i64 = row.get(10)?;
                     let secure: i64 = row.get(11)?;
+                    let identity: Option<String> = row.get(12)?;
                     Ok(RequestRow {
+                        identity,
                         // Parsed after the query: the id types return `HexoraError`,
                         // which is not a `rusqlite::Error` and cannot surface here.
                         parent: row.get(0)?,
@@ -391,6 +428,7 @@ impl TrafficStore {
                         request: StoredRequest {
                             id,
                             parent: None,
+                            identity: None,
                             origin: row.get(1)?,
                             method: row.get(2)?,
                             path: row.get(3)?,
@@ -416,6 +454,7 @@ impl TrafficStore {
 
         let mut stored = row.request;
         stored.parent = row.parent.map(|p| p.parse()).transpose()?;
+        stored.identity = row.identity.map(|i| i.parse()).transpose()?;
         stored.body = match row.body_hash {
             None => Vec::new(),
             Some(hash) => {
@@ -510,7 +549,7 @@ fn header_block(headers: &hexora_types::http::Headers) -> Vec<u8> {
     out
 }
 
-fn now() -> String {
+pub(crate) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
@@ -554,6 +593,7 @@ mod tests {
             encoded_body: None,
             content_encoding: None,
             origin: "proxy",
+            identity: None,
             parent: None,
             quirks: Vec::new(),
             tls: None,
@@ -600,6 +640,28 @@ mod tests {
         let (store, _project) = store();
         let id = store.record(&exchange("/", 200, b"")).unwrap();
         assert!(store.request(id).unwrap().body.is_empty());
+    }
+
+    #[test]
+    fn a_request_sent_as_an_identity_reads_back_naming_it() {
+        let (store, project) = store();
+        let identity = hexora_types::identity::Identity::bearer("User B", "TEST_TOKEN");
+        project.identities().put(&identity).unwrap();
+
+        let mut captured = exchange("/accounts/1", 200, b"{}");
+        captured.origin = "authz";
+        captured.identity = Some(identity.id);
+        let id = store.record(&captured).unwrap();
+
+        assert_eq!(store.request(id).unwrap().identity, Some(identity.id));
+        let page = store
+            .history(None, crate::repository::Limit::new(10))
+            .unwrap();
+        assert_eq!(
+            page.items[0].identity.as_deref(),
+            Some("User B"),
+            "history shows the label, because history is read by people"
+        );
     }
 
     #[test]

@@ -26,30 +26,42 @@ influenced part of the process.
 | Crate | Role | Status |
 | ----- | ---- | ------ |
 | `core/types` | Domain model: HTTP messages, IDs, scope, identities, findings, limits, secrets, errors | **Implemented** |
-| `core/storage` | SQLite metadata database, migrations, content-addressed blob store, backend-agnostic repository traits | **Implemented** (repository impls pending M3) |
-| `core/engine` | Transport boundary, scope enforcement, extension permissions, AI tool gate | **Implemented** (real transport pending M1) |
-| `apps/cli` | `hexora` headless CLI | Project commands only |
-| `apps/desktop` | Tauri shell | Version/status window only |
-| `frontend` | React + TypeScript UI | Status view only |
+| `core/storage` | SQLite metadata database, migrations, content-addressed blob store, traffic, identities, project settings | **Implemented** (findings store still pending) |
+| `core/engine` | Transport boundary, scope enforcement, extension permissions, AI tool gate | **Implemented** |
+| `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
+| `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
+| `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
+| `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings | **Implemented** (M12.1) |
+| `apps/cli` | `hexora` headless CLI | **Implemented** |
+| `apps/desktop` | Tauri shell | **Implemented** (layout unreviewed) |
+| `frontend` | React + TypeScript UI | **Implemented** (layout unreviewed) |
 
 The dependency graph is a DAG with `core/types` at the bottom and nothing depending on
 the applications:
 
 ```text
-types ← storage ← cli
-  ↑        ↑       ↑
-  └── engine ──────┘
-           ↑
-       desktop
+types ← storage ← http ← proxy
+  ↑        ↑        ↑       ↑
+  └────  engine ────┴───────┤
+           ↑                │
+       repeater ← authz ────┤
+           ↑                │
+        cli · desktop ──────┘
 ```
+
+`core/authz` deliberately owns no send path of its own: it drives `core/repeater`,
+because loading a stored request, applying a credential, sending it and recording the
+result is exactly what the repeater already does, and a second implementation would be
+a second set of bugs.
 
 ### Why so few crates
 
 An earlier draft of this workspace had eleven core crates, nine of them empty. Empty
 crates are not architecture — they are a promise the compiler cannot check. Crates are
 split out of `core/engine` when the milestone that needs them lands and there is real
-code to separate. `core/http`, `core/proxy`, `core/tls` and `core/scanner` are expected;
-they do not exist yet because their contents do not.
+code to separate. `core/http`, `core/proxy`, `core/repeater` and `core/authz` were each
+split out that way, when their contents existed; `core/scanner` is expected and does not
+exist yet, because its contents do not.
 
 Similarly, a trait earns its place when at least two components must agree on it, or
 when it is the seam an invariant is enforced at. Speculative interfaces are worse than
