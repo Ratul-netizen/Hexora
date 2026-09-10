@@ -1,0 +1,30 @@
+[package]
+name = "hexora-proxy"
+description = "Hexora's intercepting proxy: certificate authority, request interception and capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-engine.workspace = true
+hexora-http.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
+rcgen.workspace = true
+time.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
+# The interception tests stand up a real HTTPS upstream.
+rcgen.workspace = true

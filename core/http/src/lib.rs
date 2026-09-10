@@ -19,14 +19,15 @@
 //!   is assumed, so a response that never ends must be refused before it exhausts
 //!   memory rather than after.
 //!
-//! ## Status (M1.1)
+//! ## Status
 //!
-//! Implemented: HTTP/1.0 and HTTP/1.1 over plaintext TCP, bodies delimited by
-//! `Content-Length` or connection close, per-phase timeouts, incremental limits.
+//! Implemented: HTTP/1.0 and HTTP/1.1 over plaintext TCP and TLS; request and
+//! response head parsing; `Content-Length`, chunked and connection-close framing;
+//! streaming bodies; gzip, deflate and brotli; per-phase timeouts and incrementally
+//! enforced limits.
 //!
-//! Not implemented, and failing loudly rather than guessing: TLS (M1.2), streaming
-//! bodies (M1.3), connection reuse (M1.4), chunked decoding and content decoding
-//! (M1.5), redirects (M1.6).
+//! Not implemented, and failing loudly rather than guessing: connection reuse (M1.4)
+//! and redirects (M1.6).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
@@ -35,11 +36,13 @@ pub mod body;
 pub mod chunked;
 pub mod decode;
 pub mod parse;
+pub mod request;
 pub mod tls;
 pub mod transport;
 pub mod write;
 
 pub use body::{BodyStream, CollectedBody};
 pub use parse::{BodyFraming, Quirk, ResponseHead};
+pub use request::{parse_request_head, RequestHead, RequestTarget};
 pub use tls::{ClientIdentity, TlsConfig};
 pub use transport::{StreamingExchange, TcpTransport};

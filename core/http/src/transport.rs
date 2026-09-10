@@ -49,9 +49,22 @@ const READ_CHUNK: usize = 16 * 1024;
 /// Opens a fresh connection per request. Connection reuse is M1.4; doing it now would
 /// mean building a pool before there is a parser proven to find message boundaries
 /// correctly, and a pool that mis-frames one response corrupts the next.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TcpTransport {
     tls: TlsConfig,
+}
+
+impl Default for TcpTransport {
+    /// Deliberately hand-written rather than derived.
+    ///
+    /// A derived `Default` would use `TlsConfig::default()`, whose ALPN list is
+    /// empty, so `TcpTransport::default()` and `TcpTransport::new()` would quietly
+    /// negotiate differently. Two constructors that look interchangeable but are
+    /// not is exactly the kind of difference that surfaces months later as an
+    /// unexplained protocol change.
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TcpTransport {
@@ -136,7 +149,7 @@ pub struct StreamingExchange {
     /// What the TLS handshake produced, for `https` exchanges.
     pub tls: Option<hexora_types::tls::TlsInfo>,
     /// The body, still arriving.
-    pub body: BodyStream,
+    pub body: BodyStream<'static>,
     started: Instant,
 }
 

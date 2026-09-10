@@ -91,7 +91,15 @@ Bodies delimited by `Content-Length` or connection close. Chunked responses and 
 return `NotImplemented` naming the milestone that will handle them, rather than
 returning a wrong body.
 
-**M2 — Proxy** · PLANNED
+**M2 — Proxy** · IN PROGRESS
+
+| | Scope | Status |
+| --- | --- | --- |
+| M2.1 | Interception certificate authority | **DONE** |
+| M2.2 | Plain HTTP proxy, absolute-form requests | **DONE** |
+| M2.3 | `CONNECT` tunnelling and TLS interception | **DONE** |
+| M2.4 | Intercept / forward / drop / modify hooks | PLANNED · **next** |
+| M2.5 | Trust installation and first-run experience | PLANNED |
 
 HTTP proxy, `CONNECT` tunnelling, per-install interception CA with generated leaf
 certificates, intercept/forward/drop/modify, certificate export and browser trust

@@ -7,6 +7,7 @@ members = [
     "core/storage",
     "core/engine",
     "core/http",
+    "core/proxy",
     "apps/cli",
     "apps/desktop/src-tauri",
 ]
@@ -24,6 +25,7 @@ hexora-types = { path = "core/types" }
 hexora-storage = { path = "core/storage" }
 hexora-engine = { path = "core/engine" }
 hexora-http = { path = "core/http" }
+hexora-proxy = { path = "core/proxy" }
 
 # Async runtime. Needed at M0 only for the engine trait signatures.
 tokio = { version = "1.43", features = [
@@ -53,6 +55,11 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"
 rustls-native-certs = "0.8"
 rustls-pemfile = "2.2"
 rustls-pki-types = "1.10"
+# Mints the interception CA and its per-host leaf certificates.
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+# Certificate validity windows. rcgen takes `time::OffsetDateTime` but does not
+# re-export it, so the dependency has to be declared here as well.
+time = { version = "0.3", default-features = false, features = ["std"] }
 x509-parser = "0.16"
 
 # Content decoding. A hostile server controls these bytes, so both are driven
@@ -78,9 +85,6 @@ tauri-build = { version = "2.0", features = [] }
 
 # Testing
 tempfile = "3.14"
-# Generates throwaway certificates so the TLS path is tested against a real local
-# handshake rather than the internet.
-rcgen = "0.13"
 proptest = "1.6"
 
 [profile.release]

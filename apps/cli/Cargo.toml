@@ -16,6 +16,7 @@ hexora-types.workspace = true
 hexora-storage.workspace = true
 hexora-engine.workspace = true
 hexora-http.workspace = true
+hexora-proxy.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 clap.workspace = true

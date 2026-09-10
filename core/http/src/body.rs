@@ -38,8 +38,8 @@ const READ_CHUNK: usize = 16 * 1024;
 /// Owns the connection for the lifetime of the body, because the bytes cannot be
 /// framed without it. Dropping the stream drops the connection, which is the correct
 /// way to abandon a response that is taking too long.
-pub struct BodyStream {
-    stream: Box<dyn AsyncRead + Send + Unpin>,
+pub struct BodyStream<'a> {
+    stream: Box<dyn AsyncRead + Send + Unpin + 'a>,
     buf: BytesMut,
     framing: BodyFraming,
     limits: Limits,
@@ -54,7 +54,7 @@ pub struct BodyStream {
     deadline: tokio::time::Instant,
 }
 
-impl std::fmt::Debug for BodyStream {
+impl std::fmt::Debug for BodyStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BodyStream")
             .field("framing", &self.framing)
@@ -78,11 +78,16 @@ pub struct CollectedBody {
     pub truncated: bool,
 }
 
-impl BodyStream {
+impl<'a> BodyStream<'a> {
     /// Builds a stream over `connection`, starting with `prefix` — the bytes that
     /// arrived alongside the response head and belong to the body.
+    ///
+    /// The connection may be borrowed rather than owned. The proxy needs that: it
+    /// reads a request body from a client socket it must keep afterwards to write the
+    /// response back, and requiring ownership here would have meant a second copy of
+    /// the chunked decoder living in the proxy.
     pub fn new(
-        connection: Box<dyn AsyncRead + Send + Unpin>,
+        connection: Box<dyn AsyncRead + Send + Unpin + 'a>,
         prefix: BytesMut,
         framing: BodyFraming,
         limits: Limits,
@@ -333,12 +338,12 @@ mod tests {
         }
     }
 
-    fn stream(pieces: Vec<&[u8]>, framing: BodyFraming, limits: Limits) -> BodyStream {
+    fn stream(pieces: Vec<&[u8]>, framing: BodyFraming, limits: Limits) -> BodyStream<'static> {
         let owned: Vec<Vec<u8>> = pieces.into_iter().map(<[u8]>::to_vec).collect();
         BodyStream::new(Box::new(Pieces(owned)), BytesMut::new(), framing, limits)
     }
 
-    async fn drain(mut body: BodyStream) -> Result<Vec<Bytes>> {
+    async fn drain(mut body: BodyStream<'_>) -> Result<Vec<Bytes>> {
         let mut chunks = Vec::new();
         while let Some(chunk) = body.next_chunk().await? {
             if !chunk.is_empty() {

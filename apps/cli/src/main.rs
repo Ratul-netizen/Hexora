@@ -4,9 +4,9 @@
 //! no second proxy and no CLI-only code path that behaves differently from the GUI —
 //! a result reproduced in CI must be the same result a tester sees on their machine.
 //!
-//! At M0 the CLI can create and inspect projects. Commands for the proxy, scanner and
-//! fuzzer are not registered at all, rather than registered as stubs that fail at
-//! runtime: `hexora --help` lists what genuinely works today.
+//! Commands that are not implemented are not registered at all, rather than
+//! registered as stubs that fail at runtime: `hexora --help` lists what genuinely
+//! works today and nothing else.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
 mod project;
+mod proxy;
 mod send;
 
 /// Hexora — the modern offensive security workbench.
@@ -25,9 +26,9 @@ mod send;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M1.2. Project management and single-request \
-                  sending over HTTP and HTTPS work. Chunked responses, the proxy, \
-                  scanner and fuzzer are not implemented yet."
+                  Development status: M2.3. The intercepting proxy, HTTP/1.x engine \
+                  with TLS, and project management all work. The scanner, fuzzer and \
+                  repeater are not implemented yet."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -89,6 +90,55 @@ enum Command {
         client_key: Option<PathBuf>,
     },
 
+    /// Run the intercepting proxy.
+    ///
+    /// Point a browser at it, install the CA, and Hexora sees the traffic. Every
+    /// exchange is printed as it happens.
+    Proxy {
+        /// Address to listen on.
+        #[arg(short, long, default_value = "127.0.0.1:8080")]
+        listen: String,
+
+        /// Directory holding the interception CA.
+        #[arg(long, value_name = "DIR")]
+        ca_dir: Option<PathBuf>,
+
+        /// Host never to decrypt. Repeatable; accepts a leading `*.` wildcard.
+        ///
+        /// Use this for certificate-pinned applications, and for anything that
+        /// should not be decrypted at all.
+        #[arg(long, value_name = "HOST")]
+        exempt: Vec<String>,
+
+        /// Decrypt only this host, tunnelling everything else untouched.
+        ///
+        /// The safer posture: your own browsing stays encrypted while you work.
+        #[arg(long, value_name = "HOST")]
+        only: Vec<String>,
+
+        /// Do not verify upstream certificates.
+        ///
+        /// Needed for staging targets with self-signed certificates. Applies to the
+        /// connection between Hexora and the target, not the one your browser sees.
+        #[arg(short = 'k', long)]
+        insecure_upstream: bool,
+    },
+
+    /// Manage the interception certificate authority.
+    Ca {
+        /// Directory holding the CA.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+
+        /// Write the CA certificate here and print trust instructions.
+        #[arg(long, value_name = "FILE")]
+        export: Option<PathBuf>,
+
+        /// Delete the CA. Does not untrust it — remove it from trust stores too.
+        #[arg(long)]
+        delete: bool,
+    },
+
     /// Print version and build information.
     Version,
 }
@@ -143,6 +193,28 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             project::init(path, name.as_deref(), cli.json)
         }
         Command::Project(ProjectCommand::Info { path }) => project::info(path, cli.json),
+        Command::Proxy {
+            listen,
+            ca_dir,
+            exempt,
+            only,
+            insecure_upstream,
+        } => proxy::run(proxy::ProxyArgs {
+            listen,
+            ca_dir: ca_dir.as_deref(),
+            exempt,
+            only,
+            insecure_upstream: *insecure_upstream,
+        }),
+        Command::Ca {
+            dir,
+            export,
+            delete,
+        } => proxy::ca(proxy::CaArgs {
+            dir: dir.as_deref(),
+            export: export.as_deref(),
+            delete: *delete,
+        }),
         Command::Send {
             url,
             method,
@@ -175,14 +247,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M1.2",
+            "milestone": "M2.3",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M1.2 (HTTP/1.x engine with TLS)");
+        println!("  milestone:               M2.3 (intercepting proxy)");
     }
 }
 
@@ -229,7 +301,7 @@ mod tests {
     #[test]
     fn help_does_not_advertise_unimplemented_features() {
         let help = Cli::command().render_long_help().to_string().to_lowercase();
-        for absent in ["proxy", "scan", "fuzz", "intruder", "repeater"] {
+        for absent in ["scan", "fuzz", "intruder", "repeater"] {
             assert!(
                 !help.contains(&format!("  {absent}")),
                 "help offers a {absent} command that does not exist"
@@ -241,7 +313,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M1.2"),
+            help.contains("M2.3"),
             "users must not mistake this for a finished tool"
         );
     }

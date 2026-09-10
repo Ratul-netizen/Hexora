@@ -76,6 +76,16 @@ pub enum Quirk {
     TrailerFields,
     /// Bytes followed the terminating chunk that belong to no requested response.
     DataAfterFinalChunk,
+
+    // --- request-side framing ---
+    /// More than one `Host` header. Front-end and back-end routinely pick different
+    /// ones, which is how a request reaches a host the front-end never authorised.
+    MultipleHostHeaders,
+    /// An HTTP/1.1 request with no `Host` header, which RFC 9112 requires.
+    MissingHostHeader,
+    /// The `Host` header disagrees with the authority in an absolute-form target.
+    /// Which one wins is implementation-defined, so this is a routing differential.
+    HostMismatchWithTarget,
 }
 
 impl Quirk {
@@ -102,6 +112,9 @@ impl Quirk {
             Self::MissingChunkTerminator => "chunk data was not followed by CRLF",
             Self::TrailerFields => "trailer fields followed the final chunk",
             Self::DataAfterFinalChunk => "unrequested data followed the final chunk",
+            Self::MultipleHostHeaders => "more than one Host header",
+            Self::MissingHostHeader => "HTTP/1.1 request without a Host header",
+            Self::HostMismatchWithTarget => "Host header disagrees with the request target",
         }
     }
 
@@ -124,6 +137,10 @@ impl Quirk {
                 | Self::LeadingZeroChunkSize
                 | Self::MissingChunkTerminator
                 | Self::DataAfterFinalChunk
+                // Both are ways for two hops to disagree about where a request is
+                // going, which is the routing half of the same family of attacks.
+                | Self::MultipleHostHeaders
+                | Self::HostMismatchWithTarget
         )
     }
 }
@@ -247,16 +264,16 @@ pub fn parse_response_head(
 }
 
 /// The head split into lines, plus whether any used a bare LF terminator.
-struct Split<'a> {
-    lines: Vec<&'a [u8]>,
-    bare_lf: bool,
+pub(crate) struct Split<'a> {
+    pub(crate) lines: Vec<&'a [u8]>,
+    pub(crate) bare_lf: bool,
 }
 
 /// Splits on CRLF, tolerating bare LF and reporting that it happened.
 ///
 /// Bare LF is reported once for the whole head rather than per line: a response that
 /// uses it uses it throughout, and one flag is what a tester needs to see.
-fn split_lines(buf: &[u8]) -> Split<'_> {
+pub(crate) fn split_lines(buf: &[u8]) -> Split<'_> {
     let mut lines = Vec::new();
     let mut bare_lf = false;
     let mut pos = 0;
@@ -327,7 +344,7 @@ fn parse_status_line(
     Ok((version, status, reason))
 }
 
-fn parse_header_line(
+pub(crate) fn parse_header_line(
     line: &[u8],
     headers: &mut Headers,
     quirks: &mut Vec<Quirk>,

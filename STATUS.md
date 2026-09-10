@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M1.3 (streaming bodies)
+- **Last updated:** M2.3 (TLS interception)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -19,18 +19,21 @@ milestone.
 | **M1.2** — TLS | rustls with SNI/ALPN, platform trust store, per-transport verification opt-out, mTLS client certs, TLS observations recorded on the exchange |
 | **M1.5** — Chunked + compression | Chunked decoding with desync quirks, trailers, gzip/deflate/brotli with bomb protection enforced while expanding |
 | **M1.3** — Streaming bodies | Incremental chunked state machine, `BodyStream` owning the connection, `send_streaming()` returning at the response head |
+| **M2.1** — Interception CA | Per-installation CA, per-host leaf minting, RFC 1123 host validation, easy removal |
+| **M2.2** — HTTP proxy | Absolute-form forwarding, hop-by-hop stripping, capture via an observer, loopback by default |
+| **M2.3** — TLS interception | `CONNECT` tunnelling, double handshake, selective interception with exempt and only-mode |
 
 ## Next
 
-**M2 — the proxy.** The engine now has everything the proxy needs. This is the hardest
-thing in Phase 1, and not because of the HTTP: the interception CA, per-platform trust
-installation (Windows certificate store vs Linux NSS) and the first-run experience are
-where the work is. Antivirus false positives are a real budget item — an intercepting
-proxy with its own CA looks exactly like malware to a heuristic scanner.
+**M2.4 — interception hooks.** The proxy forwards everything today. Intercept, forward,
+drop and modify are what make it a *tool* rather than a recorder, and they need a
+decision point the UI can drive.
 
-M1.4 (pooling) is deliberately deferred: the fuzzer needs it, the proxy does not, and a
-pool that mis-frames one response corrupts the next. M1.6 redirects, M1.7 fuzz targets
-and M1.8 benchmarks can follow the proxy.
+Then M2.5 (trust installation and first-run), M3 (traffic storage — where captured
+exchanges finally reach the database rather than the console), and M4 (repeater).
+
+M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
+a pool that mis-frames one response corrupts the next.
 
 **Known gap to close in M3:** compressed responses are decoded in place, so the
 original wire bytes are not retained. That is at odds with "preserve the wire" and is
@@ -95,6 +98,11 @@ unmaintained-crate warnings, all transitive through Tauri and recorded in
 cargo run -p hexora-cli -- send http://example.com/
 cargo run -p hexora-cli -- send https://example.com/ --insecure   # self-signed targets
 cargo run -p hexora-cli -- project init ./scratch/demo
+
+# The proxy. Export and install the CA first, then point a browser at it.
+cargo run -p hexora-cli -- ca --export hexora-ca.crt
+cargo run -p hexora-cli -- proxy --listen 127.0.0.1:8080
+cargo run -p hexora-cli -- proxy --only target.example.com   # leave your own traffic alone
 ```
 
 ---
@@ -116,6 +124,15 @@ Written down because they were learned the hard way and are easy to undo by acci
   than one that says it cannot run yet.
 - **Tests that assert OS-specific error classifications will fail in CI.** Closing a
   socket with data queued gives `ECONNRESET` on Windows and a clean EOF on Linux.
+- **Windows schannel rejects a locally generated CA passed as a file.** It checks
+  revocation, and a local CA has no revocation list, so you get
+  `CERT_TRUST_REVOCATION_STATUS_UNKNOWN` even though the certificate is fine. Install
+  it into the store with `certutil` instead; `curl --ssl-revoke-best-effort` works for
+  a quick test.
+- **Inside a CONNECT tunnel the client sends origin-form targets**, which carry no
+  scheme. Forwarding one naively replays it upstream over plaintext and silently
+  downgrades a connection the user believes is encrypted. The scheme comes from the
+  CONNECT authority, and a test asserts the captured URL stays `https://`.
 
 ## Documentation map
 
