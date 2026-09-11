@@ -508,6 +508,74 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Fixed — three ways of calling a working application broken
+
+One run of `authz.scheduled` against a live bug bounty target filed **six findings, all
+false positives**, four of them `high · firm`. Every one was a public reference endpoint:
+a list of cities, the districts in a city, address form fields, consent configuration.
+Seven filings across the engagement, seven false positives — a 100% rate.
+
+A scanner whose top-severity output is a login screen's config file is one people stop
+reading, which is the failure this project has been designing against from the start. It
+took a real application to expose it; three milestones of local testing did not.
+
+**1. "No session required" was a classification error, not a threshold one.**
+
+`auth.enforcement` rated *same document served without a credential* as
+`Support::Distinctive` — evidence that tells the hypothesis apart from the alternatives.
+It does not. It is at least as consistent with an endpoint that is **meant** to be
+public, which is much the commoner thing. The premise underneath — captured with a
+credential, therefore meant to be protected — is simply false for browser traffic, where
+the cookie goes on every same-origin request including the ones to static config.
+
+So the check now asks the question it can actually answer: was anything *of the
+caller's* disclosed? One thing in this project answers that without guessing — an object
+identifier somebody declared as owned, found in a document served to nobody. Present, it
+is `Distinctive` and High, as before. Absent, the honest verdict is `Inconclusive`, and
+nothing is filed.
+
+The other `Distinctive` in that file is untouched and was always right: an application
+that **refuses** an anonymous request but **accepts** a JWT whose signature was altered
+is unambiguous — it reads a session and does not check it.
+
+Nothing broke when this changed, which was its own finding: the only test covered
+`how()`, the comparison of two answers, and nothing asserted what verification came out
+of it. Three tests now do.
+
+**2. An array in a different order was six differences.**
+
+Two *identical unauthenticated* requests to the same URL, one second apart:
+
+```text
+A: ["LVA", "EST", "SWE", "DNK", "ISR", "LTU"]
+B: ["ISR", "SWE", "DNK", "LTU", "LVA", "EST"]
+```
+
+Same set, shuffled. Compared by index that is six changed fields, and six changed fields
+is "the responses differ" — the premise underneath `authz.scheduled`, `auth.enforcement`
+and every other check that asks whether two callers got the same thing. Any application
+returning a collection in no particular order made all of them wrong, and most APIs do.
+
+`Policy::reordering_is_not_a_difference` sorts two arrays **only when they are
+permutations of each other** — same values, same multiplicities. Then sorting loses
+nothing, because there was nothing to lose. Anything added, removed or altered and both
+are left exactly as they were. It is recorded as `Quirk::ArraysReordered` and printed,
+because a reader deciding whether to trust "the same document" is entitled to know that
+part of it was only the same once order was ignored. Off in `Policy::strict`, like
+everything else that sets anything aside.
+
+**3. Two empty bodies were "different content".**
+
+`Diff::same_document` returns false when the bodies were not both JSON — because nothing
+was compared, not because anything differed. `answered()` read that false as *they
+differ*, so a perfectly ordinary `204 No Content`, served identically with and without a
+session, became a finding. When there is nothing to compare structurally it compares the
+bytes now: identical bytes are the same document by any definition, and two genuinely
+different non-JSON bodies are still different content.
+
+**Measured on the same target, same traffic, same 114 experiments: six findings became
+zero.** The true-positive paths are covered by tests written from the real responses.
+
 ### Added — M15.1, keeping a session alive
 
 A captured credential is a decaying asset, and the first run against a real bug bounty

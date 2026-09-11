@@ -39,7 +39,7 @@
 use async_trait::async_trait;
 use hexora_types::credential::Credential;
 use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
-use hexora_types::structure::{Diff, Policy};
+use hexora_types::structure::{Comparable, Diff, Policy};
 use hexora_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
@@ -261,6 +261,28 @@ impl ActiveCheck for AuthEnforcement {
     }
 }
 
+/// A declared object identifier appearing in a response served to nobody.
+///
+/// The one signal available here that separates "this endpoint is public" from "this
+/// endpoint leaked somebody's data": an identifier a person declared as belonging to an
+/// identity, found in a document handed to an unauthenticated caller.
+///
+/// Deliberately narrow. It looks only at identifiers somebody declared, never at
+/// anything that merely *looks* like one — the same rule the constructed-attempt engine
+/// follows, and for the same reason: Hexora does not decide what belongs to whom.
+fn owned_id_in(subject: &Subject, answer: &Answer) -> Option<String> {
+    let body = std::str::from_utf8(&answer.body).ok()?;
+    subject
+        .identities
+        .iter()
+        .flat_map(|identity| identity.owned_object_ids.iter())
+        // A short id matches everywhere by accident. The constructed-attempt engine
+        // draws this line in the same place.
+        .filter(|id| id.len() >= 8)
+        .find(|id| body.contains(id.as_str()))
+        .cloned()
+}
+
 /// The verification for an endpoint that answered without a credential.
 fn open(
     subject: &Subject,
@@ -277,16 +299,51 @@ fn open(
     );
 
     match how {
-        // Byte-identical content served to nobody. A fact about the response, not a
-        // score.
-        Answered::SameDocument => Verification::Supported {
-            support: Support::Distinctive,
-            note: format!(
-                "{where_} answered {} with the captured credential and {} with no \
-                 credential at all, serving the same document both times",
-                baseline.status, none.status,
-            ),
-            evidence,
+        // Byte-identical content served to nobody.
+        //
+        // This used to be `Distinctive`, which made it High and Firm, and against a
+        // real application it was wrong **every single time**: seven filings, seven
+        // false positives, all of them public reference endpoints — a list of cities,
+        // the districts in a city, address form fields, consent configuration.
+        //
+        // The classification was the error, not the threshold. `Distinctive` means the
+        // evidence tells this hypothesis apart from the alternatives, and "the same
+        // document came back without a session" does not: it is at least as consistent
+        // with an endpoint that is *meant* to be public, which is much the commoner
+        // thing. The premise underneath — captured with a credential, therefore meant
+        // to be protected — is simply false for browser traffic, where the cookie goes
+        // on every same-origin request including the ones to static config.
+        //
+        // So the question is not "was a session required" but "was anything of the
+        // caller's disclosed". One thing in this project answers that without guessing:
+        // an object identifier somebody declared as owned. Found in a document served
+        // to nobody, that is a disclosure. Absent, there is nothing to distinguish a
+        // missing control from a public page, and an honest check says so instead of
+        // picking the exciting reading.
+        Answered::SameDocument => match owned_id_in(subject, none) {
+            Some(id) => Verification::Supported {
+                support: Support::Distinctive,
+                note: format!(
+                    "{where_} answered {} with the captured credential and {} with no \
+                     credential at all, serving the same document both times — and that \
+                     document contains {id}, which this project declares as belonging to \
+                     an identity. A caller with no session received it",
+                    baseline.status, none.status,
+                ),
+                evidence,
+            },
+            None => Verification::Inconclusive {
+                why: format!(
+                    "{where_} answered {} with the captured credential and {} with no \
+                     credential at all, serving the same document both times. That is \
+                     what a missing session check looks like, and it is also exactly \
+                     what a public endpoint looks like — nothing in the response \
+                     belongs to a declared identity, so there is no way to tell them \
+                     apart from here. Declare what an identity owns with `hexora \
+                     identity add --owns` and run again",
+                    baseline.status, none.status,
+                ),
+            },
         },
         // The middle case, and the one a check must not overstate. A sign-in page
         // answered 200 looks exactly like this, and so does a partially-populated
@@ -379,6 +436,20 @@ fn answered(baseline: &Answer, probe: &Answer, diff: &Diff) -> Answered {
     }
     if matches!(probe.status, 401 | 403 | 407) {
         return Answered::Refused;
+    }
+    // `same_document` is false when the bodies were not both JSON — because nothing
+    // was compared, not because anything differed. Reading that as "different content"
+    // reported two empty `204` bodies as a difference, which is how a real API's
+    // perfectly ordinary no-content response became a finding.
+    //
+    // So when there was nothing to compare structurally, compare the bytes. Identical
+    // bytes are the same document by any definition, and two genuinely different
+    // non-JSON bodies are still different content.
+    if diff.comparable != Comparable::Structurally {
+        return match baseline.body == probe.body {
+            true => Answered::SameDocument,
+            false => Answered::DifferentContent,
+        };
     }
     match diff.same_document() {
         true => Answered::SameDocument,
@@ -709,6 +780,102 @@ mod tests {
         assert!(info.produces_something());
     }
 
+    /// An identity that has declared what it owns.
+    fn owner(id: &str) -> hexora_types::identity::Identity {
+        hexora_types::identity::Identity {
+            owned_object_ids: vec![id.to_string()],
+            ..hexora_types::identity::Identity::anonymous()
+        }
+    }
+
+    fn subject_owning(ids: Vec<hexora_types::identity::Identity>) -> Subject {
+        // Only `identities` is read by `owned_id_in`; the rest is scaffolding.
+        Subject {
+            hypothesis: suspect(&exchange("GET", 200, true)).remove(0),
+            exchange: exchange("GET", 200, true),
+            draft: hexora_repeater::Draft::new(hexora_types::http::HttpRequest::get(
+                hexora_types::http::HttpService::new("api.example.com", 443, true),
+                "/me",
+            )),
+            target: hexora_types::ids::TargetId::new(),
+            identities: std::sync::Arc::new(ids),
+        }
+    }
+
+    #[test]
+    fn a_public_document_served_to_nobody_establishes_nothing() {
+        // Seven filings against a real application, seven false positives: a list of
+        // cities, the districts in a city, address form fields, consent configuration.
+        // Every one served the same document with and without a session, because every
+        // one is meant to be public.
+        //
+        // "The same document came back without a session" does not tell a missing
+        // control apart from a public page — it is at least as consistent with the
+        // second, which is much the commoner thing. Saying so is the whole fix.
+        let body = r#"{"cities":["Helsinki","Tampere"]}"#;
+        let baseline = answer(200, body);
+        let none = answer(200, body);
+        let verification = open(
+            &subject_owning(vec![owner("acct-1000-belongs-to-alice")]),
+            &baseline,
+            &none,
+            compare(&baseline, &none),
+            Answered::SameDocument,
+        );
+
+        assert!(
+            matches!(verification, Verification::Inconclusive { .. }),
+            "a public endpoint was filed as a finding: {verification:?}"
+        );
+        assert!(
+            verification.confidence().is_none(),
+            "and nothing was claimed"
+        );
+    }
+
+    #[test]
+    fn a_declared_owners_data_served_to_nobody_is_the_real_thing() {
+        // The true positive this check exists for, and the one the fix must not cost:
+        // a document handed to an unauthenticated caller containing an identifier
+        // somebody declared as belonging to an identity.
+        let body = r#"{"account":"acct-1000-belongs-to-alice","balance":4210}"#;
+        let baseline = answer(200, body);
+        let none = answer(200, body);
+        let verification = open(
+            &subject_owning(vec![owner("acct-1000-belongs-to-alice")]),
+            &baseline,
+            &none,
+            compare(&baseline, &none),
+            Answered::SameDocument,
+        );
+
+        match &verification {
+            Verification::Supported { support, note, .. } => {
+                assert_eq!(*support, Support::Distinctive);
+                assert!(note.contains("acct-1000-belongs-to-alice"), "{note}");
+            }
+            other => panic!("the real thing was not established: {other:?}"),
+        }
+        assert_eq!(severity_for(&verification), Severity::High);
+    }
+
+    #[test]
+    fn a_short_identifier_is_not_matched_by_accident() {
+        // `id` or `42` appears in every document ever served. The constructed-attempt
+        // engine draws this line in the same place.
+        let body = r#"{"cities":["Helsinki"],"page":42}"#;
+        let baseline = answer(200, body);
+        let none = answer(200, body);
+        let verification = open(
+            &subject_owning(vec![owner("42")]),
+            &baseline,
+            &none,
+            compare(&baseline, &none),
+            Answered::SameDocument,
+        );
+        assert!(matches!(verification, Verification::Inconclusive { .. }));
+    }
+
     fn how(baseline: &Answer, probe: &Answer) -> Answered {
         answered(baseline, probe, &compare(baseline, probe))
     }
@@ -733,6 +900,39 @@ mod tests {
         );
         let without = answer(200, r#"{"user":null,"balance":0,"email":""}"#);
         assert_eq!(how(&with, &without), Answered::DifferentContent);
+    }
+
+    #[test]
+    fn two_empty_bodies_are_the_same_document_not_a_difference() {
+        // A real API's `204 No Content`, served identically with and without a session,
+        // was reported as "answered without a session, with different content". Nothing
+        // was compared — there was nothing to compare — and `same_document` says so by
+        // returning false, which the caller was reading as "they differ".
+        assert_eq!(
+            how(&answer(204, ""), &answer(204, "")),
+            Answered::SameDocument
+        );
+    }
+
+    #[test]
+    fn two_different_non_json_bodies_are_still_different_content() {
+        // The other half: falling back to bytes must not make everything look equal.
+        assert_eq!(
+            how(
+                &answer(200, "welcome back, alice"),
+                &answer(200, "please sign in")
+            ),
+            Answered::DifferentContent
+        );
+    }
+
+    #[test]
+    fn identical_non_json_bodies_are_the_same_document() {
+        let body = "<html><body>Shop</body></html>";
+        assert_eq!(
+            how(&answer(200, body), &answer(200, body)),
+            Answered::SameDocument
+        );
     }
 
     #[test]

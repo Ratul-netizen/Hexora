@@ -4,8 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M15.1 (keeping a session alive), after the first run against a
-  real bug bounty target
+- **Last updated:** M15.1, plus the false positives the first real engagement exposed
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 

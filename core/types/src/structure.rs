@@ -90,6 +90,29 @@ pub struct Policy {
     /// The difference is still reported — that a session token differs between two
     /// identities is correct and worth seeing — but what it was does not travel.
     pub withhold_credentials: bool,
+    /// Whether two arrays holding the same values in a different order count as equal.
+    ///
+    /// Found against a real API, and it invalidated every structural comparison made
+    /// against it. Two *identical unauthenticated* requests, one second apart:
+    ///
+    /// ```text
+    /// A: ["LVA", "EST", "SWE", "DNK", "ISR", "LTU"]
+    /// B: ["ISR", "SWE", "DNK", "LTU", "LVA", "EST"]
+    /// ```
+    ///
+    /// Same set, shuffled. Compared by index that is six differences, and six
+    /// differences is "the responses differ" — which is the premise underneath
+    /// `authz.scheduled`, `auth.enforcement` and everything else that asks whether two
+    /// callers were served the same thing. An application that returns a collection in
+    /// no particular order would make all of them wrong, and most APIs do.
+    ///
+    /// **Only when the values are identical.** The arrays are compared as multisets
+    /// first; if anything was added, removed or changed, nothing is set aside and every
+    /// difference is reported as before. Reordering alone is the one case, because
+    /// reordering alone means nothing changed.
+    ///
+    /// Off in [`Policy::strict`], like everything else that sets anything aside.
+    pub reordering_is_not_a_difference: bool,
 }
 
 impl Policy {
@@ -130,6 +153,7 @@ impl Policy {
         Self {
             dynamic_fields: Vec::new(),
             withhold_credentials: false,
+            reordering_is_not_a_difference: false,
         }
     }
 
@@ -138,6 +162,7 @@ impl Policy {
         Self {
             dynamic_fields: Vec::new(),
             withhold_credentials: true,
+            reordering_is_not_a_difference: true,
         }
     }
 
@@ -168,6 +193,7 @@ impl Default for Policy {
         Self {
             dynamic_fields: Self::DYNAMIC.iter().map(|name| name.to_string()).collect(),
             withhold_credentials: true,
+            reordering_is_not_a_difference: true,
         }
     }
 }
@@ -347,12 +373,25 @@ pub enum Quirk {
     DuplicateKeysInControl,
     /// The variant document did.
     DuplicateKeysInVariant,
+    /// Arrays holding the same values in a different order were compared as sets.
+    ///
+    /// Reported rather than done quietly. A reader deciding whether to trust "the same
+    /// document" is entitled to know that some of it was only the same once order was
+    /// ignored.
+    ArraysReordered {
+        /// How many arrays this happened to.
+        count: usize,
+    },
 }
 
 impl Quirk {
     /// How it reads.
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::ArraysReordered { .. } => {
+                "some arrays held the same values in a different order and were compared \
+                 as sets; nothing in them was added, removed or changed"
+            }
             Self::DuplicateKeysInControl => {
                 "the control response repeated a key in one of its objects, and a parser \
                  keeps only one of them"
@@ -402,7 +441,13 @@ impl Diff {
         }
 
         let (comparable, differences, shared, total) = match (left, right) {
-            (Some(left), Some(right)) => {
+            (Some(mut left), Some(mut right)) => {
+                if policy.reordering_is_not_a_difference {
+                    let reordered = settle_order(&mut left.value, &mut right.value);
+                    if reordered > 0 {
+                        quirks.push(Quirk::ArraysReordered { count: reordered });
+                    }
+                }
                 let (differences, shared, total) = compare(&left.value, &right.value, policy);
                 (Comparable::Structurally, differences, shared, total)
             }
@@ -653,6 +698,63 @@ fn difference(path: &str, change: FieldChange, policy: &Policy) -> FieldDifferen
         set_aside,
         notable: names_something_personal(path),
     }
+}
+
+/// Sorts arrays that hold the same values in a different order, in both documents.
+///
+/// Returns how many it touched, so the caller can record a [`Quirk`] rather than making
+/// the change invisible.
+///
+/// The guard is that the two arrays must be **permutations of each other**: same values,
+/// same multiplicities. When that holds, sorting both makes them identical and no
+/// information is lost, because there was no difference to lose. When it does not hold,
+/// both are left exactly as they were and every difference is reported as before — an
+/// array that gained an element is a change, and hiding it behind a sort would be the
+/// kind of quiet normalisation this module exists to avoid.
+fn settle_order(left: &mut serde_json::Value, right: &mut serde_json::Value) -> usize {
+    use serde_json::Value;
+
+    match (left, right) {
+        (Value::Array(a), Value::Array(b)) => {
+            let mut touched = 0;
+            if a.len() == b.len() && is_permutation(a, b) && !same_order(a, b) {
+                a.sort_by_key(|item| item.to_string());
+                b.sort_by_key(|item| item.to_string());
+                touched += 1;
+            }
+            // Descend either way: a correctly ordered array can still hold objects with
+            // shuffled arrays inside them.
+            for (x, y) in a.iter_mut().zip(b.iter_mut()) {
+                touched += settle_order(x, y);
+            }
+            touched
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            let mut touched = 0;
+            for (key, x) in a.iter_mut() {
+                if let Some(y) = b.get_mut(key) {
+                    touched += settle_order(x, y);
+                }
+            }
+            touched
+        }
+        _ => 0,
+    }
+}
+
+/// Whether two arrays hold the same values with the same multiplicities.
+///
+/// By serialized form, which is exact for JSON and does not need `Value` to be `Ord`.
+fn is_permutation(a: &[serde_json::Value], b: &[serde_json::Value]) -> bool {
+    let mut left: Vec<String> = a.iter().map(|item| item.to_string()).collect();
+    let mut right: Vec<String> = b.iter().map(|item| item.to_string()).collect();
+    left.sort();
+    right.sort();
+    left == right
+}
+
+fn same_order(a: &[serde_json::Value], b: &[serde_json::Value]) -> bool {
+    a.iter().zip(b.iter()).all(|(x, y)| x == y)
 }
 
 /// Flattens a document to one node per path, keeping array indices.
@@ -1361,5 +1463,104 @@ mod tests {
             let _ = diff(control, variant);
         }
         let _ = Diff::of(&[0xff, 0xfe], &[0x00], &Policy::default());
+    }
+
+    // -----------------------------------------------------------------------
+    // Arrays that come back in a different order
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_same_values_in_a_different_order_are_not_a_difference() {
+        // Measured against a real API, from two *identical unauthenticated* requests a
+        // second apart. Compared by index this is six differences, and six differences
+        // is "the responses differ" — which is the premise underneath every check that
+        // asks whether two callers were served the same thing.
+        let a = br#"{"countries":["LVA","EST","SWE","DNK","ISR","LTU"]}"#;
+        let b = br#"{"countries":["ISR","SWE","DNK","LTU","LVA","EST"]}"#;
+
+        let diff = Diff::of(a, b, &Policy::default());
+        assert!(
+            diff.same_document(),
+            "a shuffled array read as a changed document: {}",
+            diff.summary("control", "variant")
+        );
+    }
+
+    #[test]
+    fn a_reordering_is_reported_rather_than_done_quietly() {
+        // A reader deciding whether to trust "the same document" is entitled to know
+        // that part of it was only the same once order was ignored.
+        let a = br#"{"tags":["x","y"]}"#;
+        let b = br#"{"tags":["y","x"]}"#;
+
+        let diff = Diff::of(a, b, &Policy::default());
+        assert!(
+            diff.quirks
+                .iter()
+                .any(|quirk| matches!(quirk, Quirk::ArraysReordered { count: 1 })),
+            "{:?}",
+            diff.quirks
+        );
+    }
+
+    #[test]
+    fn an_array_that_actually_changed_is_still_a_difference() {
+        // The guard. Sorting is only sound when the two arrays hold the same values;
+        // an array that gained, lost or altered an element changed, and hiding that
+        // behind a sort would be exactly the quiet normalisation this module refuses.
+        for (a, b) in [
+            (&br#"{"t":["x","y"]}"#[..], &br#"{"t":["y","z"]}"#[..]),
+            (&br#"{"t":["x","y"]}"#[..], &br#"{"t":["x","y","z"]}"#[..]),
+            (
+                &br#"{"t":["x","x","y"]}"#[..],
+                &br#"{"t":["x","y","y"]}"#[..],
+            ),
+        ] {
+            let diff = Diff::of(a, b, &Policy::default());
+            assert!(
+                !diff.same_document(),
+                "a real change was sorted away: {} vs {}",
+                String::from_utf8_lossy(a),
+                String::from_utf8_lossy(b)
+            );
+        }
+    }
+
+    #[test]
+    fn strict_counts_a_reordering_as_a_difference() {
+        // `strict` sets nothing aside, and that has to keep meaning what it says.
+        let a = br#"{"t":["x","y"]}"#;
+        let b = br#"{"t":["y","x"]}"#;
+
+        assert!(!Diff::of(a, b, &Policy::strict()).same_document());
+        assert!(Diff::of(a, b, &Policy::default()).same_document());
+    }
+
+    #[test]
+    fn a_shuffled_array_nested_in_an_object_is_settled_too() {
+        let a = br#"{"payment":{"methods":["card","cash"],"fee":1}}"#;
+        let b = br#"{"payment":{"methods":["cash","card"],"fee":1}}"#;
+        assert!(Diff::of(a, b, &Policy::default()).same_document());
+    }
+
+    #[test]
+    fn shuffled_objects_inside_an_array_are_settled_by_their_content() {
+        // Arrays of objects are the common real shape — a list of venues, a list of
+        // orders — and they shuffle for the same reasons scalars do.
+        let a = br#"[{"id":"a","n":1},{"id":"b","n":2}]"#;
+        let b = br#"[{"id":"b","n":2},{"id":"a","n":1}]"#;
+        assert!(Diff::of(a, b, &Policy::default()).same_document());
+    }
+
+    #[test]
+    fn a_changed_object_inside_a_shuffled_array_is_still_found() {
+        let a = br#"[{"id":"a","n":1},{"id":"b","n":2}]"#;
+        let b = br#"[{"id":"b","n":2},{"id":"a","n":99}]"#;
+        let diff = Diff::of(a, b, &Policy::default());
+        assert!(
+            !diff.same_document(),
+            "{}",
+            diff.summary("control", "variant")
+        );
     }
 }
