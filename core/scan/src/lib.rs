@@ -127,6 +127,13 @@ pub struct Exchange {
     pub tls: Option<TlsInfo>,
     /// When it was sent, RFC 3339.
     pub sent_at: String,
+    /// Which subsystem sent it: `proxy`, `repeater`, `authz`, `scanner`.
+    ///
+    /// A check almost never needs it. What does need it is anything enumerating *what
+    /// an application takes*, which must not read Hexora's own generated requests back
+    /// as though they were the application's traffic — see
+    /// [`Summary::endpoints`](crate::passive::Summary::endpoints).
+    pub origin: String,
 }
 
 impl Exchange {

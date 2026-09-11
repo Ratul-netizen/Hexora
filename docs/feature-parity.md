@@ -98,6 +98,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Response comparison names the field that differed | ⚠️ visual diff | ⚠️ visual diff | **IMPLEMENTED M12.10** | By JSON path with array indices kept, under a normalization policy that is reported rather than applied silently. Credential-named fields report the difference and withhold the value |
 | Active scanner with a request budget | ✅ | ✅ | **IMPLEMENTED M13.3** | One queue per host rather than a global limit, a plan produced by a function that cannot send, and a run that says when it stopped early instead of reading as clean |
 | Scanner says which of its own suspicions it cannot settle | ❌ | ❌ | **IMPLEMENTED M13.3** | `hexora detectors` names the dead ends. A suspicion nothing can answer is a gap in the tool, not coverage |
+| Reflected input reported with its context | ⚠️ | ⚠️ | **IMPLEMENTED M13.4** | Which characters survived and what they landed inside, under the response's declared content type. A JSON echo is ruled out rather than filed |
+| Scanner declines to name a vulnerability class it did not establish | ❌ | ❌ | **IMPLEMENTED M13.4** | The finding says what the bytes did and what it would take to know more. It does not name a vulnerability class |
 
 ## 5. Extensibility
 

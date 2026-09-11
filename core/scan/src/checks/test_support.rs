@@ -34,6 +34,7 @@ pub fn https() -> Build {
             authenticated: false,
             tls: None,
             sent_at: "2026-01-01T00:00:00Z".into(),
+            origin: "proxy".into(),
         },
     }
 }

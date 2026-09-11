@@ -37,11 +37,13 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod candidate;
+pub mod echo;
 pub mod error;
 pub mod finding;
 pub mod http;
 pub mod identity;
 pub mod ids;
+pub mod inject;
 pub mod limits;
 pub mod object;
 pub mod raw;

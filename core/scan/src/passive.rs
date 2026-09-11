@@ -139,6 +139,20 @@ pub struct Summary {
     pub observations: Vec<Grouped>,
     /// Suspicions raised, which stop here.
     pub hypotheses: Vec<Hypothesis>,
+    /// One exchange per distinct endpoint the pass examined.
+    ///
+    /// Bounded by the number of distinct `(method, path)` pairs rather than by the
+    /// number of exchanges, so a search page loaded forty times contributes one. It is
+    /// what an active run needs in order to know what there is to probe, and computing
+    /// it here means the active run tests exactly the traffic the passive pass
+    /// reported on rather than a second, differently-filtered set.
+    ///
+    /// **Traffic the scanner generated is left out.** A project accumulates Hexora's
+    /// own probes, and an endpoint described by one of them would be reported to a
+    /// tester as `?q=hxa3f9<>"';()hxb1k2` — a URL nobody's application has, named in a
+    /// finding about that application. Reading our own output back as though it were
+    /// evidence is the shape of mistake this whole codebase is arranged to avoid.
+    pub endpoints: Vec<Exchange>,
     /// What each detector did, including the ones that found nothing.
     pub detectors: Vec<DetectorRun>,
 }
@@ -197,6 +211,7 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
 
     let mut groups: BTreeMap<String, Grouped> = BTreeMap::new();
     let mut hypotheses = Vec::new();
+    let mut endpoints: BTreeMap<(String, String), Exchange> = BTreeMap::new();
     // One key per (check, endpoint, claim) already raised.
     let mut raised: std::collections::BTreeSet<(String, String, String)> =
         std::collections::BTreeSet::new();
@@ -226,6 +241,20 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
                 continue;
             };
             read += 1;
+
+            // Query strings differ between two loads of one page; the endpoint does
+            // not. Keyed without the query so `?q=shoes` and `?q=hats` are one place.
+            if exchange.origin != "scanner" {
+                let endpoint = exchange
+                    .path
+                    .split('?')
+                    .next()
+                    .unwrap_or(&exchange.path)
+                    .to_string();
+                endpoints
+                    .entry((exchange.method.clone(), endpoint))
+                    .or_insert_with(|| exchange.clone());
+            }
 
             for check in &checks {
                 let id = check.about().id.to_string();
@@ -340,6 +369,7 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
     project.scans().record(&run)?;
 
     Ok(Summary {
+        endpoints: endpoints.into_values().collect(),
         exchanges_read: read,
         exchanges_skipped: skipped,
         detectors: run.detectors.clone(),
@@ -486,6 +516,7 @@ pub fn exchange_at(project: &Project, request: RequestId) -> Result<Option<Excha
         authenticated,
         tls: traffic.tls_of(request)?,
         sent_at: stored.sent_at.clone(),
+        origin: stored.origin.clone(),
     }))
 }
 
@@ -522,6 +553,7 @@ fn assemble(project: &Project, row: &hexora_storage::StoredTraffic) -> Result<Op
         authenticated,
         tls: traffic.tls_of(row.id)?,
         sent_at: row.sent_at.clone(),
+        origin: request.origin.clone(),
     }))
 }
 

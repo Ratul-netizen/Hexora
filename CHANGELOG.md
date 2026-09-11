@@ -508,6 +508,69 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.4, reflected-input verification
+
+The check a scanner is most often wrong about. "My string appeared in the response" is
+true of every search box ever built, and a tool that reports it has taught its reader
+to skip its output. So this asks the two questions that separate the cases — *what
+came back* and *what did it land inside*:
+
+```text
+sent:  ?q=hxa9f3<>"'`;()hxb2k7
+
+back:  {"q": "hxa9f3<>…"}              application/json  → data. Ruled out.
+       <div>hxa9f3&lt;&gt;…</div>      text/html         → escaped. Ruled out.
+       <div>hxa9f3<>"'`;()…</div>      text/html         → `<` in HTML text. Filed.
+```
+
+**The content type is a parameter, not a guess.** `{"q": "<script>"}` is inert as
+`application/json` and is markup as `text/html`, and the bytes are identical. The
+check reads the response's own `Content-Type`; sniffing it would be inventing
+information the caller already has.
+
+**It never says "cross-site scripting".** The finding says which characters came back
+unencoded and where they landed, then says in as many words that whether it is
+exploitable depends on a CSP, a template engine that may re-encode, and a page
+somebody has to look at. A tester reading "`<` came back unencoded in HTML text" can
+check it in thirty seconds; one reading "possible XSS" starts from nothing. A test
+asserts the title contains neither "xss" nor "cross-site".
+
+**One value answers both questions.** The probe is a sandwich — `prefix` + probe
+characters + `suffix`, both tokens alphanumeric so nothing encodes them. Finding the
+prefix says where the value starts, finding the suffix says where it ends even when
+the middle came back longer or shorter, and what lies between is what survived.
+Tokens are generated per run, so a page that happens to contain a string this build
+compiled in is never mistaken for a reflection.
+
+**Confirmed means a different marker, not the same request twice.** A second,
+independently generated probe that lands in the same context with the same characters
+is the same experiment with a different input. A page that cached the first answer does
+not survive it.
+
+**Seven contexts, told apart**: HTML text, quoted and unquoted attributes, comments,
+script strings, script source, style blocks and JSON strings — with `Unknown` as a
+normal answer rather than a guess, because a response is not parsed into a DOM here
+and saying so is cheaper than being wrong.
+
+- `input.reflection` settles work items enumerated from each endpoint's inputs: query
+  parameters and ordinary headers. **Not** path segments (a segment is as often a route
+  as a value), **not** credential headers ever, **not** headers that decide delivery,
+  and **not** bodies yet — that wants a body model rather than a byte offset, and the
+  gap is stated rather than papered over.
+- `hexora_types::inject` is new: `locate`, `value_at`, `substitute` and now `inputs`
+  moved out of `core/authz`, where M12.5 had left them. None of it was ever about
+  authorization, and an active check reaching into the authorization crate for it would
+  have been the wrong dependency direction.
+- `hexora_active::standing` is the one function the CLI and the window both ask what is
+  testable. They each had their own, which is how two surfaces of one tool come to
+  disagree.
+
+Verified live against a demo with five endpoints: `/raw` and `/attr` established
+High/Confirmed with the character and context named, and `/escaped`, `/api` and
+`/quiet` were each ruled out for a different and correct reason. The HTML report
+escapes the probe's own markup, so a payload cannot inject into the document reporting
+it.
+
 ### Added — stopping a run
 
 `Cancel` existed from M13.3 and nothing pulled it: the CLI constructed a token and

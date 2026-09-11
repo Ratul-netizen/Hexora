@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M13.3",
+        milestone: "M13.4",
     }
 }
 
@@ -1167,12 +1167,9 @@ pub fn scan_active_plan(
 ) -> CommandResult<PlanView> {
     let project = open(&state)?;
     let budget = active_budget(max_requests)?;
-    let hypotheses = standing(&project, host.as_deref(), false)?;
-    let out_of_scope = if hypotheses.is_empty() {
-        standing(&project, host.as_deref(), true)?.len()
-    } else {
-        0
-    };
+    let standing = hexora_active::standing(&project, &selection(host.as_deref())).map_err(fail)?;
+    let hypotheses = standing.hypotheses;
+    let out_of_scope = standing.out_of_scope;
 
     // A transport is needed to build a lab, and building one sends nothing: the plan
     // only ever asks it whether a draft would leave scope.
@@ -1245,7 +1242,9 @@ fn active_run_blocking(
 ) -> CommandResult<ActiveRunView> {
     let project = Project::open(&path).map_err(fail)?;
     let budget = active_budget(max_requests)?;
-    let hypotheses = standing(&project, host.as_deref(), false)?;
+    let hypotheses = hexora_active::standing(&project, &selection(host.as_deref()))
+        .map_err(fail)?
+        .hypotheses;
 
     let store = std::sync::Arc::new(project.traffic());
     let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
@@ -1329,20 +1328,12 @@ fn active_budget(max_requests: Option<usize>) -> CommandResult<hexora_active::Bu
     Ok(budget)
 }
 
-/// The hypotheses a passive pass raises over this project's traffic, right now.
-fn standing(
-    project: &hexora_storage::Project,
-    host: Option<&str>,
-    everything: bool,
-) -> CommandResult<Vec<hexora_types::finding::Hypothesis>> {
-    let selection = hexora_scan::passive::Selection {
+/// What a run was asked to look at.
+fn selection(host: Option<&str>) -> hexora_scan::passive::Selection {
+    hexora_scan::passive::Selection {
         host: host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
-        everything,
         ..Default::default()
-    };
-    Ok(hexora_scan::passive::scan(project, &selection)
-        .map_err(fail)?
-        .hypotheses)
+    }
 }
 
 fn plan_view(plan: &hexora_active::Plan, out_of_scope: usize) -> PlanView {

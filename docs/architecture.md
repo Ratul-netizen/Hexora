@@ -36,7 +36,9 @@ influenced part of the process.
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic, and compiles a finding into a runnable reproduction | **Implemented** (M12.3, M12.9) |
 | `core/types::structure` | Says *where* two response bodies differ, by JSON path, under a normalization policy the caller passes in and the report prints | **Implemented** (M12.10) |
-| `core/active` | The queue: settles the hypotheses a passive pass could not, one host at a time, under a request ceiling, from a plan produced without sending | **Implemented** (M13.3) |
+| `core/active` | The queue: settles the hypotheses a passive pass could not, one host at a time, under a request ceiling, from a plan produced without sending | **Implemented** (M13.3, M13.4) |
+| `core/types::inject` | Where a value sits in a request and how to put a different one there — shared by constructed authorization tests and by input probing | **Implemented** (M13.4) |
+| `core/types::echo` | Where a value came back and which of its characters survived, under the response's declared content type | **Implemented** (M13.4) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |

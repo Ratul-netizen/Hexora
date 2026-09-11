@@ -75,9 +75,11 @@ use hexora_verify::Lab;
 pub mod budget;
 pub mod checks;
 pub mod schedule;
+pub mod standing;
 
 pub use budget::{Budget, MAX_HOSTS_AT_ONCE, MAX_REQUESTS};
 pub use schedule::{run, run_into, Outcome, Plan, Skipped, StoppedBecause};
+pub use standing::{standing, Standing};
 
 /// Something that settles a hypothesis by running an experiment.
 ///
@@ -187,7 +189,10 @@ impl Cancel {
 /// [`Registry`](hexora_verify::Registry) gives: adding a check means adding a line,
 /// and that is the honest cost of not having a plugin mechanism.
 pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
-    vec![Box::new(checks::reflection::OriginReflection)]
+    vec![
+        Box::new(checks::reflection::OriginReflection),
+        Box::new(checks::echo::InputReflection),
+    ]
 }
 
 /// What every active check in this build is, for `hexora detectors`.

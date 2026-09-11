@@ -36,7 +36,6 @@ use hexora_engine::guard::ScopeGuard;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_repeater::Repeater;
 use hexora_storage::Recorded;
-use hexora_types::finding::Hypothesis;
 use hexora_types::verify::Verification;
 use hexora_types::{HexoraError, Result};
 use hexora_verify::RepeaterLab;
@@ -71,16 +70,17 @@ pub fn active(args: Args<'_>) -> Result<()> {
     let store = Arc::new(project.traffic());
 
     let budget = budget_from(&args)?;
-    let hypotheses = standing(&project, &args, false)?;
+    // One function, shared with the window: two surfaces of one tool that each worked
+    // out for themselves what was testable would eventually disagree.
+    let standing = hexora_active::standing(&project, &selection(&args))?;
 
-    if hypotheses.is_empty() {
-        // Before saying "nothing to do", find out whether that is true. A project can
-        // hold traffic that raised a suspicion yesterday and is out of scope today,
-        // and reporting that as "no suspicions" would be silence standing in for a
-        // reason — the failure this whole codebase is built around.
-        let out_of_scope = standing(&project, &args, true)?.len();
-        return nothing_to_do(out_of_scope, args.json);
+    if standing.hypotheses.is_empty() {
+        // `Standing` already asked whether "nothing to do" is true. A project can hold
+        // traffic that raised a suspicion yesterday and is out of scope today, and
+        // reporting that as "no suspicions" would be silence standing in for a reason.
+        return nothing_to_do(standing.out_of_scope, args.json);
     }
+    let hypotheses = standing.hypotheses;
 
     let transport = if args.insecure {
         TcpTransport::with_tls(TlsConfig::accept_any())
@@ -223,23 +223,13 @@ fn budget_from(args: &Args<'_>) -> Result<Budget> {
     Ok(budget)
 }
 
-/// The hypotheses a passive pass raised and nothing has settled.
-///
-/// Re-derived by running the passive checks again rather than read from a table:
-/// a hypothesis is cheap to recompute, and computing it means the active run is
-/// testing what the traffic says *now* rather than what a stale row remembers.
-fn standing(
-    project: &hexora_storage::Project,
-    args: &Args<'_>,
-    everything: bool,
-) -> Result<Vec<Hypothesis>> {
-    let selection = hexora_scan::Selection {
+/// What the run was asked to look at.
+fn selection(args: &Args<'_>) -> hexora_scan::Selection {
+    hexora_scan::Selection {
         host: args.host.map(|host| host.to_string()),
         detector: args.detector.map(|detector| detector.to_string()),
-        everything,
         ..Default::default()
-    };
-    Ok(hexora_scan::passive::scan(project, &selection)?.hypotheses)
+    }
 }
 
 /// Says nothing was tested, and — when it can — why that is not the same as nothing
@@ -378,10 +368,28 @@ fn print_human(outcome: &Outcome, saved: &[Recorded], no_save: bool) {
     if !refuted.is_empty() {
         println!();
         println!("Ruled out ({}):", refuted.len());
-        for judged in &refuted {
+
+        // The overwhelmingly common refutation, and the least interesting: the input
+        // was tested and nothing came back. Counted rather than listed, because a
+        // hundred identical lines bury the handful that say something.
+        let (silent, echoed): (Vec<&&hexora_verify::Judged>, Vec<&&hexora_verify::Judged>) =
+            refuted
+                .iter()
+                .partition(|judged| judged.verification.note().contains("did not come back"));
+
+        if !silent.is_empty() {
+            println!(
+                "  {} input(s) were tested and did not come back in the response.",
+                silent.len()
+            );
+        }
+        for judged in &echoed {
             println!("  {}", judged.hypothesis.claim);
             println!("    {}", judged.verification.note());
         }
+        println!();
+        println!("  A refutation is a result: these were tested, and what came back");
+        println!("  does not support the suspicion. Nothing was filed for them.");
     }
 
     if !unclear.is_empty() {
@@ -396,8 +404,14 @@ fn print_human(outcome: &Outcome, saved: &[Recorded], no_save: bool) {
     if !outcome.skipped.is_empty() {
         println!();
         println!("Not tested ({}):", outcome.skipped.len());
+        // Grouped by reason: "no check can settle this" said four hundred times is one
+        // fact about the tool, not four hundred.
+        let mut by_reason: std::collections::BTreeMap<&str, usize> = Default::default();
         for skipped in &outcome.skipped {
-            println!("  {} — {}", skipped.detector, skipped.why);
+            *by_reason.entry(skipped.why.as_str()).or_default() += 1;
+        }
+        for (why, count) in by_reason {
+            println!("  {count} — {why}");
         }
     }
 

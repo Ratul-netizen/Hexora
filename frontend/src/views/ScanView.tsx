@@ -12,6 +12,8 @@ import {
   type ObservationView,
   type PlanView,
   type ScanView as ScanResult,
+  type SettledView,
+  type SkippedView,
 } from "../ipc";
 
 /**
@@ -512,24 +514,7 @@ function Outcome({ outcome }: { outcome: ActiveRunView }) {
         </>
       )}
 
-      {refuted.length > 0 && (
-        <>
-          <h3>Ruled out ({refuted.length})</h3>
-          <ul className="claims">
-            {refuted.map((settled, index) => (
-              <li key={index}>
-                {settled.claim}
-                <div className="muted small">{settled.note}</div>
-              </li>
-            ))}
-          </ul>
-          <p className="muted small">
-            A refutation is a result. It is what stops a suspicion following you
-            around for the rest of an engagement — and it is not a finding, so nothing
-            was filed for it.
-          </p>
-        </>
-      )}
+      {refuted.length > 0 && <RuledOut rows={refuted} />}
 
       {unclear.length > 0 && (
         <>
@@ -556,17 +541,61 @@ function Outcome({ outcome }: { outcome: ActiveRunView }) {
   );
 }
 
+/**
+ * What was tested and did not hold up.
+ *
+ * The overwhelmingly common refutation — the input was tested and nothing came back —
+ * is counted rather than listed. A hundred identical lines bury the handful that say
+ * something, and a section nobody reads is the same as one that is not there.
+ */
+function RuledOut({ rows }: { rows: SettledView[] }): JSX.Element {
+  const silent = rows.filter((row) => row.note.includes("did not come back"));
+  const echoed = rows.filter((row) => !row.note.includes("did not come back"));
+
+  return (
+    <>
+      <h3>Ruled out ({rows.length})</h3>
+      {silent.length > 0 && (
+        <p>
+          {silent.length} input(s) were tested and did not come back in the response.
+        </p>
+      )}
+      {echoed.length > 0 && (
+        <ul className="claims">
+          {echoed.map((settled, index) => (
+            <li key={index}>
+              {settled.claim}
+              <div className="muted small">{settled.note}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="muted small">
+        A refutation is a result: these were tested, and what came back does not
+        support the suspicion. Nothing was filed for them.
+      </p>
+    </>
+  );
+}
+
 /** Hypotheses nothing was sent for, and why. */
-function Skipped({ rows }: { rows: { detector: string; claim: string; why: string }[] }) {
+function Skipped({ rows }: { rows: SkippedView[] }) {
   if (rows.length === 0) return null;
+
+  // Grouped by reason: "no check can settle this" said four hundred times is one fact
+  // about the tool, not four hundred.
+  const byReason = new Map<string, number>();
+  for (const row of rows) {
+    byReason.set(row.why, (byReason.get(row.why) ?? 0) + 1);
+  }
+
   return (
     <details>
       <summary className="muted small">Not tested ({rows.length})</summary>
       <ul className="claims">
-        {rows.map((skipped, index) => (
-          <li key={index}>
-            <span className="mono small">{skipped.detector}</span> {skipped.claim}
-            <div className="muted small">{skipped.why}</div>
+        {[...byReason].map(([why, count]) => (
+          <li key={why} className="muted small">
+            {count} — {why}
           </li>
         ))}
       </ul>

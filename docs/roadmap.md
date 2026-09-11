@@ -571,10 +571,35 @@ Deliberately not built: retries, a resumable queue, and any form of scheduled or
 background running. A queue nobody is watching is how a tool ends up sending traffic
 after everyone has gone home.
 
-**M13.4 — Reflected-input verification** · PLANNED — a marker goes in, and the
-*context* it comes back in decides what it means: HTML text, an attribute, JavaScript,
-JSON, a URL, CSS. Reporting because a string came back is how scanners earn their
-reputation.
+**M13.4 — Reflected-input verification** · DONE
+
+A marker goes in, and the *context* it comes back in decides what it means. Reporting
+because a string came back is how scanners earn their reputation, so this reports
+neither less nor more than what happened:
+
+```text
+{"q": "hxa…<>…"}            application/json   data. Ruled out.
+<div>hxa…&lt;&gt;…</div>    text/html          escaped. Ruled out.
+<div>hxa…<>"'…</div>        text/html          `<` in HTML text. Filed.
+```
+
+One value answers both questions — a prefix token, the probe characters, a suffix
+token — so the sandwich says where the value landed *and* what survived the trip. Both
+tokens are alphanumeric, so nothing encodes them, and they are generated per run so a
+page containing a string this build compiled in is never mistaken for a reflection.
+
+The content type is a parameter rather than a guess: the same bytes are inert as
+`application/json` and are markup as `text/html`, and the caller has that header.
+
+**It does not say "cross-site scripting."** It says which character came back
+unencoded, what it landed inside, and — in the finding itself — that whether this is
+exploitable depends on a CSP, a template that may re-encode, and a page somebody has
+to look at. A test asserts the title names no vulnerability class.
+
+Deliberately not built: body inputs, which want a body model rather than a byte
+offset; path segments, because `hexora identifiers` tells a route from a value with
+evidence and guessing here would undo it; and any attempt to render the page to see
+what a browser would do, which is a different tool.
 
 **M13.5 — Redirect verification** · PLANNED — a controlled destination, and the
 `Location` header inspected rather than followed.
