@@ -1,0 +1,17 @@
+-- M14.2: headers a program requires on every request.
+--
+-- A bug bounty programme routinely asks a researcher to identify their traffic:
+--
+--     Add the following headers to requests: X-HackerOne-Research: [username]
+--     Reports resulting in testing without headers can result in the forfeiture
+--     of the eligible bounty.
+--
+-- Until now the only way to attach a header to a Hexora request was to put it on an
+-- identity, which covers authenticated replays and nothing else — not the scanner's
+-- probes, not the intruder, not an anonymous control. A requirement that holds for
+-- *every* request needs to live where every request can see it, which is the project.
+--
+-- Stored as JSON in the single project row, beside the scope, for the same reason: a
+-- project file should be a complete record of an engagement, including the terms it
+-- was conducted under.
+ALTER TABLE project ADD COLUMN attached_headers_json TEXT NOT NULL DEFAULT '[]';

@@ -90,7 +90,11 @@ pub fn active(args: Args<'_>) -> Result<()> {
     // The project's own scope. An active run is automated traffic by definition, and
     // the guard refuses automated traffic to hosts nobody declared.
     let scope = Arc::new(project.settings().scope()?);
-    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone())
+        // Whatever the programme requires on every request. A researcher whose
+        // traffic cannot be told from an attacker's is entitled to be treated
+        // like one.
+        .attaching(project.settings().attached_headers()?);
     // `scanner`, not `new`: an experiment with no identity must be recorded as
     // automated traffic, so the scope guard refuses an out-of-scope target rather
     // than flagging it the way it would a request a person typed.

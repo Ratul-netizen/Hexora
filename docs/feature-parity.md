@@ -109,6 +109,9 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Intruder / payload iteration | ✅ | ✅ | **IMPLEMENTED M14.1** | `hexora fuzz`. Responses grouped by `(status, length)` so the outlier is one short row; concludes nothing, because what a difference means is the tester's judgement |
 | Payload iteration is rate-limited and stoppable | ⚠️ | ⚠️ | **IMPLEMENTED M14.1** | Reuses the scheduler's budget, pause and Ctrl-C. A truncated list says so rather than reading as "nothing stood out" |
 
+| A header on every request the tool sends | ✅ | ✅ | **IMPLEMENTED M14.2** | `hexora header add`, stored on the project. Bug bounty programmes require it so research traffic is attributable; applied before the identity's credential, and never spliced into a raw send |
+| Match-and-replace on proxied traffic | ✅ | ✅ | ❌ | M14.2 covers requests Hexora sends. Traffic through the proxy is the browser's and is not rewritten, so manual browsing still needs the header set in the browser |
+
 ## 5. Extensibility
 
 | Capability | Burp Pro | Caido | Hexora | Notes |

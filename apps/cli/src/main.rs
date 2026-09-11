@@ -19,6 +19,7 @@ mod authz;
 mod detectors;
 mod findings;
 mod fuzz;
+mod header;
 mod history;
 mod identifiers;
 mod identity;
@@ -42,7 +43,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M14.1. The proxy, HTTP/1.x engine \
+                  Development status: M14.2. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -346,6 +347,10 @@ enum Command {
     /// live, so without a snapshot there is nothing to compare against.
     #[command(subcommand)]
     Snapshot(SnapshotCommand),
+
+    /// Headers put on every request, for a programme that requires identification.
+    #[command(subcommand)]
+    Header(HeaderCommand),
 
     /// Show and change what this engagement is authorized to touch.
     ///
@@ -825,6 +830,38 @@ enum SnapshotCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum HeaderCommand {
+    /// Show the headers put on every request.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Put a header on every request Hexora sends.
+    ///
+    /// For a programme that requires researchers to identify their traffic — the usual
+    /// shape is `X-HackerOne-Research: <username>`, and a programme that cannot tell a
+    /// researcher's requests from an attacker's is entitled to treat them the same way.
+    ///
+    /// Applies to everything structured: the repeater, the scanner's probes, the
+    /// intruder's payloads, every authorization replay and every anonymous control. It
+    /// does **not** apply to a raw send, which is byte-exact by definition — put it in
+    /// the bytes there.
+    Add {
+        /// Project directory.
+        path: PathBuf,
+        /// The header, as `Name: value`.
+        header: String,
+    },
+    /// Stop sending a header.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// The header name.
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ScopeCommand {
     /// Print the project's scope.
     List {
@@ -965,6 +1002,11 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             in_request: in_request.as_deref(),
             json: cli.json,
         }),
+        Command::Header(HeaderCommand::List { path }) => header::list(path, cli.json),
+        Command::Header(HeaderCommand::Add { path, header }) => header::add(path, header, cli.json),
+        Command::Header(HeaderCommand::Remove { path, name }) => {
+            header::remove(path, name, cli.json)
+        }
         Command::Object(ObjectCommand::List { path }) => object::list(path, cli.json),
         Command::Object(ObjectCommand::Remove { path, id }) => object::remove(path, id, cli.json),
         Command::Scan(ScanCommand::Passive {
@@ -1284,14 +1326,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M14.1",
+            "milestone": "M14.2",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M14.1 (the intruder)");
+        println!("  milestone:               M14.2 (headers a programme requires)");
     }
 }
 
@@ -1352,7 +1394,7 @@ mod tests {
                 "help offers a {absent} command that does not exist: {commands:?}"
             );
         }
-        for present in ["authz", "scan", "detectors", "fuzz"] {
+        for present in ["authz", "scan", "detectors", "fuzz", "header"] {
             assert!(
                 commands.iter().any(|name| name == present),
                 "and it must still list the ones that do: {commands:?}"
@@ -1402,7 +1444,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M14.1"),
+            help.contains("M14.2"),
             "users must not mistake this for a finished tool"
         );
     }

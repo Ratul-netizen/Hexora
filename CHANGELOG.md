@@ -508,6 +508,53 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M14.2, the headers a programme requires
+
+A bug bounty programme routinely asks a researcher to identify their traffic. Wolt's,
+for example:
+
+> Add the following headers to requests: `X-HackerOne-Research: [H1 username]`.
+> Reports resulting in testing without headers can result in the forfeiture of the
+> eligible bounty.
+
+**This is the opposite of hiding.** A programme that cannot tell a researcher's requests
+from an attacker's is entitled to treat them the same way — block the address, page
+somebody at two in the morning, hand the logs to a lawyer. The header is what makes
+automated testing safe to run against somebody else's production system, and attaching
+it is a condition of being allowed to test at all.
+
+Until now the only place to put a header was on an identity, which covers authenticated
+replays and nothing else — not the scanner's probes, not the intruder's payloads, and
+not the anonymous control, which is precisely the request a target is most likely to
+read as an attack. A requirement that holds for *every* request has to live where every
+request can see it, so it lives on the project.
+
+- `hexora header list|add|remove <project>`, stored in the project row beside the scope,
+  because a project file should record the terms an engagement was conducted under.
+- Applied in `Repeater::send_as`, which every structured send passes through: the
+  repeater, `hexora authz`, the scheduler's active checks, `hexora fuzz`, every replay
+  and every anonymous control.
+- **Applied before the identity's credential**, so a project setting can never displace
+  the thing that decides who a request is from. A test holds that line.
+- **Not applied to a raw send.** Raw is byte-exact and that promise is worth more than
+  the convenience — but `hexora repeat --raw --dry-run` now prints what it is *not*
+  sending, so the omission is visible at the moment it matters rather than discovered in
+  a forfeited report.
+- `--dry-run` prints attached headers under the request bytes. A dry run exists to
+  answer "what exactly goes out?", and one that hid this would be wrong in the direction
+  that costs a researcher their bounty.
+- A value containing CR or LF is refused: this one is spliced into every request the
+  project sends, so a value that could split a request could split all of them.
+- Migration 9. `hexora send` is unaffected — it takes no project, and its `-H` is the
+  whole point of it.
+
+**Not yet covered: the proxy.** Traffic through the proxy is the browser's, and Hexora
+does not rewrite it. Manual browsing still needs the header set in the browser.
+
+Verified end to end against `httpbin.org/headers`, which echoed
+`X-Hackerone-Research: wahid_ratul` back from a replayed request — and did not echo it
+from the same request sent raw.
+
 ### Added — M14.1, the intruder
 
 The tool a tester reaches for between the repeater and the scanner, and the biggest

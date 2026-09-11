@@ -72,7 +72,11 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     // The project's own scope, not an empty one. An authorization matrix is automated
     // traffic, and the guard refuses automated traffic to undeclared hosts.
     let scope = Arc::new(project.settings().scope()?);
-    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone())
+        // Whatever the programme requires on every request. A researcher whose
+        // traffic cannot be told from an attacker's is entitled to be treated
+        // like one.
+        .attaching(project.settings().attached_headers()?);
     let tester = AuthzTester::new(repeater, store.clone(), identities_store);
 
     let method = tester.method_of(base)?;

@@ -64,7 +64,11 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
     // but the decision is still reported so an accidental resend against production
     // is visible rather than silent.
     let guard = ScopeGuard::new(transport, Arc::new(Scope::new()));
-    let repeater = Repeater::new(guard, store);
+    // Whatever the programme requires on every request. A manual resend is still a
+    // request, and a programme that cannot tell a researcher's traffic from an
+    // attacker's is entitled to treat it the same way.
+    let attached = project.settings().attached_headers()?;
+    let repeater = Repeater::new(guard, store).attaching(attached.clone());
 
     let mut draft = repeater.draft_from(id)?;
     // Asked for explicitly, and it sticks: a request that was captured raw comes back
@@ -90,12 +94,23 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
                 "mode": mode.as_str(),
                 "warnings": warnings.iter().map(ToString::to_string).collect::<Vec<_>>(),
                 "scope": describe(repeater.decide(&draft)),
+                // What the bytes above do not show. A dry run that hid this would be
+                // lying about what the real send does.
+                "attached": if mode == RequestMode::Raw {
+                    serde_json::json!([])
+                } else {
+                    serde_json::json!(attached
+                        .iter()
+                        .map(|h| format!("{}: {}", h.name, h.value_lossy()))
+                        .collect::<Vec<_>>())
+                },
             });
             println!("{payload}");
         } else {
             print!("{}", String::from_utf8_lossy(&draft.to_raw()));
             println!();
             print_mode(mode);
+            print_attached(&attached, mode);
             print_warnings(&warnings);
             println!("Not sent (--dry-run).");
         }
@@ -131,6 +146,31 @@ fn print_mode(mode: RequestMode) {
              framed or corrected."
         );
     }
+}
+
+/// Says what this project adds to the request that the bytes above do not show.
+///
+/// A dry run exists to answer "what exactly goes out?". Attached headers are applied
+/// inside the send, so without this the answer on screen would be wrong — and wrong in
+/// the direction that costs a researcher their bounty, because the header that proves
+/// who they are would be missing from what they checked.
+fn print_attached(attached: &[hexora_types::http::Header], mode: RequestMode) {
+    if attached.is_empty() {
+        return;
+    }
+    if mode == RequestMode::Raw {
+        println!("This project attaches headers, but a raw send carries only its bytes:");
+        for header in attached {
+            println!("  not sent: {}: {}", header.name, header.value_lossy());
+        }
+        println!("Put them in the bytes above if the programme requires them.");
+    } else {
+        println!("Attached by this project, added as it is sent:");
+        for header in attached {
+            println!("  {}: {}", header.name, header.value_lossy());
+        }
+    }
+    println!();
 }
 
 /// Compares two stored exchanges without sending anything.

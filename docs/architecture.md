@@ -30,7 +30,7 @@ influenced part of the process.
 | `core/engine` | Transport boundary, scope enforcement, extension permissions, AI tool gate | **Implemented** |
 | `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
-| `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
+| `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results. Carries the project's **attached headers** — what a programme requires on every request — applied in `send_as` before the identity's credential, and never to a raw send | **Implemented** |
 | `core/verify` | The verification framework: detector and verifier traits, the one way to run an experiment, and the registry of what a build checks for | **Implemented** (M13.1) |
 | `core/scan` | Passive checks over captured traffic, and the pass that runs them. Takes no transport | **Implemented** (M13.2) |
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |

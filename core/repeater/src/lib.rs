@@ -339,6 +339,14 @@ pub struct Repeater<T: HttpTransport> {
     transport: ScopeGuard<T>,
     store: Arc<TrafficStore>,
     limits: Limits,
+    /// Headers put on every structured request this repeater sends.
+    ///
+    /// A bug bounty programme routinely requires researchers to identify their
+    /// traffic, and that requirement covers every request — the scanner's probes and
+    /// the intruder's payloads as much as an authenticated replay. An identity's
+    /// `extra_headers` cannot express it, so it comes from the project and is applied
+    /// here, where every send passes.
+    attached: Vec<hexora_types::http::Header>,
 }
 
 impl<T: HttpTransport> std::fmt::Debug for Repeater<T> {
@@ -354,7 +362,28 @@ impl<T: HttpTransport> Repeater<T> {
             transport,
             store,
             limits: Limits::default(),
+            attached: Vec::new(),
         }
+    }
+
+    /// Puts these headers on every structured request this repeater sends.
+    ///
+    /// Applied before the identity's credential, so a programme header cannot silently
+    /// displace the thing that decides who the request is from.
+    ///
+    /// **Not applied to a raw request**, for the same reason a credential is not: raw
+    /// mode is byte-exact and rewriting a header block the tester wrote deliberately
+    /// would undo the one thing it promises. A raw send carries whatever its bytes
+    /// carry, and `hexora fuzz --raw` is not a way to become anonymous by accident —
+    /// the CLI says so when a project has attached headers and a raw draft is sent.
+    pub fn attaching(mut self, headers: Vec<hexora_types::http::Header>) -> Self {
+        self.attached = headers;
+        self
+    }
+
+    /// The headers this repeater puts on everything it sends.
+    pub fn attached(&self) -> &[hexora_types::http::Header] {
+        &self.attached
     }
 
     /// Uses different resource limits for sends.
@@ -476,6 +505,14 @@ impl<T: HttpTransport> Repeater<T> {
                 (decision, self.transport.send_raw(raw, options).await?)
             }
             RequestSource::Structured(mut request) => {
+                // The programme's header first, the identity's credential second: the
+                // credential decides who the request is from and must win any
+                // collision.
+                for header in &self.attached {
+                    request
+                        .headers
+                        .set(&header.name, header.value_lossy().into_owned());
+                }
                 if let Some(identity) = sender.identity {
                     identity.authenticate(&mut request.headers);
                 }
@@ -986,6 +1023,63 @@ mod tests {
             ScopeDecision::Allowed,
             "example.com/admin is in scope; the request line said nothing about that"
         );
+    }
+
+    #[tokio::test]
+    async fn an_attached_header_goes_on_every_structured_send() {
+        // The programme requirement covers every request, not the authenticated ones:
+        // an anonymous control is exactly the request a target is most likely to see as
+        // an attack, so it is the one that most needs to be attributable.
+        let (repeater, _store, _project) = repeater(in_scope());
+        let repeater = repeater.attaching(vec![Header::new("X-HackerOne-Research", "wahid_ratul")]);
+
+        let sent = repeater
+            .send_as(
+                &Draft::new(HttpRequest::get(service(), "/")),
+                SendAs {
+                    origin: Origin::Scanner,
+                    identity: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let raw = String::from_utf8(repeater.draft_from(sent.id).unwrap().to_raw()).unwrap();
+        assert!(raw.contains("X-HackerOne-Research: wahid_ratul"), "{raw:?}");
+    }
+
+    #[tokio::test]
+    async fn an_attached_header_does_not_displace_the_credential() {
+        // If it could, a project setting would decide who a request is from, and an
+        // authorization matrix would silently compare an identity against itself.
+        let (repeater, _store, project) = repeater(in_scope());
+        let repeater = repeater.attaching(vec![Header::new("Authorization", "Bearer WRONG")]);
+        let identity = Identity::bearer("User B", "TOKEN_B");
+        project.identities().put(&identity).unwrap();
+
+        let sent = repeater
+            .send_as(
+                &Draft::new(HttpRequest::get(service(), "/")),
+                SendAs::authz(&identity),
+            )
+            .await
+            .unwrap();
+
+        let raw = String::from_utf8(repeater.draft_from(sent.id).unwrap().to_raw()).unwrap();
+        assert!(raw.contains("Bearer TOKEN_B"), "{raw:?}");
+        assert!(!raw.contains("WRONG"), "{raw:?}");
+    }
+
+    #[tokio::test]
+    async fn an_attached_header_is_not_spliced_into_a_raw_request() {
+        // Raw is byte-exact, and that promise is worth more than the convenience. The
+        // CLI says so at the point a raw draft is about to go out.
+        let (repeater, _store, _project) = repeater(in_scope());
+        let repeater = repeater.attaching(vec![Header::new("X-HackerOne-Research", "r")]);
+
+        let sent = repeater.send(&raw_draft()).await.unwrap();
+        let raw = String::from_utf8(repeater.draft_from(sent.id).unwrap().to_raw()).unwrap();
+        assert!(!raw.contains("X-HackerOne-Research"), "{raw:?}");
     }
 
     #[tokio::test]

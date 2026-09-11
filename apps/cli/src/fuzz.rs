@@ -77,7 +77,11 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     // The project's own scope. A payload list is automated traffic by volume whatever
     // it is by intent, and the guard refuses automated traffic to undeclared hosts.
     let scope = Arc::new(project.settings().scope()?);
-    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store.clone())
+        // Whatever the programme requires on every request. A researcher whose
+        // traffic cannot be told from an attacker's is entitled to be treated
+        // like one.
+        .attaching(project.settings().attached_headers()?);
     let draft = repeater.draft_from(id)?;
 
     let at = slot(&draft.request, &args)?;
