@@ -1,0 +1,28 @@
+[package]
+name = "hexora-active"
+description = "Hexora's active scheduler: one queue, one scope guard, and a ceiling on what a run may send"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-storage.workspace = true
+hexora-verify.workspace = true
+hexora-repeater.workspace = true
+hexora-scan.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hexora-types = { workspace = true, features = ["test-support"] }
+hexora-engine.workspace = true
+hexora-http.workspace = true
+bytes.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

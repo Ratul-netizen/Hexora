@@ -508,6 +508,83 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.3, the active scheduler
+
+The first thing in Hexora that sends traffic nobody typed. M13.2's passive checks
+raise hypotheses they structurally cannot settle; this is what picks them up.
+
+```text
+passive pass ──▶ Hypothesis  "this host may reflect any Origin"
+                     │        filed as nothing
+                     ▼
+                  Plan       what would be sent, to whom, how much   ← no traffic
+                     │
+                     ▼
+                   run()     the experiment, paced and bounded
+                     ▼
+                Verification reproduced / supported / refuted / cannot tell
+```
+
+**The plan is a separate function, and it cannot send.** `Plan::prepare` is
+synchronous — there is no `.await` in it through which a request could leave — and it
+answers every question somebody has before authorising traffic: which hypotheses have
+a check that can settle them, which have lost the traffic behind them, which point
+outside scope, and how many requests each host would receive. `--dry-run` is that
+function without the next one, not a flag the sending path is trusted to honour.
+
+**One host is never sent two requests at once.** Each host gets one sequential queue
+with a pause between its requests; different hosts are worked concurrently, up to
+`hosts_at_once`. A global concurrency limit would have been simpler and is the wrong
+promise — eight requests spread over eight hosts is polite, eight aimed at one host is
+a small denial of service, and what a client cares about is what *their* server sees.
+Defaults: 2 hosts at a time, 250ms between requests to one host, 200 requests in
+total. Slower than a person clicking through the application by hand.
+
+**A truncated run says so.** `StoppedBecause::{Cancelled, CeilingReached}` is carried
+on the outcome, printed first in the CLI, and stored in `scan_runs.stopped_because`.
+A run that stopped early and read as a finished one would turn "unfinished" into
+"clean", which is the worst output this subsystem could produce. New security
+invariant 15.
+
+**The ceiling is enforced by the lab a check is handed**, not by each check's
+restraint: a check that loops asking for fifty requests gets the number the budget
+allowed. Scope is re-asked immediately before every send as well as in the plan,
+because scope can be narrowed while a queue is draining.
+
+**The first active check: `cors.reflection`.** It settles `cors.configuration`'s
+suspicion with the one thing that can — an `Origin` that cannot be on anybody's
+allowlist (`https://hexora-probe.invalid`, reserved by RFC 2606 and never resolvable).
+Reflected twice with two unrelated origins is `Reproduced`; answered with a fixed
+origin is `Refuted`; answered without the CORS headers the capture had is
+`Inconclusive`, because an expired session looks exactly like a fixed application and
+reporting one as the other is the mistake this check is most likely to make.
+
+- `hexora scan active <project> [--dry-run] [--max-requests N] [--delay MS]
+  [--hosts-at-once N] [--yes]`. A non-interactive stdin answers *no*.
+- An **Active scan** panel in the window: a plan, then a separate button to send it.
+- `hexora detectors` now says which suspicions have somebody to answer them and which
+  are still dead ends.
+- RPC contract version 10; migration 8 adds `requests_sent` and `stopped_because`.
+
+### Fixed — attribution, and what it was silently permitting
+
+`RepeaterLab` attributed an experiment sent without an identity to
+`Origin::Repeater`. `Origin::is_automated()` is false there — a person typed that
+request — so `ScopeGuard` **flags** an out-of-scope target rather than refusing it.
+Scanner traffic recorded as the repeater was therefore being handed a person's
+permissions, and could have reached a host nobody declared in scope. `SendAs::scanner`
+and `RepeaterLab::scanner` fix it; the authorization matrix was never affected because
+every one of its experiments names the identity it went out as.
+
+### Fixed — one suspicion per endpoint, not per host
+
+The passive pass deduplicated hypotheses on the claim alone, so five hundred endpoints
+on one host produced one. Building the scheduler showed that to be exactly wrong:
+against a demo application with a reflecting `/reflect` and a correctly allowlisted
+`/allowed`, one hypothesis was raised, the active run tested whichever came first, and
+the real bug was never probed. Deduplication is now per `(check, endpoint, claim)`,
+and the CORS claim names the endpoint rather than only the host.
+
 ### Added — M12.10, structural differential analysis
 
 The comparison engine could say two responses were 97% alike. It can now say *which

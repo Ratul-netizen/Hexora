@@ -34,14 +34,17 @@
 //! stored as evidence — which is security invariant 1, kept by construction rather
 //! than by each check remembering to.
 //!
-//! ## What this milestone deliberately does not do
+//! ## Where the queue lives
 //!
-//! There is no scheduler and no `dyn Detector` registry. [`Detector`] and [`Verifier`]
-//! carry associated types, so a check is statically paired with what it reads and what
-//! it needs to re-run — which is honest about today and costs nothing, because nothing
-//! yet dispatches over a heterogeneous set. The queue, the concurrency limits and the
-//! object-safe wrapper belong to the active scheduler, where the requirements are
-//! real; inventing them here would be inventing them blind.
+//! Not here. [`Detector`] and [`Verifier`] carry associated types, so a check is
+//! statically paired with what it reads and what it needs to re-run — which is right
+//! for a subsystem that knows its own case type, and unusable for a scheduler that
+//! must hold a heterogeneous list of checks in a `Vec`.
+//!
+//! So `hexora-active` defines its own object-safe trait over one concrete case, and
+//! owns the queue, the pacing and the request ceiling. The requirements for those are
+//! about what a run may do to somebody's system, which is a different question from
+//! what a check may claim, and putting them here would have been inventing them blind.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
@@ -118,6 +121,15 @@ pub trait Lab: Send + Sync {
     /// Asked before a run rather than per request, so an out-of-scope target produces
     /// one sentence instead of one failure per experiment.
     fn would_leave_scope(&self, draft: &Draft, as_identity: Option<&Identity>) -> bool;
+
+    /// Loads a stored request as a draft, ready to be varied and re-sent.
+    ///
+    /// Setting up an experiment means fetching the specimen, so this belongs on the
+    /// bench next to the sending. It grants no new power — a draft is a description
+    /// of a request, and the only thing that puts one on a wire is
+    /// [`Self::experiment`] — and it saves every check from being handed a store it
+    /// would then be free to read anything out of.
+    fn draft_of(&self, request: hexora_types::ids::RequestId) -> Result<Draft>;
 }
 
 /// A [`Lab`] backed by the repeater.
@@ -127,18 +139,49 @@ pub trait Lab: Send + Sync {
 /// implementation of any of that would be a second set of bugs.
 pub struct RepeaterLab<'a, T: hexora_engine::transport::HttpTransport> {
     repeater: &'a Repeater<T>,
+    /// What an experiment sent without an identity is attributed to.
+    ///
+    /// It has to be the subsystem that is actually running, not a default. The scope
+    /// guard refuses out-of-scope traffic from automated origins and merely *flags*
+    /// it from the repeater, because a human typed a repeater request — so a scanner
+    /// recorded as the repeater would be handed a person's permissions and could
+    /// reach a host nobody declared. See [`SendAs::scanner`].
+    unattributed: hexora_engine::transport::Origin,
 }
 
 impl<'a, T: hexora_engine::transport::HttpTransport> RepeaterLab<'a, T> {
-    /// Wraps a repeater as a lab.
+    /// Wraps a repeater as a lab for a subsystem that always sends as an identity.
+    ///
+    /// The authorization matrix: every experiment names the principal it went out as,
+    /// so the unattributed case never arises and the repeater is the honest fallback.
     pub fn new(repeater: &'a Repeater<T>) -> Self {
-        Self { repeater }
+        Self {
+            repeater,
+            unattributed: hexora_engine::transport::Origin::Repeater,
+        }
     }
 
-    fn sender<'b>(identity: Option<&'b Identity>) -> SendAs<'b> {
+    /// Wraps a repeater as a lab for the active scanner.
+    ///
+    /// Experiments without an identity are recorded as [`Origin::Scanner`], which is
+    /// what makes the scope guard refuse an out-of-scope target instead of flagging
+    /// it.
+    ///
+    /// [`Origin::Scanner`]: hexora_engine::transport::Origin::Scanner
+    pub fn scanner(repeater: &'a Repeater<T>) -> Self {
+        Self {
+            repeater,
+            unattributed: hexora_engine::transport::Origin::Scanner,
+        }
+    }
+
+    fn sender<'b>(&self, identity: Option<&'b Identity>) -> SendAs<'b> {
         match identity {
             Some(identity) => SendAs::authz(identity),
-            None => SendAs::repeater(),
+            None => SendAs {
+                origin: self.unattributed,
+                identity: None,
+            },
         }
     }
 }
@@ -146,16 +189,18 @@ impl<'a, T: hexora_engine::transport::HttpTransport> RepeaterLab<'a, T> {
 #[async_trait]
 impl<T: hexora_engine::transport::HttpTransport> Lab for RepeaterLab<'_, T> {
     async fn experiment(&self, draft: &Draft, as_identity: Option<&Identity>) -> Result<Sent> {
-        self.repeater
-            .send_as(draft, Self::sender(as_identity))
-            .await
+        self.repeater.send_as(draft, self.sender(as_identity)).await
     }
 
     fn would_leave_scope(&self, draft: &Draft, as_identity: Option<&Identity>) -> bool {
         !self
             .repeater
-            .decide_as(draft, Self::sender(as_identity))
+            .decide_as(draft, self.sender(as_identity))
             .permits_sending()
+    }
+
+    fn draft_of(&self, request: hexora_types::ids::RequestId) -> Result<Draft> {
+        self.repeater.draft_from(request)
     }
 }
 
@@ -257,6 +302,34 @@ impl Judged {
 }
 
 #[cfg(test)]
+mod attribution {
+    //! Which subsystem a lab's traffic is recorded as, and why it matters.
+
+    use hexora_engine::transport::Origin;
+
+    #[test]
+    fn a_scanners_experiment_is_automated_and_a_repeaters_is_not() {
+        // The whole reason `RepeaterLab::scanner` exists. `ScopeGuard` refuses an
+        // out-of-scope request from an automated origin and merely flags one from a
+        // human-driven origin — so a scanner recorded as the repeater would be handed
+        // a person's permissions and could reach a host nobody declared in scope.
+        assert!(
+            Origin::Scanner.is_automated(),
+            "generated traffic must be refused out of scope, not flagged"
+        );
+        assert!(
+            !Origin::Repeater.is_automated(),
+            "a request a person typed is their decision to make"
+        );
+        assert_eq!(
+            hexora_repeater::SendAs::scanner().origin,
+            Origin::Scanner,
+            "a scanner send must not be attributed to the repeater"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use hexora_types::finding::{Evidence, FindingSource, Severity};
     use hexora_types::ids::{RequestId, TargetId};
@@ -275,6 +348,9 @@ mod tests {
         }
         fn would_leave_scope(&self, _: &Draft, _: Option<&Identity>) -> bool {
             false
+        }
+        fn draft_of(&self, _: hexora_types::ids::RequestId) -> Result<Draft> {
+            panic!("this verifier must not load a request either");
         }
     }
 
@@ -295,6 +371,7 @@ mod tests {
                 mode: DetectorMode::Passive,
                 observes: false,
                 hypothesizes: true,
+                settles: None,
             }
         }
 
@@ -398,6 +475,7 @@ mod tests {
             mode: DetectorMode::Passive,
             observes: true,
             hypothesizes: false,
+            settles: None,
         };
         let loud = DetectorInfo {
             id: DetectorId("authz.cross_identity"),
@@ -407,6 +485,7 @@ mod tests {
             mode: DetectorMode::Active,
             observes: false,
             hypothesizes: true,
+            settles: None,
         };
 
         let registry = Registry::new().with([quiet, loud]);
@@ -429,6 +508,7 @@ mod tests {
             mode: DetectorMode::Active,
             observes: false,
             hypothesizes: true,
+            settles: None,
         };
         let registry = Registry::new().with([check]).with([check]);
         assert_eq!(registry.all().len(), 1);

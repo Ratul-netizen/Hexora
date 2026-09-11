@@ -303,6 +303,21 @@ impl SendAs<'_> {
             identity: None,
         }
     }
+
+    /// A scanner's own experiment, with whatever credential the draft already carries.
+    ///
+    /// Not [`Self::repeater`] with a different label. [`Origin::is_automated`] is
+    /// false for the repeater — a human typed that request, so the scope guard flags
+    /// an out-of-scope target rather than refusing it — and true for the scanner,
+    /// where nobody decided on this particular request and the guard must refuse.
+    /// Attributing generated traffic to the repeater would quietly hand a scanner the
+    /// permissions of a person.
+    pub fn scanner() -> Self {
+        Self {
+            origin: Origin::Scanner,
+            identity: None,
+        }
+    }
 }
 
 impl<'a> SendAs<'a> {

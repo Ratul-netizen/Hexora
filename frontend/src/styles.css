@@ -130,6 +130,14 @@ button.danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
+/* The button that actually sends traffic. Marked out because it is the one action in
+   the window with a consequence on somebody else's system, and it should not look the
+   same as the button that only shows you a plan. */
+button.primary {
+  border-color: var(--accent);
+  color: var(--text-bright);
+}
+
 button.tab {
   background: none;
   border: none;
@@ -1105,4 +1113,24 @@ tr.violation td {
 
 .structure details summary {
   cursor: pointer;
+}
+
+/* The active pass: a plan, then what it did. Indented from the controls above it so
+   "what would be sent" reads as a consequence of the button rather than a new panel. */
+.plan {
+  margin-top: 12px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.plan > p {
+  margin: 6px 0;
+}
+
+.plan details summary {
+  cursor: pointer;
+}
+
+input.narrow {
+  width: 5.5em;
 }

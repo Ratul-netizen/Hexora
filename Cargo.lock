@@ -1089,12 +1089,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -1149,6 +1164,7 @@ version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -1500,6 +1516,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hexora-active"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "hexora-engine",
+ "hexora-http",
+ "hexora-repeater",
+ "hexora-scan",
+ "hexora-storage",
+ "hexora-types",
+ "hexora-verify",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "hexora-authz"
 version = "0.1.0"
 dependencies = [
@@ -1526,6 +1562,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "hexora-active",
  "hexora-authz",
  "hexora-engine",
  "hexora-http",
@@ -1549,6 +1586,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "hexora-active",
  "hexora-authz",
  "hexora-engine",
  "hexora-http",

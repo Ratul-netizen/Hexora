@@ -130,12 +130,30 @@ pub struct DetectorInfo {
     /// different products, and a check that only ever hypothesises produces no
     /// findings at all until something verifies it.
     pub hypothesizes: bool,
+    /// The check whose hypotheses this one settles, when that is its whole job.
+    ///
+    /// The third kind of product, and the one the first two could not express. An
+    /// active check often states no facts and raises no suspicions — it takes a
+    /// suspicion somebody else raised and runs the experiment that ends it, in either
+    /// direction. `cors.reflection` settles `cors.configuration`.
+    ///
+    /// Printed by `hexora detectors`, so a tester can see which of this build's
+    /// suspicions have somebody to answer them and which are still dead ends.
+    pub settles: Option<&'static str>,
 }
 
 impl DetectorInfo {
     /// Whether running this check puts traffic on the wire.
     pub fn sends(&self) -> bool {
         self.mode.sends()
+    }
+
+    /// Whether this check produces anything at all.
+    ///
+    /// A check that states no facts, raises no suspicions and settles none of anybody
+    /// else's is a registry row describing nothing.
+    pub fn produces_something(&self) -> bool {
+        self.observes || self.hypothesizes || self.settles.is_some()
     }
 }
 
@@ -636,6 +654,7 @@ mod tests {
             mode: DetectorMode::Active,
             observes: false,
             hypothesizes: true,
+            settles: None,
         };
         assert_eq!(info.id.to_string(), "authz.bola");
         assert!(info.sends(), "an active check sends, by definition");

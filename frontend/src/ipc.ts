@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 9;
+export const EXPECTED_RPC_CONTRACT_VERSION = 10;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -520,6 +520,8 @@ export interface DetectorView {
   sends: boolean;
   observes: boolean;
   hypothesizes: boolean;
+  /** The check whose suspicions this one settles, when that is its job. */
+  settles: string | null;
 }
 
 /** What one detector did during a pass. */
@@ -580,6 +582,91 @@ export const scanPassive = (
   everything: boolean,
 ): Promise<ScanView> =>
   invoke<ScanView>("scan_passive", { host: null, detector, everything });
+
+/* ------------------------------------------------------------------ *
+ * Active scanning
+ * ------------------------------------------------------------------ */
+
+/** One experiment a run would perform. */
+export interface PlannedView {
+  host: string;
+  detector: string;
+  claim: string;
+  /** The exchange it was raised from, for opening in History. */
+  source_request: string;
+}
+
+/** A hypothesis nothing will be sent for, and why. */
+export interface SkippedView {
+  detector: string;
+  claim: string;
+  why: string;
+}
+
+/** What a run would do. Produced without sending anything. */
+export interface PlanView {
+  experiments: PlannedView[];
+  skipped: SkippedView[];
+  /** Each host, with how many experiments and how many requests at most. */
+  hosts: [string, number, number][];
+  requests_at_most: number;
+  /** What the run may do to the systems it tests, in words. */
+  budget: string;
+  /** Whether the request ceiling would cut this run short. */
+  exceeds_ceiling: boolean;
+  /**
+   * Suspicions standing on traffic that is no longer in scope.
+   *
+   * So an empty plan can say *why* it is empty. "Nothing to test" and "everything
+   * that could be tested is out of bounds" are different sentences, and only one of
+   * them is about the application.
+   */
+  out_of_scope: number;
+}
+
+/** One experiment and what it established. */
+export interface SettledView {
+  detector: string;
+  claim: string;
+  /** `reproduced`, `supported`, `refuted` or `inconclusive`. */
+  verification: string;
+  note: string;
+  finding: string | null;
+  severity: string | null;
+  confidence: string | null;
+  title: string | null;
+}
+
+/** What an active run did. */
+export interface ActiveRunView {
+  requests_sent: number;
+  settled: SettledView[];
+  skipped: SkippedView[];
+  detectors: DetectorRunView[];
+  /**
+   * Whether the run worked through everything it planned.
+   *
+   * The field every reader has to look at: a truncated run whose reader concludes
+   * "clean" is the worst thing this can produce.
+   */
+  complete: boolean;
+  /** Why it ended early, in a sentence. */
+  unfinished_note: string | null;
+  recorded_new: number;
+  recorded_refreshed: number;
+}
+
+/** Works out what an active run would send. Sends nothing. */
+export const scanActivePlan = (
+  maxRequests: number | null,
+): Promise<PlanView> =>
+  invoke<PlanView>("scan_active_plan", { host: null, maxRequests });
+
+/** Performs the experiments. The only call in this file that generates traffic. */
+export const scanActiveRun = (
+  maxRequests: number | null,
+): Promise<ActiveRunView> =>
+  invoke<ActiveRunView>("scan_active_run", { host: null, maxRequests });
 
 /* ------------------------------------------------------------------ *
  * Engagement snapshots

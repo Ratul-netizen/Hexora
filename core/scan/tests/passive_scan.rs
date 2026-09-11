@@ -320,6 +320,66 @@ fn a_reflected_origin_becomes_a_hypothesis_and_not_a_finding() {
 }
 
 #[test]
+fn two_endpoints_on_one_host_each_get_their_own_suspicion() {
+    // A regression, and the bug that building the active scheduler exposed. These
+    // used to collapse to one hypothesis per host, so an active run tested whichever
+    // endpoint came first and the other was never probed — against a real application
+    // with a reflecting endpoint and a correctly allowlisted one, that means the bug
+    // is the half that goes untested.
+    let fixture = fixture();
+    for path in ["/reflect", "/allowed"] {
+        fixture.capture(
+            "api.example.com",
+            true,
+            path,
+            &[("Origin", "https://app.example.com")],
+            200,
+            &[
+                ("Content-Type", "application/json"),
+                ("Strict-Transport-Security", "max-age=1"),
+                ("Access-Control-Allow-Origin", "https://app.example.com"),
+                ("Access-Control-Allow-Credentials", "true"),
+                ("Vary", "Origin"),
+            ],
+        );
+    }
+
+    let summary = fixture.scan(Selection::default());
+    assert_eq!(
+        summary.hypotheses.len(),
+        2,
+        "one per endpoint, so an active run can test both: {:#?}",
+        summary.hypotheses
+    );
+}
+
+#[test]
+fn the_same_endpoint_seen_many_times_is_still_one_suspicion() {
+    // The other half. Deduplication per endpoint must not become no deduplication:
+    // a page loaded forty times is one thing to test, not forty.
+    let fixture = fixture();
+    for _ in 0..40 {
+        fixture.capture(
+            "api.example.com",
+            true,
+            "/reflect",
+            &[("Origin", "https://app.example.com")],
+            200,
+            &[
+                ("Content-Type", "application/json"),
+                ("Strict-Transport-Security", "max-age=1"),
+                ("Access-Control-Allow-Origin", "https://app.example.com"),
+                ("Access-Control-Allow-Credentials", "true"),
+                ("Vary", "Origin"),
+            ],
+        );
+    }
+
+    let summary = fixture.scan(Selection::default());
+    assert_eq!(summary.hypotheses.len(), 1, "{:#?}", summary.hypotheses);
+}
+
+#[test]
 fn every_finding_is_a_lead_and_never_more() {
     // The ceiling a passive check cannot exceed. Checked over a response that
     // triggers several detectors at once.

@@ -35,6 +35,7 @@ const INFO: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Passive,
     observes: true,
     hypothesizes: true,
+    settles: None,
 };
 
 /// What a response's cache headers amount to.

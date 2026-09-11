@@ -36,6 +36,7 @@ influenced part of the process.
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic, and compiles a finding into a runnable reproduction | **Implemented** (M12.3, M12.9) |
 | `core/types::structure` | Says *where* two response bodies differ, by JSON path, under a normalization policy the caller passes in and the report prints | **Implemented** (M12.10) |
+| `core/active` | The queue: settles the hypotheses a passive pass could not, one host at a time, under a request ceiling, from a plan produced without sending | **Implemented** (M13.3) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |
@@ -256,6 +257,29 @@ see invariant 13.
 — a non-UTF-8 body, two `Content-Length` headers, a `Content-Length` that disagrees
 with the body, and a bare-LF header block — and each is a thing a real finding is
 sometimes about. The refusal carries the reason, and the raw form is always there.
+
+## The queue, and what it promises
+
+`hexora-scan` cannot send — `passive::scan` has no transport in its signature.
+`hexora-active` is the crate where sending lives, and the split is the point:
+
+```text
+Plan::prepare(project, lab, checks, hypotheses, budget)  →  Plan     synchronous
+run(plan, lab, checks, cancel)                           →  Outcome  the only sender
+```
+
+A dry run is the first function without the second. There is no flag on a sending path
+that a future edit could stop honouring.
+
+Within a run, **one host has one sequential queue**; the queues are futures driven
+together on a single task by `buffer_unordered`, so the scheduler holds a `&dyn Lab`
+across the whole run and stopping needs no cross-thread handshake. The request ceiling
+is enforced by a `Metered` lab wrapped around the real one, so a check that loops is
+stopped by the thing it was handed rather than by its own restraint.
+
+`ActiveCheck` is object-safe where `Verifier` is not, and that is the whole reason it
+exists separately: a verifier is written by a subsystem that knows its own case type,
+and a scheduler holds a `Vec` of checks it knows nothing about. See invariant 15.
 
 ## Passive and active are a type, not a convention
 

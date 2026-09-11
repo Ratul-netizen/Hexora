@@ -641,6 +641,75 @@ still cites the response exactly as it arrived.
 
 ---
 
+## 15. A run that did not finish never reads as a run that found nothing
+
+Every other invariant here is about not saying too much. This one is about not saying
+too little, and it is the failure a scanner commits most easily: a queue that stopped
+early, reported as a clean result.
+
+An active run ends for three different reasons, and they are three different
+sentences:
+
+```text
+worked through the queue     →  what it says is what it found
+stopped by the operator      →  the experiments it had not reached were not performed
+reached its request ceiling  →  the experiments it had not reached were not performed
+```
+
+`Outcome::stopped` carries which, `Outcome::complete()` answers it in one call, the
+CLI prints it **before** the results rather than after, the window shows it as a
+warning above them, and `scan_runs.stopped_because` records it so a later retest can
+see that a claim stopped appearing because nobody re-tested it. This is invariant 11
+applied to a whole run instead of a single claim.
+
+**The plan says so in advance too.** `Plan::exceeds_ceiling` is true when the queue is
+longer than the budget allows, and both the CLI and the window say that before
+anything is sent — a tester who is told afterwards has already made a decision on bad
+information.
+
+**An experiment is never half-run.** `RequestCeiling::has_room` is asked before an
+experiment starts, not between its requests: a check that gets two of the four
+requests it needed answers worse than one that was never started, and "not started" is
+the thing the outcome can state honestly.
+
+## What a run promises the target
+
+The same invariant's other half, because a run that is *too* polite to finish is the
+common way to get an unfinished one.
+
+**One host is never sent two Hexora requests at the same time.** Each host has one
+sequential queue with `Budget::pause` between its requests; different hosts are worked
+concurrently up to `Budget::hosts_at_once`. A global concurrency limit is the wrong
+promise: eight requests spread over eight hosts is polite and eight aimed at one host
+is a small denial of service, so the limit is expressed in what one client's server
+sees.
+
+**The budget refuses rather than clamps.** A tester who typed `--concurrency 0` meant
+something, and quietly running with 1 answers a question they did not ask.
+
+**Generated traffic is attributed to the subsystem that generated it.** `SendAs::scanner`
+rather than `SendAs::repeater`, because `ScopeGuard` *refuses* an out-of-scope request
+from an automated origin and only *flags* one from the repeater — a person typed that
+one. A scanner recorded as the repeater would be handed a person's permissions. This
+was a real defect, found by reading the `requests.origin` column after a live run.
+
+**Tests.** `core/active/tests/scheduling.rs` —
+`preparing_a_plan_sends_nothing_at_all`,
+`one_host_is_never_sent_two_requests_at_the_same_time`,
+`different_hosts_are_worked_at_the_same_time`,
+`the_pause_between_requests_to_one_host_is_honoured`,
+`the_request_ceiling_holds_even_against_a_check_that_loops`,
+`a_run_that_hit_its_ceiling_says_so_rather_than_reading_as_finished`,
+`stopping_a_run_stops_the_next_request`,
+`an_out_of_scope_target_is_one_line_in_the_plan_and_never_a_request`;
+`core/active/src/budget.rs` —
+`a_budget_that_would_send_nothing_is_refused_rather_than_clamped`,
+`the_ceilings_cannot_be_raised_past_the_build_limits`;
+`core/verify/src/lib.rs` —
+`a_scanners_experiment_is_automated_and_a_repeaters_is_not`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

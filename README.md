@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.10 — a comparison that says which field, not how alike
+## Status: M13.3 — the scanner sends, and asks first
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -91,6 +91,7 @@ work.
 | Passive scanner: six checks over captured traffic, sending nothing, every result a lead (`hexora scan passive`) | **IMPLEMENTED** |
 | Proof-of-concept compilation: a finding becomes runnable steps, credentials replaced by placeholders (`hexora poc`) | **IMPLEMENTED** |
 | Structural response comparison: which JSON field differed, at which path, under a normalization policy the report states | **IMPLEMENTED** |
+| Active scheduler: one queue per host, a request ceiling, a plan you see before anything is sent (`hexora scan active`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings, the report and snapshots | **IMPLEMENTED** |

@@ -27,6 +27,7 @@ const INFO: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Passive,
     observes: true,
     hypothesizes: false,
+    settles: None,
 };
 
 /// The headers that name a product, and what to call each of them.

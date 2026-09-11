@@ -14,6 +14,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
+mod active;
 mod authz;
 mod detectors;
 mod findings;
@@ -40,7 +41,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.10. The proxy, HTTP/1.x engine \
+                  Development status: M13.3. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -661,6 +662,58 @@ enum ScanCommand {
         #[arg(long)]
         no_save: bool,
     },
+
+    /// Settle the suspicions a passive pass could not, by running experiments.
+    ///
+    /// This sends requests. It is the only `scan` pass that does, which is why it is
+    /// spelled out rather than a flag: a pass that reads a project and a pass that
+    /// puts traffic on somebody's system are different acts and should not be one
+    /// typo apart.
+    ///
+    /// Nothing is invented. An active run only tests hypotheses a passive pass
+    /// raised, so `hexora scan passive` comes first. Use --dry-run to see exactly
+    /// what would be sent, to which hosts, and how much.
+    Active {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Only hypotheses about this host.
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+
+        /// Only hypotheses raised by this check, by id.
+        #[arg(long, value_name = "ID")]
+        detector: Option<String>,
+
+        /// Work out what would be sent, print it, and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// How many hosts to work at once. One host is never sent two requests at
+        /// once whatever this is set to.
+        #[arg(long, value_name = "N")]
+        hosts_at_once: Option<usize>,
+
+        /// Milliseconds to wait between requests to one host.
+        #[arg(long, value_name = "MS")]
+        delay: Option<u64>,
+
+        /// The most requests this run may send in total.
+        #[arg(long, value_name = "N")]
+        max_requests: Option<usize>,
+
+        /// Send without asking first.
+        #[arg(long)]
+        yes: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+
+        /// Print the results without writing them into the project.
+        #[arg(long)]
+        no_save: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -876,6 +929,30 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             since: since.as_deref(),
             limit: *limit,
             everything: *everything,
+            no_save: *no_save,
+            json: cli.json,
+        }),
+        Command::Scan(ScanCommand::Active {
+            path,
+            host,
+            detector,
+            dry_run,
+            hosts_at_once,
+            delay,
+            max_requests,
+            yes,
+            insecure,
+            no_save,
+        }) => active::active(active::Args {
+            project: path,
+            host: host.as_deref(),
+            detector: detector.as_deref(),
+            hosts_at_once: *hosts_at_once,
+            delay_ms: *delay,
+            max_requests: *max_requests,
+            dry_run: *dry_run,
+            yes: *yes,
+            insecure: *insecure,
             no_save: *no_save,
             json: cli.json,
         }),
@@ -1130,14 +1207,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.10",
+            "milestone": "M13.3",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.10 (structural differential analysis)");
+        println!("  milestone:               M13.3 (the active scheduler)");
     }
 }
 
@@ -1207,10 +1284,11 @@ mod tests {
     }
 
     #[test]
-    fn the_scan_command_only_offers_the_pass_that_exists() {
-        // `scan` is a subcommand rather than a flag precisely so that adding the
-        // active pass later is visible. Until then, offering only `passive` is what
-        // keeps the help honest about what this build will do to a target.
+    fn the_scan_command_names_each_pass_rather_than_hiding_one_behind_a_flag() {
+        // `scan` is a subcommand rather than a flag precisely so that the pass which
+        // sends traffic is a word somebody had to type. A `--active` flag one
+        // character away from a safe default is how a tool ends up scanning a
+        // production system by accident.
         let scan = Cli::command()
             .get_subcommands()
             .find(|command| command.get_name() == "scan")
@@ -1221,14 +1299,33 @@ mod tests {
             .map(|command| command.get_name().to_string())
             .collect();
 
-        assert_eq!(passes, vec!["passive".to_string()], "{passes:?}");
+        assert_eq!(
+            passes,
+            vec!["passive".to_string(), "active".to_string()],
+            "{passes:?}"
+        );
+
+        let active = scan
+            .get_subcommands()
+            .find(|command| command.get_name() == "active")
+            .expect("the active pass");
+        let flags: Vec<String> = active
+            .get_arguments()
+            .map(|arg| arg.get_id().to_string())
+            .collect();
+        for required in ["dry_run", "yes", "max_requests"] {
+            assert!(
+                flags.iter().any(|flag| flag == required),
+                "an active pass must offer --{required}: {flags:?}"
+            );
+        }
     }
 
     #[test]
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.10"),
+            help.contains("M13.3"),
             "users must not mistake this for a finished tool"
         );
     }

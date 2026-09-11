@@ -32,6 +32,7 @@ const INFO: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Passive,
     observes: true,
     hypothesizes: false,
+    settles: None,
 };
 
 impl PassiveCheck for SecurityHeaders {

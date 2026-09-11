@@ -20,6 +20,7 @@ pub fn registry() -> Registry {
     Registry::new()
         .with(hexora_authz::checks())
         .with(hexora_scan::checks::all().iter().map(|check| check.about()))
+        .with(hexora_active::checks_info())
 }
 
 /// Lists them.
@@ -42,6 +43,7 @@ pub fn list(json: bool) -> Result<()> {
                         "sends": check.sends(),
                         "observes": check.observes,
                         "hypothesizes": check.hypothesizes,
+                        "settles": check.settles,
                     }))
                     .collect::<Vec<_>>(),
             })
@@ -67,6 +69,34 @@ pub fn list(json: bool) -> Result<()> {
     println!();
     let sending = registry.sending().count();
     println!("{} check(s); {sending} of them send traffic.", checks.len());
+
+    let (answered, unanswered) = settlement(&registry);
+    if !answered.is_empty() || !unanswered.is_empty() {
+        println!();
+        for id in &answered {
+            let by: Vec<&str> = registry
+                .all()
+                .iter()
+                .filter(|check| check.settles == Some(id.as_str()))
+                .map(|check| check.id.0)
+                .collect();
+            if by == [id.as_str()] {
+                // A subsystem that raises its own suspicions and runs its own
+                // experiments. Worth saying plainly rather than as a sentence that
+                // names the same check twice.
+                println!("  {id} raises suspicions and settles them itself.");
+            } else {
+                println!(
+                    "  {id} raises suspicions that {} can settle.",
+                    by.join(", ")
+                );
+            }
+        }
+        for id in &unanswered {
+            println!("  {id} raises suspicions nothing in this build can settle yet.");
+        }
+    }
+
     println!();
     // The two sentences the verification framework exists to make true.
     println!("An observation is a fact about traffic and reaches a report as a lead.");
@@ -74,19 +104,53 @@ pub fn list(json: bool) -> Result<()> {
     println!("Neither becomes a finding on its own.");
     println!();
     println!("  hexora scan passive <project>   runs every passive check; sends nothing");
+    println!("  hexora scan active <project>    settles what it raised; sends");
     println!("  hexora authz <project> <id>     runs the authorization checks; sends");
     Ok(())
 }
 
 /// What a check can produce, for the registry listing.
 fn produces(check: &hexora_types::verify::DetectorInfo) -> &'static str {
-    match (check.observes, check.hypothesizes) {
-        (true, true) => "obs + hyp",
-        (true, false) => "observations",
-        (false, true) => "hypotheses",
+    match (check.observes, check.hypothesizes, check.settles.is_some()) {
+        (true, true, _) => "obs + hyp",
+        (true, false, _) => "observations",
+        (false, true, _) => "hypotheses",
+        (false, false, true) => "verdicts",
         // Nothing: a row that would be a lie if it appeared, so it says so.
-        (false, false) => "nothing",
+        (false, false, false) => "nothing",
     }
+}
+
+/// Which suspicions this build can settle, and which are still dead ends.
+///
+/// The question a tester should be able to ask of a scanner and almost never can: not
+/// "what do you look for" but "what happens to the things you find and cannot
+/// explain". A hypothesis with nobody to answer it stays a suspicion forever, and
+/// saying so is better than letting it look like coverage.
+fn settlement(registry: &Registry) -> (Vec<String>, Vec<String>) {
+    let raises: Vec<&str> = registry
+        .all()
+        .iter()
+        .filter(|check| check.hypothesizes)
+        .map(|check| check.id.0)
+        .collect();
+    let settled: Vec<&str> = registry
+        .all()
+        .iter()
+        .filter_map(|check| check.settles)
+        .collect();
+
+    let answered = raises
+        .iter()
+        .filter(|id| settled.contains(id))
+        .map(|id| id.to_string())
+        .collect();
+    let unanswered = raises
+        .iter()
+        .filter(|id| !settled.contains(id))
+        .map(|id| id.to_string())
+        .collect();
+    (answered, unanswered)
 }
 
 #[cfg(test)]
@@ -143,11 +207,7 @@ mod tests {
         // registry row claiming it exists would be the kind of padding this listing
         // is meant to prevent.
         for check in registry().all() {
-            assert!(
-                check.observes || check.hypothesizes,
-                "{} produces nothing",
-                check.id
-            );
+            assert!(check.produces_something(), "{} produces nothing", check.id);
         }
     }
 

@@ -78,6 +78,10 @@ pub const CROSS_IDENTITY: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Active,
     observes: false,
     hypothesizes: true,
+    // Raises its own and settles them, in one subsystem: the matrix is the first
+    // experiment and `--verify` is the second. Recorded so the registry does not list
+    // it among the suspicions nothing in this build can answer.
+    settles: Some("authz.cross_identity"),
 };
 
 /// The check that builds the request nobody captured.
@@ -89,6 +93,7 @@ pub const CONSTRUCTED_OBJECT: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Active,
     observes: false,
     hypothesizes: true,
+    settles: Some("authz.constructed_object"),
 };
 
 /// The longest excerpt quoted as evidence from a response body.

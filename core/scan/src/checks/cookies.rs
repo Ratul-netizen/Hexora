@@ -39,6 +39,7 @@ const INFO: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Passive,
     observes: true,
     hypothesizes: false,
+    settles: None,
 };
 
 /// A `Set-Cookie`, with the value deliberately absent.

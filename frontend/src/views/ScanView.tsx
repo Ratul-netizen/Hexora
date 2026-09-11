@@ -3,9 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   describeError,
   listDetectors,
+  scanActivePlan,
+  scanActiveRun,
   scanPassive,
+  type ActiveRunView,
   type DetectorView,
   type ObservationView,
+  type PlanView,
   type ScanView as ScanResult,
 } from "../ipc";
 
@@ -109,6 +113,8 @@ export function ScanView({
       </section>
 
       {result && <Results result={result} onOpenExchange={onOpenExchange} />}
+
+      <ActivePass onOpenExchange={onOpenExchange} />
 
       <section className="card">
         <h3>What this build checks for ({detectors.length})</h3>
@@ -259,6 +265,278 @@ function Results({
   );
 }
 
+/**
+ * The active pass: the experiments the passive one could not run.
+ *
+ * Two steps, never one. The plan is worked out by a command that has no way to send —
+ * it is a different call, not a flag — and the run happens only after somebody has
+ * seen how many requests would go where and pressed the second button.
+ */
+function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }) {
+  const [plan, setPlan] = useState<PlanView | null>(null);
+  const [outcome, setOutcome] = useState<ActiveRunView | null>(null);
+  const [ceiling, setCeiling] = useState("200");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const maxRequests = () => {
+    const parsed = Number.parseInt(ceiling, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  async function preview() {
+    setBusy(true);
+    setError(null);
+    setOutcome(null);
+    try {
+      setPlan(await scanActivePlan(maxRequests()));
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      setOutcome(await scanActiveRun(maxRequests()));
+      setPlan(null);
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Active scan</h2>
+      <p className="muted">
+        Settles suspicions the passive pass raised, by sending requests. It invents no
+        work of its own: run the passive pass first, and everything below comes from
+        what it found. Nothing is sent until you have seen the plan.
+      </p>
+
+      <div className="toolbar">
+        <label>
+          Request ceiling{" "}
+          <input
+            className="narrow"
+            value={ceiling}
+            onChange={(e) => setCeiling(e.target.value)}
+            inputMode="numeric"
+          />
+        </label>
+        <button onClick={() => void preview()} disabled={busy}>
+          {busy ? "Working…" : "Show me what it would send"}
+        </button>
+      </div>
+
+      {error && <p className="notice warn">{error}</p>}
+
+      {plan && <Plan plan={plan} busy={busy} onSend={() => void send()} onOpenExchange={onOpenExchange} />}
+      {outcome && <Outcome outcome={outcome} />}
+    </section>
+  );
+}
+
+/** What a run would do, before it does any of it. */
+function Plan({
+  plan,
+  busy,
+  onSend,
+  onOpenExchange,
+}: {
+  plan: PlanView;
+  busy: boolean;
+  onSend: () => void;
+  onOpenExchange: (id: string) => void;
+}) {
+  if (plan.experiments.length === 0) {
+    return (
+      <div className="plan">
+        {plan.out_of_scope > 0 ? (
+          /* "Nothing to test" and "everything that could be tested is out of
+             bounds" are different sentences, and only one of them is about the
+             application. */
+          <p className="notice">
+            No in-scope hypothesis to settle. {plan.out_of_scope} suspicion(s) stand on
+            traffic that is no longer in this project's scope, so nothing would be sent
+            to it. That is the scope working, not the application being clean.
+          </p>
+        ) : (
+          <p className="muted">
+            Nothing to test. Run the passive pass first; if it raises no suspicion,
+            there is no experiment for this one to perform.
+          </p>
+        )}
+        <Skipped rows={plan.skipped} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="plan">
+      <p>
+        <strong>
+          {plan.experiments.length} experiment(s), at most {plan.requests_at_most}{" "}
+          request(s)
+        </strong>
+      </p>
+      <ul className="differences">
+        {plan.hosts.map(([host, experiments, requests]) => (
+          <li key={host}>
+            <code>{host}</code> — {experiments} experiment(s), at most {requests}{" "}
+            request(s)
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">{plan.budget}</p>
+      {plan.exceeds_ceiling && (
+        <p className="notice warn">
+          This plan can reach its request ceiling. A run that stops there will say so
+          rather than reading as a finished one.
+        </p>
+      )}
+
+      <details>
+        <summary className="muted small">
+          The {plan.experiments.length} suspicion(s) that would be tested
+        </summary>
+        <ul className="claims">
+          {plan.experiments.map((experiment, index) => (
+            <li key={index}>
+              <span className="mono small">{experiment.detector}</span>{" "}
+              {experiment.claim}
+              <div className="muted small">
+                <button
+                  className="link"
+                  onClick={() => onOpenExchange(experiment.source_request)}
+                >
+                  open the exchange
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      <Skipped rows={plan.skipped} />
+
+      <div className="toolbar">
+        <button className="primary" onClick={onSend} disabled={busy}>
+          {busy ? "Running…" : `Send ${plan.requests_at_most} request(s) at most`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What a run did. */
+function Outcome({ outcome }: { outcome: ActiveRunView }) {
+  const established = outcome.settled.filter((s) => s.finding !== null);
+  const refuted = outcome.settled.filter((s) => s.verification === "refuted");
+  const unclear = outcome.settled.filter((s) => s.verification === "inconclusive");
+
+  return (
+    <div className="plan">
+      <p>
+        <strong>
+          {outcome.requests_sent} request(s) sent across {outcome.settled.length}{" "}
+          experiment(s).
+        </strong>
+      </p>
+
+      {/* First, because it is the sentence that must never be mistaken for a clean
+          result. */}
+      {!outcome.complete && (
+        <p className="notice warn">
+          This run is unfinished: {outcome.unfinished_note}
+        </p>
+      )}
+
+      {established.length > 0 && (
+        <>
+          <h3>Established ({established.length})</h3>
+          <ul className="findings-brief">
+            {established.map((settled, index) => (
+              <li key={index}>
+                <span className={`badge sev-${settled.severity}`}>
+                  {settled.severity}
+                </span>{" "}
+                <span className="muted small">{settled.confidence}</span>{" "}
+                {settled.title}
+                <div className="muted small">{settled.note}</div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {refuted.length > 0 && (
+        <>
+          <h3>Ruled out ({refuted.length})</h3>
+          <ul className="claims">
+            {refuted.map((settled, index) => (
+              <li key={index}>
+                {settled.claim}
+                <div className="muted small">{settled.note}</div>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">
+            A refutation is a result. It is what stops a suspicion following you
+            around for the rest of an engagement — and it is not a finding, so nothing
+            was filed for it.
+          </p>
+        </>
+      )}
+
+      {unclear.length > 0 && (
+        <>
+          <h3>Could not be established either way ({unclear.length})</h3>
+          <ul className="claims">
+            {unclear.map((settled, index) => (
+              <li key={index}>
+                {settled.claim}
+                <div className="muted small">{settled.note}</div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <Skipped rows={outcome.skipped} />
+
+      <p className="muted small">
+        {outcome.recorded_new + outcome.recorded_refreshed === 0
+          ? "No finding was recorded."
+          : `${outcome.recorded_new} new, ${outcome.recorded_refreshed} refreshed in the project.`}
+      </p>
+    </div>
+  );
+}
+
+/** Hypotheses nothing was sent for, and why. */
+function Skipped({ rows }: { rows: { detector: string; claim: string; why: string }[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <details>
+      <summary className="muted small">Not tested ({rows.length})</summary>
+      <ul className="claims">
+        {rows.map((skipped, index) => (
+          <li key={index}>
+            <span className="mono small">{skipped.detector}</span> {skipped.claim}
+            <div className="muted small">{skipped.why}</div>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function Observations({
   title,
   rows,
@@ -322,5 +600,9 @@ function produces(detector: DetectorView): string {
   if (detector.observes && detector.hypothesizes) return "observations + hypotheses";
   if (detector.observes) return "observations";
   if (detector.hypothesizes) return "hypotheses";
+  // The third product, and the one a check that only *settles* other checks' work
+  // has. Without this it read as "nothing", which is what an active verifier looks
+  // like if you only ask what it raises.
+  if (detector.settles) return `settles ${detector.settles}`;
   return "nothing";
 }

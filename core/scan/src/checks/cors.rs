@@ -35,6 +35,7 @@ const INFO: DetectorInfo = DetectorInfo {
     mode: DetectorMode::Passive,
     observes: true,
     hypothesizes: true,
+    settles: None,
 };
 
 /// Whether the response says credentialed cross-origin reads are allowed.
@@ -134,9 +135,13 @@ impl PassiveCheck for CorsConfiguration {
 
         vec![Hypothesis {
             detector: INFO.id.to_string(),
+            // Names the endpoint, not just the host. Two endpoints on one host
+            // routinely differ — one reflecting, one correctly allowlisted — and two
+            // suspicions that read identically are two a tester cannot tell apart in
+            // a list or in a plan.
             claim: format!(
-                "{} may reflect any Origin it is sent, with credentials allowed",
-                exchange.host
+                "{} {} may reflect any Origin it is sent, with credentials allowed",
+                exchange.method, exchange.url
             ),
             source_request: exchange.id,
             location: Some(Location {

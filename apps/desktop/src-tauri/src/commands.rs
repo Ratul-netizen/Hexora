@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.10",
+        milestone: "M13.3",
     }
 }
 
@@ -1080,6 +1080,285 @@ pub fn scan_passive(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Active scanning
+// ---------------------------------------------------------------------------
+
+/// One experiment a run would perform, before anything is sent.
+#[derive(Debug, Clone, Serialize)]
+pub struct PlannedView {
+    pub host: String,
+    pub detector: String,
+    pub claim: String,
+    /// The exchange it was raised from, for opening in History.
+    pub source_request: String,
+}
+
+/// A hypothesis nothing will be sent for, and why.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedView {
+    pub detector: String,
+    pub claim: String,
+    pub why: String,
+}
+
+/// What a run would do. Produced without sending anything.
+#[derive(Debug, Clone, Serialize)]
+pub struct PlanView {
+    pub experiments: Vec<PlannedView>,
+    pub skipped: Vec<SkippedView>,
+    /// Hosts, each with how many experiments and how many requests at most.
+    pub hosts: Vec<(String, usize, usize)>,
+    pub requests_at_most: usize,
+    /// What the run may do to the systems it tests, in words.
+    pub budget: String,
+    /// Whether the ceiling would cut this run short.
+    pub exceeds_ceiling: bool,
+    /// Suspicions standing on traffic that is no longer in scope.
+    ///
+    /// Counted so an empty plan can say *why* it is empty. "Nothing to test" and
+    /// "everything that could be tested is out of bounds" are different sentences and
+    /// only one of them is about the application.
+    pub out_of_scope: usize,
+}
+
+/// One experiment and what it established.
+#[derive(Debug, Clone, Serialize)]
+pub struct SettledView {
+    pub detector: String,
+    pub claim: String,
+    /// `reproduced`, `supported`, `refuted` or `inconclusive`.
+    pub verification: String,
+    pub note: String,
+    /// The finding, when the experiment supported one.
+    pub finding: Option<String>,
+    pub severity: Option<String>,
+    pub confidence: Option<String>,
+    pub title: Option<String>,
+}
+
+/// What an active run did.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActiveRunView {
+    pub requests_sent: usize,
+    pub settled: Vec<SettledView>,
+    pub skipped: Vec<SkippedView>,
+    pub detectors: Vec<DetectorRunView>,
+    /// Whether the run worked through everything it planned.
+    ///
+    /// The field every reader has to look at. A truncated run whose reader concludes
+    /// "clean" is the worst output this subsystem can produce.
+    pub complete: bool,
+    /// Why it ended early, in a sentence.
+    pub unfinished_note: Option<String>,
+    pub recorded_new: usize,
+    pub recorded_refreshed: usize,
+}
+
+/// Works out what an active run would send. Sends nothing.
+///
+/// A separate command from [`scan_active_run`], not a flag on it: the window shows a
+/// plan and asks, and the asking is worth nothing if the same call could have sent.
+#[tauri::command]
+pub fn scan_active_plan(
+    state: State<'_, AppState>,
+    host: Option<String>,
+    max_requests: Option<usize>,
+) -> CommandResult<PlanView> {
+    let project = open(&state)?;
+    let budget = active_budget(max_requests)?;
+    let hypotheses = standing(&project, host.as_deref(), false)?;
+    let out_of_scope = if hypotheses.is_empty() {
+        standing(&project, host.as_deref(), true)?.len()
+    } else {
+        0
+    };
+
+    // A transport is needed to build a lab, and building one sends nothing: the plan
+    // only ever asks it whether a draft would leave scope.
+    let store = std::sync::Arc::new(project.traffic());
+    let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
+    let repeater = hexora_repeater::Repeater::new(
+        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new(), scope),
+        store,
+    );
+    let lab = hexora_verify::RepeaterLab::scanner(&repeater);
+    let checks = hexora_active::active_checks();
+
+    let plan = hexora_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
+        .map_err(fail)?;
+
+    Ok(plan_view(&plan, out_of_scope))
+}
+
+/// Performs the experiments.
+///
+/// The only command in the desktop surface that puts traffic on somebody else's system
+/// without a person having typed the request. The window shows the plan first.
+///
+/// Runs on a blocking worker with a runtime of its own, and reopens the project from
+/// its path rather than borrowing the one the window holds. A scan is seconds to
+/// minutes of network work; holding the application state across it would block every
+/// other command for the duration, and the borrow could not cross the await anyway.
+#[tauri::command]
+pub async fn scan_active_run(
+    state: State<'_, AppState>,
+    host: Option<String>,
+    max_requests: Option<usize>,
+) -> CommandResult<ActiveRunView> {
+    let path = state.project_path().map_err(fail)?;
+
+    tauri::async_runtime::spawn_blocking(move || active_run_blocking(path, host, max_requests))
+        .await
+        .map_err(fail)?
+}
+
+/// The run itself, owning everything it touches.
+fn active_run_blocking(
+    path: std::path::PathBuf,
+    host: Option<String>,
+    max_requests: Option<usize>,
+) -> CommandResult<ActiveRunView> {
+    let project = Project::open(&path).map_err(fail)?;
+    let budget = active_budget(max_requests)?;
+    let hypotheses = standing(&project, host.as_deref(), false)?;
+
+    let store = std::sync::Arc::new(project.traffic());
+    let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
+    let repeater = hexora_repeater::Repeater::new(
+        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new(), scope),
+        store,
+    );
+    let lab = hexora_verify::RepeaterLab::scanner(&repeater);
+    let checks = hexora_active::active_checks();
+
+    let plan = hexora_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
+        .map_err(fail)?;
+    let cancel = hexora_active::Cancel::new();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+    let outcome = runtime
+        .block_on(hexora_active::run_into(
+            &plan, &lab, &checks, &cancel, &project,
+        ))
+        .map_err(fail)?;
+
+    let findings_store = project.findings();
+    let mut recorded_new = 0;
+    let mut recorded_refreshed = 0;
+    for finding in outcome.findings() {
+        match findings_store.record(finding).map_err(fail)? {
+            hexora_storage::Recorded::Created(_) => recorded_new += 1,
+            hexora_storage::Recorded::Updated(_) => recorded_refreshed += 1,
+        }
+    }
+
+    Ok(ActiveRunView {
+        requests_sent: outcome.requests_sent,
+        settled: outcome
+            .judged
+            .iter()
+            .map(|judged| {
+                let finding = judged.finding.clone().map(|v| v.into_finding());
+                SettledView {
+                    detector: judged.hypothesis.detector.clone(),
+                    claim: judged.hypothesis.claim.clone(),
+                    verification: judged.verification.as_str().to_string(),
+                    note: judged.verification.note().to_string(),
+                    finding: finding.as_ref().map(|f| f.id.to_string()),
+                    severity: finding
+                        .as_ref()
+                        .map(|f| severity_word(f.severity).to_string()),
+                    confidence: finding
+                        .as_ref()
+                        .map(|f| confidence_word(f.confidence).to_string()),
+                    title: finding.as_ref().map(|f| f.title.clone()),
+                }
+            })
+            .collect(),
+        skipped: outcome.skipped.iter().map(skipped_view).collect(),
+        detectors: outcome
+            .detectors
+            .iter()
+            .map(|detector| DetectorRunView {
+                detector: detector.detector.clone(),
+                version: detector.version.clone(),
+                mode: detector.mode.as_str().to_string(),
+                observations: detector.observations,
+                hypotheses: detector.hypotheses,
+            })
+            .collect(),
+        complete: outcome.complete(),
+        unfinished_note: outcome.stopped.map(|why| why.as_str().to_string()),
+        recorded_new,
+        recorded_refreshed,
+    })
+}
+
+fn active_budget(max_requests: Option<usize>) -> CommandResult<hexora_active::Budget> {
+    let mut budget = hexora_active::Budget::default();
+    if let Some(max) = max_requests {
+        budget.max_requests = max;
+    }
+    budget.check().map_err(fail)?;
+    Ok(budget)
+}
+
+/// The hypotheses a passive pass raises over this project's traffic, right now.
+fn standing(
+    project: &hexora_storage::Project,
+    host: Option<&str>,
+    everything: bool,
+) -> CommandResult<Vec<hexora_types::finding::Hypothesis>> {
+    let selection = hexora_scan::passive::Selection {
+        host: host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
+        everything,
+        ..Default::default()
+    };
+    Ok(hexora_scan::passive::scan(project, &selection)
+        .map_err(fail)?
+        .hypotheses)
+}
+
+fn plan_view(plan: &hexora_active::Plan, out_of_scope: usize) -> PlanView {
+    PlanView {
+        experiments: plan
+            .work
+            .iter()
+            .map(|subject| PlannedView {
+                host: subject.host().to_string(),
+                detector: subject.hypothesis.detector.clone(),
+                claim: subject.hypothesis.claim.clone(),
+                source_request: subject.hypothesis.source_request.to_string(),
+            })
+            .collect(),
+        skipped: plan.skipped.iter().map(skipped_view).collect(),
+        hosts: plan
+            .by_host()
+            .into_iter()
+            .map(|(host, queue)| {
+                let len = queue.len();
+                (host, len, len * plan.budget.per_hypothesis)
+            })
+            .collect(),
+        requests_at_most: plan.requests_at_most(),
+        budget: plan.budget.describe(),
+        exceeds_ceiling: plan.exceeds_ceiling(),
+        out_of_scope,
+    }
+}
+
+fn skipped_view(skipped: &hexora_active::Skipped) -> SkippedView {
+    SkippedView {
+        detector: skipped.detector.clone(),
+        claim: skipped.claim.clone(),
+        why: skipped.why.clone(),
+    }
+}
+
 /// The checks this build has.
 #[derive(Debug, Clone, Serialize)]
 pub struct DetectorView {
@@ -1091,6 +1370,8 @@ pub struct DetectorView {
     pub sends: bool,
     pub observes: bool,
     pub hypothesizes: bool,
+    /// The check whose suspicions this one settles, when that is its job.
+    pub settles: Option<String>,
 }
 
 /// Lists them, so a tester can see what this build looks for and which of it sends.
@@ -1098,7 +1379,8 @@ pub struct DetectorView {
 pub fn detectors_list() -> CommandResult<Vec<DetectorView>> {
     let registry = hexora_verify::Registry::new()
         .with(hexora_authz::checks())
-        .with(hexora_scan::checks::all().iter().map(|check| check.about()));
+        .with(hexora_scan::checks::all().iter().map(|check| check.about()))
+        .with(hexora_active::checks_info());
 
     Ok(registry
         .all()
@@ -1112,6 +1394,7 @@ pub fn detectors_list() -> CommandResult<Vec<DetectorView>> {
             sends: check.sends(),
             observes: check.observes,
             hypothesizes: check.hypothesizes,
+            settles: check.settles.map(|id| id.to_string()),
         })
         .collect())
 }

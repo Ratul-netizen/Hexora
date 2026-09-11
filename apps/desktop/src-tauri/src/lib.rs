@@ -73,6 +73,8 @@ pub fn run() {
             commands::candidate_decide,
             commands::finding_reproduction,
             commands::scan_passive,
+            commands::scan_active_plan,
+            commands::scan_active_run,
             commands::detectors_list,
             commands::snapshots_list,
             commands::snapshot_take,

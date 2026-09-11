@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.10 (structural differential analysis)
+- **Last updated:** M13.3 (the active scheduler)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -39,8 +39,22 @@ milestone.
 | **M13.2** — The passive scanner | Six checks over traffic the project already holds, and nothing sent: `scan(&Project, &Selection)` has nowhere to put a transport, so "passive" is a property of the signature. Three products kept apart — an informational observation is listed and never filed, a reportable one becomes a *lead*, and a hypothesis stops until an experiment settles it. A check does not choose its own verification, so nothing passive can state itself above a lead. Five hundred endpoints missing one header is one finding citing three exchanges. A run records which detectors ran and at which versions, including the ones that saw nothing — which is the row that turns silence into a fact |
 | **M12.9** — Proof of concept | A finding compiles into steps somebody can run, built from the exchanges it already cites and nothing else — a citation the project has lost is printed as a gap rather than guessed at. Credentials become placeholders named after the identity, the same one in every step, so a reader supplies two values and runs the whole thing. `curl` where curl can express the request, and a stated reason where it cannot: a command that recomputed a deliberately wrong `Content-Length` would undo raw mode at the last step. `hexora poc`, a **Run it** block in the report for established findings, and a panel in the window |
 | **M12.10** — Structural difference | The comparison engine could say two responses were 97% alike; it can now say *which field*. Responses are flattened to JSON paths that keep their array indices — `$.items[3].price`, not `$.items[].price` — and each path is classified as appeared, disappeared, changed or type-changed. The normalisation that makes that survive a real application is an **explicit policy**, not a silent behaviour: a field set aside is still listed with both its values and the reason, the policy prints itself into the report, and `Policy::strict()` sets nothing aside at all. Credential-named fields report *that* they differed and never *what* they were. Duplicate JSON keys are flagged rather than collapsed by the parser in silence. Two identities served byte-for-byte the same document — behind an unauthenticated request that was refused — now state firmly, without needing a declared object id |
+| **M13.3** — The active scheduler | The first thing in Hexora that sends traffic nobody typed, and the first that asks before doing it. `Plan::prepare` is synchronous and answers "what would this do?" — which hypotheses can be settled, which lost their traffic, which point outside scope, how many requests per host — so `--dry-run` is the sending function not being called rather than a flag it honours. One host is never sent two requests at once: each gets a sequential queue with a pause, and only different hosts run concurrently. The ceiling is enforced by the lab a check is handed, so a check that loops is stopped by what it was given. A run that stopped early says so before its results, in the CLI, the window and the run record. First active check: `cors.reflection`, which settles M13.2's CORS suspicion with an origin that cannot be on anybody's allowlist |
 
 ## Next
+
+**The spine now runs in both directions.** A passive check raises a suspicion it
+cannot settle; the scheduler settles it, and a refutation is as much a result as a
+finding. Against a demo application with one reflecting endpoint and one correctly
+allowlisted one, three requests produced a High/Confirmed finding on the first and
+ruled the second out by name.
+
+**Two real defects fell out of building it**, both found by checking a live run rather
+than by reading code. Scanner traffic was attributed to `Origin::Repeater`, which the
+scope guard treats as human-initiated — so an out-of-scope host would have been
+flagged rather than refused. And the passive pass deduplicated hypotheses per *host*,
+so on an application with a vulnerable endpoint and a safe one next to it, the
+scheduler tested whichever came first and the bug went unprobed.
 
 **The evidence spine is now end to end.** Traffic becomes an observation, an
 observation becomes a hypothesis, a hypothesis becomes a verification, a verification
@@ -55,9 +69,10 @@ claim: two identities served *the same document*, with an unauthenticated reques
 refused that document, no longer needs a hand-declared object id to be stated
 firmly.
 
-**M13.3, the active scheduler, is not implemented.** Nothing in this build sends a
-request that a tester did not ask for: the authorization checks run when `hexora
-authz` is invoked, and the passive pass sends nothing at all.
+**Nothing in this build sends a request a tester did not ask for.** That sentence
+survives M13.3 unchanged, and keeping it true is most of what the milestone is: a run
+happens because somebody invoked one, the plan is shown before anything goes out, and
+a non-interactive stdin answers *no*.
 
 **The gate everything else is built behind is in place.** M13.1 makes the distinction
 between *a check thought something* and *an experiment established something* a fact
@@ -89,7 +104,6 @@ making every automated result explainable, reproducible and safe.* Full detail i
 [`docs/roadmap.md`](docs/roadmap.md).
 
 ```text
-M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
 M13.4  Reflected-input verification  context-aware, not "the string came back"
 M13.5  Redirect verification         a controlled destination, never blindly followed
 M13.6  Auth/session verification     the identity model, applied differentially
@@ -98,11 +112,12 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
-- **M13.3 — the active scheduler.** One queue, one `ScopeGuard`, bounded concurrency
-  — and the first consumer of the hypotheses the passive pass now produces and cannot
-  settle. Origin reflection is the worked example waiting for it: a second request
-  with a different `Origin` is all it takes, and that request is exactly what M13.2
-  will not make.
+- **M13.4 — reflected-input verification.** The first check that has to reason about
+  *where* its input came back, not that it came back. A string echoed inside a JSON
+  string, an HTML attribute, a comment and a `<script>` block are four different
+  facts, and a scanner that treats them as one is the scanner everybody has learned to
+  ignore. It is a natural second consumer of the scheduler: one request to place a
+  marker, one to read it back, both inside the budget M13.3 already enforces.
 
 Still open in M12: **attack chains** that retain evidence at every step.
 
@@ -110,6 +125,15 @@ Still open in M12: **attack chains** that retain evidence at every step.
 large payload generators, autonomous AI exploitation, hundreds of vulnerability
 signatures, or Burp extension compatibility. Each multiplies the surface area that has
 to be trustworthy before any of it is.
+
+**What the active scheduler has and has not been run against.** One local demo
+application with a deliberately reflecting endpoint and a correctly allowlisted one,
+over plain HTTP on loopback. The pacing and ceiling are unit-tested against a
+recording lab with real timing, and the whole thing has never been pointed at a large
+application, a rate-limited one, or one behind a CDN that answers differently to an
+unfamiliar `Origin`. The cancellation path has not been exercised from the window,
+which has no stop button yet — `Cancel` exists and the CLI constructs one, but nothing
+pulls it mid-run.
 
 **Two honesty notes carried forward:**
 

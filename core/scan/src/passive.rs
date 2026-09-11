@@ -197,6 +197,9 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
 
     let mut groups: BTreeMap<String, Grouped> = BTreeMap::new();
     let mut hypotheses = Vec::new();
+    // One key per (check, endpoint, claim) already raised.
+    let mut raised: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
     let mut read = 0u64;
     let mut skipped = 0u64;
     let ceiling = selection.limit.unwrap_or(MAX_EXCHANGES).min(MAX_EXCHANGES);
@@ -262,12 +265,22 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
                     if let Some(entry) = counts.get_mut(&id) {
                         entry.hypotheses += 1;
                     }
-                    // Deduplicated on the claim: one suspicion per host per check is
-                    // what a scheduler will want to test, not one per URL.
-                    if !hypotheses
-                        .iter()
-                        .any(|existing: &Hypothesis| existing.claim == hypothesis.claim)
-                    {
+                    // One suspicion per endpoint per check, not one per host.
+                    //
+                    // This used to collapse to one per host, on the reasoning that a
+                    // scheduler would rather test a host than a URL. Building the
+                    // scheduler showed that to be exactly wrong: two endpoints on one
+                    // host routinely differ — a demo application with a reflecting
+                    // `/reflect` and a correctly allowlisted `/allowed` produced one
+                    // hypothesis, the active run tested whichever came first, and the
+                    // real bug was never probed.
+                    //
+                    // The count is bounded by distinct endpoints rather than by
+                    // exchanges, which is the number that matters, and the active
+                    // scheduler shows the total and its request ceiling before it
+                    // sends anything.
+                    let key = (id.clone(), exchange.path.clone(), hypothesis.claim.clone());
+                    if raised.insert(key) {
                         hypotheses.push(hypothesis);
                     }
                 }
@@ -317,6 +330,10 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
         status: RunStatus::Completed,
         exchanges_read: read,
         exchanges_skipped: skipped,
+        // Not a placeholder. A passive pass has no transport, so zero is the measured
+        // truth rather than a value nobody filled in.
+        requests_sent: 0,
+        stopped_because: None,
         tool_version: hexora_types::VERSION.to_string(),
         detectors: counts.values().cloned().collect(),
     };
@@ -426,6 +443,50 @@ fn wanted(
         }
     }
     true
+}
+
+/// Reads one stored exchange by id, into the shape a check sees.
+///
+/// The same assembly a pass uses, including the redaction — which is the reason this
+/// exists rather than each caller reading the tables itself. An active check settles a
+/// hypothesis a passive one raised, and it must not be handed the credential the
+/// passive side was carefully not given.
+///
+/// `Ok(None)` means the project no longer holds a response for that request, which is
+/// a normal answer and not an error: a hypothesis can outlive the traffic behind it.
+pub fn exchange_at(project: &Project, request: RequestId) -> Result<Option<Exchange>> {
+    let traffic = project.traffic();
+    let Ok((status, _, _, response_headers)) = traffic.response_head(request) else {
+        return Ok(None);
+    };
+    let stored = traffic.request(request)?;
+    let raw_request_headers = Headers::from_block(&stored.headers_raw);
+    let authenticated = raw_request_headers.iter().any(|header| {
+        CREDENTIAL_HEADERS
+            .iter()
+            .any(|name| header.name.eq_ignore_ascii_case(name))
+    });
+
+    Ok(Some(Exchange {
+        id: request,
+        target: traffic.target_of(request)?,
+        host: stored.service.host.clone(),
+        port: stored.service.port,
+        secure: stored.service.secure,
+        method: stored.method.clone(),
+        url: format!("{}{}", stored.service.origin(), stored.path),
+        path: stored.path.clone(),
+        status,
+        request_headers: redacted_request_headers(&raw_request_headers),
+        response_headers: redacted_response_headers(&Headers::from_block(&response_headers)),
+        // Not carried on the request row. Only the checks that ask "did this response
+        // have content" use it, and none of them runs from this path today; stating a
+        // zero it did not measure would be worse than the gap.
+        response_bytes: 0,
+        authenticated,
+        tls: traffic.tls_of(request)?,
+        sent_at: stored.sent_at.clone(),
+    }))
 }
 
 /// Reads one exchange into the shape a check sees.

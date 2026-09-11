@@ -65,7 +65,6 @@ M12.7  Identifier suggestions        candidates a human confirms, never assertio
 M12.8  Engagement snapshots          what changed since the last assessment  ✔
 M13.1  Verification framework        detector ≠ finding, enforced by the type system  ✔
 M13.2  Passive scanner               observations over captured traffic, no new requests  ✔
-M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
 M13.4  Reflected-input verification  context-aware, not "the string came back"
 M13.5  Redirect verification         a controlled destination, never blindly followed
 M13.6  Auth/session verification     the identity model, applied differentially
@@ -532,11 +531,45 @@ The four rows not covered — mixed content, sensitive data in responses,
 authentication/session observations, technology fingerprinting beyond banners — are
 either body-reading (deliberately deferred with the accessor) or need an experiment.
 
-**M13.3 — Active test scheduler** · PLANNED
+**M13.3 — Active test scheduler** · DONE
 
-One queue, bounded concurrency, per-host rate limits, and every request through the
-guard. The scheduler is what makes active testing safe to point at a production system,
-so it lands before the detectors that use it.
+One queue per host, a request ceiling, and every request through the guard. The
+scheduler is what makes active testing safe to point at a production system, so it
+landed before the detectors that use it.
+
+```text
+Plan::prepare(...)  →  Plan     synchronous; there is no await to send through
+run(plan, ...)      →  Outcome  the only function in Hexora that sends
+```
+
+`--dry-run` is the first without the second. Not a flag on a sending path — a flag can
+stop being honoured by an edit nobody reviewed carefully.
+
+**One host is never sent two requests at once.** Each host has a sequential queue with
+a pause between its requests; only different hosts run concurrently. A global
+concurrency limit was the obvious design and the wrong promise: eight requests over
+eight hosts is polite, eight at one host is a small denial of service, and what a
+client cares about is what their server sees.
+
+**A run that stopped early says so, before its results.** Invariant 15. A truncated
+queue reported as a finished one turns "unfinished" into "clean", which is the worst
+thing a scanner can say.
+
+The first check is `cors.reflection`, chosen because it closes a loop M13.2 left open
+on purpose: an `Origin` that cannot be on anybody's allowlist separates a reflecting
+server from an allowlisted one, and that request is exactly what a passive pass will
+not make. A refutation is a first-class result here — "this host does not reflect
+arbitrary origins" is what stops a suspicion following a tester around.
+
+Building it found two defects nothing else would have. Scanner traffic was attributed
+to `Origin::Repeater`, which the scope guard treats as human-initiated, so an
+out-of-scope host would have been flagged rather than refused. And the passive pass
+deduplicated hypotheses per host, so an application with a vulnerable endpoint beside
+a safe one had only one of them tested — whichever came first.
+
+Deliberately not built: retries, a resumable queue, and any form of scheduled or
+background running. A queue nobody is watching is how a tool ends up sending traffic
+after everyone has gone home.
 
 **M13.4 — Reflected-input verification** · PLANNED — a marker goes in, and the
 *context* it comes back in decides what it means: HTML text, an attribute, JavaScript,

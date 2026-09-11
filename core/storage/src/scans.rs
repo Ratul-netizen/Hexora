@@ -54,6 +54,17 @@ pub struct ScanRun {
     pub exchanges_read: u64,
     /// Exchanges deliberately not examined — out of scope, or past the limit.
     pub exchanges_skipped: u64,
+    /// How many requests the run put on somebody's system.
+    ///
+    /// Zero for a passive pass, and a real number for an active one: it is the
+    /// question a client asks afterwards, and an engagement report should not have to
+    /// guess at it.
+    pub requests_sent: u64,
+    /// Why the run ended before working through its queue, if it did.
+    ///
+    /// `None` means it finished. Anything else means the run is *unfinished*, and a
+    /// reader must not take its silence for a clean result.
+    pub stopped_because: Option<String>,
     /// The Hexora build that ran it.
     pub tool_version: String,
     /// What each detector did.
@@ -116,8 +127,9 @@ impl ScanStore {
         tx.execute(
             "INSERT INTO scan_runs (
                  id, selection, started_at, completed_at, status,
-                 exchanges_read, exchanges_skipped, tool_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 exchanges_read, exchanges_skipped, tool_version,
+                 requests_sent, stopped_because)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 run.id.to_string(),
                 run.selection,
@@ -127,6 +139,8 @@ impl ScanStore {
                 run.exchanges_read as i64,
                 run.exchanges_skipped as i64,
                 run.tool_version,
+                run.requests_sent as i64,
+                run.stopped_because,
             ],
         )?;
 
@@ -164,7 +178,8 @@ impl ScanStore {
         let decoded: Vec<Result<ScanRun>> = {
             let mut statement = conn.prepare(
                 "SELECT id, selection, started_at, completed_at, status,
-                        exchanges_read, exchanges_skipped, tool_version
+                        exchanges_read, exchanges_skipped, tool_version,
+                        requests_sent, stopped_because
                  FROM scan_runs ORDER BY started_at DESC, id DESC",
             )?;
             let rows = statement.query_map([], decode_run)?;
@@ -189,7 +204,8 @@ impl ScanStore {
         let row = conn
             .query_row(
                 "SELECT id, selection, started_at, completed_at, status,
-                        exchanges_read, exchanges_skipped, tool_version
+                        exchanges_read, exchanges_skipped, tool_version,
+                        requests_sent, stopped_because
                  FROM scan_runs WHERE id = ?1",
                 params![id.to_string()],
                 decode_run,
@@ -266,6 +282,8 @@ fn decode_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<ScanRun>> {
     let read: i64 = row.get(5)?;
     let skipped: i64 = row.get(6)?;
     let tool_version: String = row.get(7)?;
+    let requests_sent: i64 = row.get(8)?;
+    let stopped_because: Option<String> = row.get(9)?;
 
     Ok((|| {
         Ok(ScanRun {
@@ -282,6 +300,8 @@ fn decode_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<ScanRun>> {
             })?,
             exchanges_read: read as u64,
             exchanges_skipped: skipped as u64,
+            requests_sent: requests_sent as u64,
+            stopped_because,
             tool_version,
             detectors: Vec::new(),
         })
@@ -312,6 +332,8 @@ mod tests {
             status: RunStatus::Completed,
             exchanges_read: 184,
             exchanges_skipped: 3,
+            requests_sent: 0,
+            stopped_because: None,
             tool_version: "0.1.0".into(),
             detectors,
         }
