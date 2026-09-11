@@ -57,6 +57,14 @@ pub fn is_state_changing(method: &str) -> bool {
         .any(|safe| safe.eq_ignore_ascii_case(method))
 }
 
+/// How many of these are the anonymous principal, which has nothing to expire.
+fn anonymous_count(identities: &[hexora_types::identity::Identity]) -> usize {
+    identities
+        .iter()
+        .filter(|identity| identity.privilege == hexora_types::identity::PrivilegeLevel::Anonymous)
+        .count()
+}
+
 /// Why a hypothesis was not going to be tested.
 ///
 /// Reported rather than dropped. A suspicion that nothing can settle is a gap in the
@@ -170,12 +178,55 @@ impl Plan {
                 identities.push(anonymous);
             }
         }
+        // A credential that has already said when it stops working.
+        //
+        // A run against a real target replayed twenty requests as a declared identity
+        // and got twenty 401s. Every one was doomed before it left: the token had
+        // expired eighty-five minutes earlier and `exp` said so, unencrypted, in the
+        // project the whole time. Twenty requests at somebody's production API to learn
+        // something that was written down — and a run that then reported "tested 20"
+        // and established nothing, which reads like coverage.
+        //
+        // Only what the credential states about itself. An unexpired token can still be
+        // revoked or wrong, and nothing here claims otherwise; this refuses the one
+        // case that is knowable for free.
+        let now = chrono::Utc::now().timestamp();
+        let stale: Vec<String> = identities
+            .iter()
+            .filter(|identity| identity.credential_expired(now))
+            .map(|identity| {
+                let when = identity
+                    .lifetime()
+                    .map(|lifetime| lifetime.describe(now))
+                    .unwrap_or_else(|| "expired".into());
+                format!("{} ({when})", identity.label)
+            })
+            .collect();
+
         let identities = std::sync::Arc::new(identities);
 
         let mut work = Vec::new();
         let mut skipped = Vec::new();
 
         for hypothesis in hypotheses {
+            // Nothing is queued while the credentials it would use are known-dead. The
+            // check would send, be refused, and report that it established nothing —
+            // three things, none of them worth a request.
+            if !stale.is_empty() && identities.len() == stale.len() + anonymous_count(&identities) {
+                skipped.push(Skipped {
+                    claim: hypothesis.claim.clone(),
+                    detector: hypothesis.detector.clone(),
+                    why: format!(
+                        "every credential this project holds has expired by its own \
+                         reckoning — {} — so a replay would be refused and prove \
+                         nothing. Browse the application logged in, through the proxy, \
+                         then `hexora identity refresh`",
+                        stale.join(", ")
+                    ),
+                });
+                continue;
+            }
+
             let Some(check) = checks.iter().find(|check| check.handles(hypothesis)) else {
                 skipped.push(Skipped {
                     claim: hypothesis.claim.clone(),

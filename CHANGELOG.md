@@ -508,6 +508,65 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M15.3, reading what a credential says about itself
+
+Getting `authz.scheduled` to a verdict against a real application took four fixes. Each
+was found the same way: by running it, watching it fail, and asking why.
+
+**1. It sent twenty requests it knew were doomed.**
+
+A run replayed twenty requests as a declared identity and got twenty `401`s. Every one
+was dead before it left: the token had expired eighty-five minutes earlier, and `exp` —
+an unencrypted field in the middle of every JWT — had been sitting in the project the
+whole time. Twenty requests at somebody's production API to learn something written
+down, and a run that then reported "tested 20" and established nothing, which reads like
+coverage.
+
+`hexora_types::expiry` reads it. Nothing is queued while every credential the project
+holds has expired by its own reckoning, and `hexora identity list` says
+`expired 89 minute(s) ago` before anybody starts.
+
+It answers one question only: *has the stated lifetime ended?* An unexpired token can
+still be revoked or wrong; `None` means "nothing here says otherwise", never "this
+works".
+
+**2. Session adoption took the newest request, not the freshest credential.**
+
+`identity refresh` adopted a token that had expired four minutes earlier while a valid
+one — nineteen minutes of life left — sat two rows further down the history. Requests
+queued before a token refresh land after ones sent with the new token, so arrival order
+is not freshness order. Where a credential states an expiry, that now decides; where it
+does not, the newest request is still the best guess available and is used.
+
+**3. An anonymous request shadowed the authenticated one.**
+
+One exchange stands for each endpoint, and first-seen won. A cookie-only request to
+`/e-wallet/credits/api/v2/user_balance` therefore represented an endpoint whose
+authenticated traffic was two rows away, and every cross-identity experiment reported
+"there is nobody to say whose session it was" about it. An exchange carrying
+`Authorization` now wins the slot.
+
+**4. And the one underneath all of it: a rotating token never matches byte for byte.**
+
+Attribution compared credentials exactly — the right instinct, because guessing whose
+session something was is how a cross-identity test invents a finding. But an application
+issues a new JWT every half hour, so the identity's *current* token is never the token
+in a *past* request. Measured: a request carrying `user.id 6aa42fa1…` and a declared
+identity holding a token for `user.id 6aa42fa1…` did not match, because the two differed
+in their expiry. Every captured exchange read as belonging to nobody.
+
+The subject is the way through, and it is not a guess: a JWT is the application's own
+signed statement about who the caller is. Two tokens naming the same subject were issued
+to the same person, and the application said so when it served them. `sub` first, then
+`user.id`, then `user_id`. A token naming somebody else is still not attributed — there
+is a test for that, because "match on the subject" must not decay into "match because it
+is a JWT".
+
+**Measured across the four:** experiments ruled out on one host went from 21 to 57, and
+`authz.scheduled` reached twenty real verdicts against a live target for the first time.
+It found nothing, which for a mature programme is the expected answer and now a
+believable one.
+
 ### Added — the entities a programme permits, and nothing else
 
 Fixing the identifier analyzer created this. Once it stopped offering `boolean` and

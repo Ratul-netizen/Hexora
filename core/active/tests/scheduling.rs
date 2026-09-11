@@ -457,6 +457,176 @@ async fn an_identity_that_names_no_session_cookie_still_compares_the_whole_jar()
         .is_none());
 }
 
+/// A JWT for `user.id`, expiring at `exp`. Only the payload is ever read.
+fn jwt_for(user: &str, exp: i64) -> String {
+    fn b64(bytes: &[u8]) -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
+            let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+            for (i, idx) in [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63]
+                .iter()
+                .enumerate()
+            {
+                if i <= chunk.len() {
+                    out.push(A[*idx as usize] as char);
+                }
+            }
+        }
+        out
+    }
+    format!(
+        "{}.{}.c2ln",
+        b64(br#"{"alg":"HS256"}"#),
+        b64(format!(r#"{{"user":{{"id":"{user}"}},"exp":{exp}}}"#).as_bytes())
+    )
+}
+
+#[tokio::test]
+async fn a_rotating_token_is_still_attributed_to_the_person_it_names() {
+    // The blocker, measured against a real application. Tokens rotate every half hour,
+    // so the identity's current token is never the token in a captured request —
+    // byte-for-byte attribution failed on every single exchange, and cross-identity
+    // testing reported "there is nobody to say whose session it was" about traffic
+    // whose owner the token stated in plain text.
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+
+    let captured_with = jwt_for("user-1000", 1_000_000_000);
+    let held_now = jwt_for("user-1000", 4_000_000_000);
+    assert_ne!(captured_with, held_now, "two tokens, one person");
+
+    let mut request = HttpRequest::get(HttpService::new("api.example.com", 443, true), "/me");
+    request
+        .headers
+        .set("Authorization", format!("Bearer {captured_with}"));
+
+    let subject = Subject {
+        hypothesis: suspicion(source, "api.example.com"),
+        exchange: hexora_scan::passive::exchange_at(&project, source)
+            .unwrap()
+            .unwrap(),
+        draft: hexora_repeater::Draft::new(request),
+        target: hexora_types::ids::TargetId::new(),
+        identities: Arc::new(vec![hexora_types::identity::Identity::bearer(
+            "Me", &held_now,
+        )]),
+    };
+
+    assert_eq!(
+        subject.whose().map(|identity| identity.label.as_str()),
+        Some("Me"),
+        "a token naming the same person was not attributed to them"
+    );
+}
+
+#[tokio::test]
+async fn a_token_naming_somebody_else_is_not_attributed() {
+    // The guard. Matching on the subject must not become matching on "it is a JWT".
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+
+    let mut request = HttpRequest::get(HttpService::new("api.example.com", 443, true), "/me");
+    request.headers.set(
+        "Authorization",
+        format!("Bearer {}", jwt_for("somebody-else", 4_000_000_000)),
+    );
+
+    let subject = Subject {
+        hypothesis: suspicion(source, "api.example.com"),
+        exchange: hexora_scan::passive::exchange_at(&project, source)
+            .unwrap()
+            .unwrap(),
+        draft: hexora_repeater::Draft::new(request),
+        target: hexora_types::ids::TargetId::new(),
+        identities: Arc::new(vec![hexora_types::identity::Identity::bearer(
+            "Me",
+            jwt_for("user-1000", 4_000_000_000),
+        )]),
+    };
+
+    assert!(
+        subject.whose().is_none(),
+        "it attributed somebody else's session"
+    );
+}
+
+#[tokio::test]
+async fn an_expired_credential_queues_nothing_at_all() {
+    // A run against a real target replayed twenty requests as a declared identity and
+    // got twenty 401s. Every one was doomed before it left: the token had expired
+    // eighty-five minutes earlier and said so, unencrypted, in the project the whole
+    // time. Twenty requests at somebody's production API to learn something written
+    // down — and a run that reported "tested 20" and established nothing.
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+    let lab = Recorder::new(project.clone());
+
+    // A JWT whose payload says it expired in 2001. Nothing verifies it; `exp` is read.
+    let expired = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.c2lnbmF0dXJl";
+    project
+        .identities()
+        .put(&hexora_types::identity::Identity::bearer("Stale", expired))
+        .unwrap();
+
+    let plan = Plan::prepare(
+        &project,
+        &lab,
+        &chatty(1),
+        &[suspicion(source, "api.example.com")],
+        &Budget::default(),
+    )
+    .unwrap();
+
+    assert!(plan.work.is_empty(), "doomed requests were queued");
+    assert_eq!(plan.skipped.len(), 1);
+    assert!(
+        plan.skipped[0].why.contains("expired"),
+        "and it says why, in the credential's own terms: {:?}",
+        plan.skipped[0]
+    );
+    assert_eq!(lab.count(), 0);
+}
+
+#[tokio::test]
+async fn a_live_credential_alongside_an_expired_one_still_runs() {
+    // Refusing everything because one identity went stale would be its own failure:
+    // an engagement with three identities does not stop when one session lapses.
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+    let lab = Recorder::new(project.clone());
+
+    let expired = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.c2lnbmF0dXJl";
+    project
+        .identities()
+        .put(&hexora_types::identity::Identity::bearer("Stale", expired))
+        .unwrap();
+    // An opaque token says nothing about itself, so it is not assumed dead.
+    project
+        .identities()
+        .put(&hexora_types::identity::Identity::bearer(
+            "Live",
+            "an-opaque-session-value",
+        ))
+        .unwrap();
+
+    let plan = Plan::prepare(
+        &project,
+        &lab,
+        &chatty(1),
+        &[suspicion(source, "api.example.com")],
+        &Budget::default(),
+    )
+    .unwrap();
+
+    assert_eq!(plan.work.len(), 1, "the live identity still has work to do");
+}
+
 #[tokio::test]
 async fn hexora_never_probes_a_header_it_attached_itself() {
     // Found against a real bug bounty programme. The proxy attaches

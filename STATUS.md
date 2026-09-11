@@ -4,10 +4,10 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M15.2, plus every false positive the first real engagement
-  produced: `auth.enforcement` went 23 findings → 0, and the identifier analyzer
-  stopped offering `boolean` as an object identifier — and then had to be stopped
-  from targeting the real restaurants it correctly found
+- **Last updated:** M15.3, after an evening against a real bug bounty target.
+  `auth.enforcement` went 23 findings → 0, every one of them false; the identifier
+  analyzer stopped offering `boolean` as an object identifier, and then had to be
+  stopped from targeting the real restaurants it correctly found
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -53,6 +53,7 @@ milestone.
 | **M14.4** — The header on your own traffic | M14.2 covered every request *Hexora* sends; while hunting, a browser sends most of them, and a programme's rule is about your traffic rather than your scanner's. `hexora proxy --attach-headers`, on the M2.4 interceptor seam. Bounded three ways, each deliberate: **declared hosts only** (a tester's browser also visits their mail and their bank, and a researcher's name does not belong in those logs — an empty scope attaches to nothing), opt-in and announced before the first request, and **refused at startup** when it would be a no-op, because the failure it guards against is silent. History records what was actually sent. The repeater now applies the same rule, so there is one rule and no door that skips it |
 | **M15.1** — Keeping a session alive | A captured credential decays, and a stale one turns cross-identity testing — the best thing here — into "could not be established": three of five checks said exactly that on the first real run. `hexora identity refresh` adopts a newer session from traffic **a person generated**. Not a recorded login replayed, which would mean storing a password and would fail against the target's hCaptcha anyway; the human logs in through the proxy as they already do. **Only proxy traffic counts** — `auth.enforcement` sends credentials it broke deliberately, and adopting one would replace a working session with an invalid one while every later result read like a finding. The value is never printed: a host, a time and a byte count are enough to judge and nothing like enough to use |
 | **M15.2** — Which cookie says who you are | Attribution compared the whole `Cookie` header byte for byte, which works for a bearer token and fails for cookies — and cookies are most of the web. A real engagement's header was 1,535 bytes of which three values changed per request, so nothing ever matched and the best check here said "there is nobody to say whose session it was" everywhere. `--session-cookie` names the one that identifies you and compares it exactly. **Never loosely**: two identities from one browser share every cookie but the session, so a fuzzy match attributes a request to the wrong person and files an IDOR that does not exist. Failing to attribute is recoverable; attributing wrongly is a false report. And `hexora identity list` now says when a project holds **no authenticated traffic at all** — the thing nobody asked, that cost an evening |
+| **M15.3** — What a credential says about itself | Getting cross-identity testing to a verdict against a real application took four fixes, each found by running it. It **sent twenty requests it knew were doomed** — the token's own `exp` said it died eighty-five minutes earlier. Session adoption took the newest *request* rather than the freshest *credential*. A cookie-only exchange shadowed the authenticated one as an endpoint's representative. And underneath all of it: **a rotating token never matches byte for byte**, so every captured exchange read as belonging to nobody — attribution now compares the JWT's subject, which is the application's own signed statement about whose request it was, while a token naming somebody else is still refused. Experiments ruled out went from 21 to 57 |
 
 ## Next
 

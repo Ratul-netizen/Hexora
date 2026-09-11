@@ -40,6 +40,7 @@ pub mod candidate;
 pub mod credential;
 pub mod echo;
 pub mod error;
+pub mod expiry;
 pub mod finding;
 pub mod http;
 pub mod identity;

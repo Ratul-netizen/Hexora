@@ -193,6 +193,32 @@ impl Identity {
         }
     }
 
+    /// What this identity's credential says about its own lifetime.
+    ///
+    /// `None` when nothing says anything: an opaque session id, a cookie, a JWT with no
+    /// `exp`. Never a guess — see [`crate::expiry`].
+    pub fn lifetime(&self) -> Option<crate::expiry::Lifetime> {
+        match &self.credential {
+            Credential::Bearer { token } => crate::expiry::of_jwt(token.expose()),
+            // A cookie jar can carry a JWT, and often does. Only a value that reads as
+            // one is examined; the rest of the jar is not guessed at.
+            Credential::Cookie { value } => value
+                .expose()
+                .split(';')
+                .filter_map(|pair| pair.split_once('='))
+                .find_map(|(_, v)| crate::expiry::of_jwt(v.trim())),
+            _ => None,
+        }
+    }
+
+    /// Whether the credential's own stated lifetime has already ended.
+    ///
+    /// False when the credential says nothing, which is not the same as "it works".
+    pub fn credential_expired(&self, now: i64) -> bool {
+        self.lifetime()
+            .is_some_and(|lifetime| lifetime.expired_at(now))
+    }
+
     /// Whether a response reaching `self` while containing data owned by `other`
     /// would constitute a privilege violation.
     ///

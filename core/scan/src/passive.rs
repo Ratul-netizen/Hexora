@@ -274,9 +274,29 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
                     .next()
                     .unwrap_or(&exchange.path)
                     .to_string();
-                endpoints
-                    .entry((exchange.method.clone(), endpoint))
-                    .or_insert_with(|| exchange.clone());
+                // One exchange stands for the endpoint, and **an authenticated one
+                // beats an anonymous one**.
+                //
+                // First-seen used to win, which against a real application meant a
+                // cookie-only request shadowed the one carrying the session — same
+                // method, same path, different credentials — and every cross-identity
+                // experiment then reported "there is nobody to say whose session it
+                // was" about an endpoint whose authenticated traffic was sitting in the
+                // project two rows away.
+                //
+                // Presence of the header, not its value: what is held here is the
+                // redacted view, and the value is nobody's business at this point.
+                let key = (exchange.method.clone(), endpoint);
+                match endpoints.entry(key) {
+                    std::collections::btree_map::Entry::Vacant(slot) => {
+                        slot.insert(exchange.clone());
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut held) => {
+                        if carries_a_session(&exchange) && !carries_a_session(held.get()) {
+                            held.insert(exchange.clone());
+                        }
+                    }
+                }
             }
 
             for check in &checks {
@@ -410,6 +430,15 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
         observations,
         hypotheses,
     })
+}
+
+/// Whether this request was sent with something that authenticates it.
+///
+/// By header name. The scanner holds a redacted view, so the value is not available and
+/// is not wanted: the question is which of two exchanges for one endpoint is the
+/// authenticated one, and a name answers that.
+fn carries_a_session(exchange: &Exchange) -> bool {
+    exchange.request_headers.get("authorization").is_some()
 }
 
 /// Turns a grouped observation into a finding.

@@ -130,8 +130,16 @@ pub fn slot_of(credential: &Credential) -> Option<String> {
 
 /// Looks through recent traffic for a newer credential in this identity's slot.
 ///
-/// Newest first, and it stops at the first eligible request rather than reading the
-/// whole history: a session is renewed by the most recent login, not by the best one.
+/// **The one that lasts longest, not the one that arrived last.** This used to stop at
+/// the first eligible request, on the reasoning that the newest request carries the
+/// newest session. Against a real application it does not: requests queued before a
+/// token refresh land after ones sent with the new token, and the adopted credential
+/// had expired four minutes earlier while a valid one — nineteen minutes of life left —
+/// sat two rows further down.
+///
+/// A JWT states when it stops working, so where it does, that decides. Where it does
+/// not — an opaque session id, a cookie — the newest request is still the best guess
+/// available, and it is used.
 ///
 /// Eligible means all of:
 ///
@@ -158,6 +166,11 @@ pub fn find_renewal(
 
     let mut cursor = None;
     let mut read = 0usize;
+    // Best so far, and what makes it best: a stated expiry beats no expiry, a later
+    // expiry beats an earlier one, and among equals the first seen wins because history
+    // is newest first.
+    let mut best: Option<(Option<i64>, Renewal)> = None;
+
     loop {
         let page = traffic.history(
             cursor.as_ref(),
@@ -167,7 +180,7 @@ pub fn find_renewal(
 
         for row in page.items {
             if read >= limit {
-                return Ok(None);
+                return Ok(best.map(|(_, renewal)| renewal));
             }
             read += 1;
 
@@ -205,19 +218,31 @@ pub fn find_renewal(
                 continue;
             }
 
-            return Ok(Some(Renewal {
+            let expires = crate::expiry_of(&value);
+            let candidate = Renewal {
                 source: row.id,
                 host: service.host.clone(),
                 sent_at: row.sent_at.clone(),
                 length: value.len(),
                 slot: slot.clone(),
                 value,
-            }));
+            };
+
+            best = match best {
+                None => Some((expires, candidate)),
+                Some((held, kept)) => match (held, expires) {
+                    // A credential that says when it dies beats one that says nothing,
+                    // and a later death beats an earlier one.
+                    (None, Some(_)) => Some((expires, candidate)),
+                    (Some(a), Some(b)) if b > a => Some((expires, candidate)),
+                    _ => Some((held, kept)),
+                },
+            };
         }
 
         match next {
             Some(next) => cursor = Some(next),
-            None => return Ok(None),
+            None => return Ok(best.map(|(_, renewal)| renewal)),
         }
     }
 }

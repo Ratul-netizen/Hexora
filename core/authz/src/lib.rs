@@ -85,6 +85,23 @@ pub mod analysis;
 pub mod compare;
 pub mod construct;
 pub mod session;
+
+/// When a credential value says it stops working, if it says.
+///
+/// A cookie jar can carry a JWT among its values, so each pair is examined; anything
+/// else is read as a bearer token. `None` means nothing stated a lifetime, never that
+/// the credential works.
+fn expiry_of(value: &str) -> Option<i64> {
+    if let Some(lifetime) = hexora_types::expiry::of_jwt(value) {
+        return Some(lifetime.expires_at);
+    }
+    value
+        .split(';')
+        .filter_map(|pair| pair.split_once('='))
+        .filter_map(|(_, v)| hexora_types::expiry::of_jwt(v.trim()))
+        .map(|lifetime| lifetime.expires_at)
+        .max()
+}
 pub mod suggest;
 
 use std::sync::Arc;

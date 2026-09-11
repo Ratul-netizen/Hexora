@@ -34,6 +34,37 @@ fn identity(cookie: &str) -> Identity {
     }
 }
 
+/// Records one exchange carrying an `Authorization` bearer token.
+fn capture_bearer(traffic: &TrafficStore, host: &str, origin: &'static str, token: &str) {
+    let mut request = HttpRequest::get(HttpService::new(host, 443, true), "/me");
+    request
+        .headers
+        .set("Authorization", format!("Bearer {token}"));
+
+    traffic
+        .record(&CapturedExchange {
+            request,
+            raw_request: None,
+            response: HttpResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                version: HttpVersion::Http11,
+                headers: Headers::new(),
+                body: bytes::Bytes::from_static(b"{}"),
+                truncated: false,
+            },
+            encoded_body: None,
+            content_encoding: None,
+            origin,
+            identity: None,
+            parent: None,
+            quirks: Vec::new(),
+            tls: None,
+            duration_ms: 10,
+        })
+        .unwrap();
+}
+
 /// Records one exchange carrying a `Cookie`, attributed to `origin`.
 fn capture(traffic: &TrafficStore, host: &str, origin: &'static str, cookie: &str) {
     let mut request = HttpRequest::get(HttpService::new(host, 443, true), "/me");
@@ -162,6 +193,97 @@ fn an_anonymous_identity_has_no_session_to_renew() {
             .is_none(),
         "the anonymous principal is anonymous on purpose"
     );
+}
+
+/// A JWT that expires at `exp`. Nothing verifies it; only the payload is read.
+fn jwt(exp: i64) -> String {
+    fn b64(bytes: &[u8]) -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
+            let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+            for (i, idx) in [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63]
+                .iter()
+                .enumerate()
+            {
+                if i <= chunk.len() {
+                    out.push(A[*idx as usize] as char);
+                }
+            }
+        }
+        out
+    }
+    format!(
+        "{}.{}.c2ln",
+        b64(br#"{"alg":"HS256"}"#),
+        b64(format!(r#"{{"exp":{exp}}}"#).as_bytes())
+    )
+}
+
+#[test]
+fn the_credential_that_lasts_longest_wins_not_the_one_that_arrived_last() {
+    // Found by using it against a real application. `identity refresh` adopted a token
+    // that had expired four minutes earlier while a valid one — nineteen minutes of
+    // life left — sat two rows further down the history. Requests queued before a token
+    // refresh land after ones sent with the new token, so arrival order is not
+    // freshness order.
+    let project = Project::in_memory().unwrap();
+    let traffic = store(&project);
+
+    let live = jwt(4_000_000_000);
+    let stale = jwt(1_000_000_000);
+
+    // Recorded newest last, so the stale one is what "newest request" would pick.
+    capture_bearer(&traffic, "api.example.com", "proxy", &live);
+    capture_bearer(&traffic, "api.example.com", "proxy", &stale);
+
+    let bearer = Identity {
+        credential: Credential::Bearer {
+            token: "old".to_string().into(),
+        },
+        ..identity("unused")
+    };
+    let found = find_renewal(&traffic, &scope(), &bearer, 100, None)
+        .unwrap()
+        .expect("something to adopt");
+
+    match found.credential(&bearer.credential) {
+        Credential::Bearer { token } => assert_eq!(
+            token.expose(),
+            &live,
+            "it adopted a credential that had already expired"
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_credential_that_states_nothing_still_falls_back_to_the_newest() {
+    // An opaque session id knows nothing about itself, and the newest request remains
+    // the best guess available.
+    let project = Project::in_memory().unwrap();
+    let traffic = store(&project);
+    capture_bearer(&traffic, "api.example.com", "proxy", "opaque-older-value");
+    capture_bearer(&traffic, "api.example.com", "proxy", "opaque-newest-value");
+
+    let bearer = Identity {
+        credential: Credential::Bearer {
+            token: "old".to_string().into(),
+        },
+        ..identity("unused")
+    };
+    let found = find_renewal(&traffic, &scope(), &bearer, 100, None)
+        .unwrap()
+        .unwrap();
+    match found.credential(&bearer.credential) {
+        Credential::Bearer { token } => assert_eq!(token.expose(), "opaque-newest-value"),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

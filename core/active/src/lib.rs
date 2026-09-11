@@ -191,6 +191,27 @@ impl Subject {
                     });
             }
 
+            // A rotating token never matches byte for byte, and the failure is
+            // total: an application issues a new JWT every half hour, so the identity's
+            // *current* token is never the token in a *past* request, and every
+            // captured exchange reads as belonging to nobody. Measured against a real
+            // application — a request carrying `user.id 6aa42fa1…` and an identity
+            // holding a token for `user.id 6aa42fa1…` did not match, because the two
+            // differed in their expiry.
+            //
+            // So for a JWT the comparison is the subject: the application's own signed
+            // statement about whose request this is. Not a guess, and not a similarity
+            // — two tokens naming the same subject were issued to the same person, and
+            // the application said so when it served them.
+            if let Some(who) = subject_of(&identity.credential) {
+                if let Some(sent_subject) = sent
+                    .get("authorization")
+                    .and_then(|header| hexora_types::expiry::subject_of(&header.value_lossy()))
+                {
+                    return sent_subject == who;
+                }
+            }
+
             let mut theirs = sent.clone();
             identity.credential.apply(&mut theirs);
             identity.credential.header_names().iter().all(|name| {
@@ -207,6 +228,20 @@ impl Subject {
     /// The queue key: everything with the same host shares one sequential queue.
     pub fn host(&self) -> &str {
         &self.exchange.host
+    }
+}
+
+/// Who this identity's credential says it is, when the credential says.
+///
+/// Only for a bearer JWT. A cookie jar is handled by the named-session-cookie rule
+/// above, and an opaque token asserts nothing — inventing a subject for one would put
+/// a guess exactly where this subsystem refuses to have one.
+fn subject_of(credential: &hexora_types::identity::Credential) -> Option<String> {
+    match credential {
+        hexora_types::identity::Credential::Bearer { token } => {
+            hexora_types::expiry::subject_of(token.expose())
+        }
+        _ => None,
     }
 }
 

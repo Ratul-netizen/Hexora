@@ -156,6 +156,29 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
         );
     }
 
+    // What a credential says about its own lifetime, before somebody spends a run
+    // finding out. A token that expired an hour ago will answer 401 to everything, and
+    // a run that sends twenty requests to learn that charges the target for it.
+    let now = chrono::Utc::now().timestamp();
+    let expired: Vec<&str> = identities
+        .iter()
+        .filter(|identity| identity.credential_expired(now))
+        .map(|identity| identity.label.as_str())
+        .collect();
+
+    for identity in &identities {
+        if let Some(lifetime) = identity.lifetime() {
+            println!();
+            println!("{}: {}", identity.label, lifetime.describe(now));
+        }
+    }
+
+    if !expired.is_empty() {
+        println!();
+        println!("Refresh before running anything: hexora identity refresh <project> <who>");
+        println!("(log in through the proxy first — an expired token cannot renew itself)");
+    }
+
     println!();
     println!("{}", coverage.describe());
     Ok(())
