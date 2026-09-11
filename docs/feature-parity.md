@@ -102,6 +102,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Scanner declines to name a vulnerability class it did not establish | ❌ | ❌ | **IMPLEMENTED M13.4** | The finding says what the bytes did and what it would take to know more. It does not name a vulnerability class |
 | Open redirect resolved rather than substring-matched | ⚠️ | ⚠️ | **IMPLEMENTED M13.5** | Protocol-relative, backslash and userinfo forms are resolved the way a browser resolves them; a value merely carried in the header is refuted with the reason |
 | Redirect destinations are never followed | ❓ | ❓ | **IMPLEMENTED M13.5** | Invariant 16. The header is read; no request is made to a host the target named |
+| Detects a session that is read but not verified | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | A JWT with one signature character changed, header and payload byte-identical. A cross-identity matrix cannot see this: every identity in one holds a valid token |
+| Scanner refuses to replay state-changing requests | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | Invariant 18, enforced by the scheduler rather than by each check |
 
 ## 5. Extensibility
 

@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M13.5 — where a redirect would actually send somebody
+## Status: M13.6 — is a session required here, and is it checked?
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -94,6 +94,7 @@ work.
 | Active scheduler: one queue per host, a request ceiling, a plan you see before anything is sent (`hexora scan active`) | **IMPLEMENTED** |
 | Reflected-input verification: which characters survived, and whether they landed in markup, script or data | **IMPLEMENTED** |
 | Redirect verification: the `Location` header resolved the way a browser resolves it, and never followed | **IMPLEMENTED** |
+| Authentication enforcement: whether an endpoint needs a session, and whether it verifies the one it is given | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings, the report and snapshots | **IMPLEMENTED** |

@@ -508,6 +508,69 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.6, authentication enforcement
+
+Two failures a cross-identity matrix cannot see. Every identity in a matrix holds a
+*valid* credential, so an endpoint that accepts any token at all looks exactly like one
+that checks properly:
+
+```text
+replayed as captured       →  200   the baseline: this session still works
+sent with no credential    →  200   the endpoint needs no session
+sent with a broken one     →  200   it has a session and does not check it
+```
+
+**The third is the sharp one.** The probe is the captured token with one character of
+its **JWT signature** changed — header and payload byte-identical — so an application
+that accepts it is not verifying signatures. That is a different and more useful
+sentence than "a modified token was accepted", which could equally mean the token was
+never parsed. The broken value also stays inside the alphabet it started in, so a
+rejection rejects the *value* rather than the shape.
+
+**The baseline is replayed, never assumed.** Without it, an expired session makes every
+probe come back 401 and the run would report *authentication is enforced* having
+established nothing — M12.8's lesson, made one endpoint at a time. A baseline that does
+not succeed ends the experiment as `Inconclusive`.
+
+**Three outcomes, not two.** Same status with *different* content is its own answer and
+reaches a report as a lead rather than a claim, because that is what a sign-in page
+answered 200 looks like — and also what a partly populated view of the real resource
+looks like. M12.10's structural comparison names the fields so a reader can tell which,
+and its normalization policy is what stops a timestamp turning acceptance into a lead.
+
+**A credential Hexora breaks is still a credential** — new invariant 17. `Credential`
+and `Tampered` have no `Display` and a redacting `Debug`; the bytes leave through one
+named accessor; evidence notes say what was done rather than what was sent. Verified
+live: neither the real signature nor the one-character-different one appears in the
+Markdown report, the HTML report or the scan JSON.
+
+**Scope.** This milestone's roadmap line named two things. What shipped is the
+anonymous and broken-credential half — the part nothing else in Hexora could do. The
+multi-identity differential is M12.1, which does it on demand today, and scheduling it
+is M13.7. Recorded in STATUS.md so nobody reads `auth.enforcement` as covering
+cross-identity access.
+
+Verified live against a demo with four behaviours: `/public` High/Firm ("the same
+document both times"), `/unsigned` High/Firm ("it reads a session and does not check
+it"), `/login` Medium/Tentative with the differing fields named, and `/strict` ruled
+out — "a session is required and the one supplied is checked".
+
+### Fixed — the scanner was replaying requests that change data
+
+`('scanner', 'POST', 2)` in the `requests` table after a live run. The reflection check
+queued `POST /transfer` because it has headers worth probing, and the scheduler sent it
+twice. `auth.enforcement` filtered methods itself; nothing else did.
+
+Now `Plan::prepare` refuses anything but `GET`, `HEAD` and `OPTIONS` for every check,
+and reports it as skipped with the reason rather than dropping it — the same argument
+as the request ceiling being enforced by the `Lab` a check is handed rather than by
+each author's memory. A method nobody recognises is treated as unsafe. New invariant
+18, with a scheduler-level regression test.
+
+This is a *scheduler* rule, not a tool rule: `hexora authz` will still replay a
+`DELETE` if a tester asks, after telling them what it is about to do. A person deciding
+is different from a queue deciding for them.
+
 ### Added — M13.5, redirect verification
 
 Can a caller choose where a redirect sends somebody? Two things make that question

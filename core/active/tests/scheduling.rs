@@ -183,8 +183,14 @@ impl Lab for Recorder {
 
 /// Captures one exchange that looks like the CORS hypothesis's source.
 fn capture(project: &Project, host: &str) -> RequestId {
+    captured_with(project, host, "GET")
+}
+
+/// The same, with a method of your choosing.
+fn captured_with(project: &Project, host: &str, method: &str) -> RequestId {
     let service = HttpService::new(host, 443, true);
     let mut request = HttpRequest::get(service, "/api/me");
+    request.method = method.to_string();
     request.headers.set("Origin", "https://app.example.com");
     let mut response = Headers::new();
     response.set("Access-Control-Allow-Origin", "https://app.example.com");
@@ -352,6 +358,64 @@ async fn a_hypothesis_whose_traffic_is_gone_is_not_guessed_at() {
 
     assert!(plan.work.is_empty());
     assert!(plan.skipped[0].why.contains("no longer holds"));
+}
+
+#[tokio::test]
+async fn a_request_that_might_change_data_is_never_queued_by_any_check() {
+    // Enforced by the scheduler rather than by each check, for the same reason the
+    // request ceiling is enforced by the lab a check is handed: a rule every author
+    // has to remember separately holds until the first author who forgets. One did —
+    // the reflection check queued `POST /transfer` because it has headers worth
+    // probing — and a scheduler working through an engagement's traffic meets a lot
+    // of those.
+    let project = Arc::new(Project::in_memory().unwrap());
+    let lab = Recorder::new(project.clone());
+
+    for method in ["POST", "PUT", "PATCH", "DELETE", "LOCK", "anything-else"] {
+        let source = captured_with(&project, "api.example.com", method);
+        let plan = Plan::prepare(
+            &project,
+            &lab,
+            &chatty(1),
+            &[suspicion(source, "api.example.com")],
+            &Budget::default(),
+        )
+        .unwrap();
+
+        assert!(
+            plan.work.is_empty(),
+            "{method} was queued for replay: {:#?}",
+            plan.work
+        );
+        assert_eq!(plan.skipped.len(), 1, "{method}");
+        assert!(
+            plan.skipped[0].why.contains("may change data"),
+            "{method}: {}",
+            plan.skipped[0].why
+        );
+    }
+
+    // And nothing was sent while establishing that.
+    assert_eq!(lab.count(), 0);
+}
+
+#[tokio::test]
+async fn the_safe_methods_are_still_queued() {
+    let project = Arc::new(Project::in_memory().unwrap());
+    let lab = Recorder::new(project.clone());
+
+    for method in ["GET", "HEAD", "OPTIONS", "get"] {
+        let source = captured_with(&project, "api.example.com", method);
+        let plan = Plan::prepare(
+            &project,
+            &lab,
+            &chatty(1),
+            &[suspicion(source, "api.example.com")],
+            &Budget::default(),
+        )
+        .unwrap();
+        assert_eq!(plan.work.len(), 1, "{method} was refused");
+    }
 }
 
 #[tokio::test]

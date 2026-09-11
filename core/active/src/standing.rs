@@ -96,7 +96,8 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
         // rather than discovered, for the reason the registry gives.
         let raised_here = crate::checks::echo::suspect(exchange)
             .into_iter()
-            .chain(crate::checks::redirect::suspect(exchange));
+            .chain(crate::checks::redirect::suspect(exchange))
+            .chain(crate::checks::auth::suspect(exchange));
 
         for hypothesis in raised_here {
             let name = hypothesis

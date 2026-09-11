@@ -5,6 +5,7 @@
 //! scheduler with nothing to schedule proves nothing; this one closes a loop that was
 //! left open on purpose in M13.2.
 
+pub mod auth;
 pub mod echo;
 pub mod redirect;
 pub mod reflection;

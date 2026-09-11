@@ -78,7 +78,9 @@ pub mod schedule;
 pub mod standing;
 
 pub use budget::{Budget, MAX_HOSTS_AT_ONCE, MAX_REQUESTS};
-pub use schedule::{run, run_into, Outcome, Plan, Skipped, StoppedBecause};
+pub use schedule::{
+    is_state_changing, run, run_into, Outcome, Plan, Skipped, StoppedBecause, REPLAYABLE_METHODS,
+};
 pub use standing::{standing, Standing};
 
 /// Something that settles a hypothesis by running an experiment.
@@ -190,6 +192,7 @@ impl Cancel {
 /// and that is the honest cost of not having a plugin mechanism.
 pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
     vec![
+        Box::new(checks::auth::AuthEnforcement),
         Box::new(checks::reflection::OriginReflection),
         Box::new(checks::echo::InputReflection),
         Box::new(checks::redirect::RedirectDestination),

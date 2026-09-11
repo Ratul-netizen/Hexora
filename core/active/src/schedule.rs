@@ -39,6 +39,23 @@ use hexora_verify::{Judged, Lab};
 
 use crate::{ActiveCheck, Budget, Cancel, Subject};
 
+/// Methods an automated run may repeat.
+///
+/// RFC 9110's safe methods. `OPTIONS` is included and `TRACE` is not: the first asks
+/// what an endpoint supports, and the second is echoed back by proxies in ways worth
+/// a person's attention rather than a queue's.
+pub const REPLAYABLE_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS"];
+
+/// Whether repeating this method might change something.
+///
+/// Anything not known to be safe. A method nobody recognises is treated as unsafe,
+/// which is the direction to be wrong in.
+pub fn is_state_changing(method: &str) -> bool {
+    !REPLAYABLE_METHODS
+        .iter()
+        .any(|safe| safe.eq_ignore_ascii_case(method))
+}
+
 /// Why a hypothesis was not going to be tested.
 ///
 /// Reported rather than dropped. A suspicion that nothing can settle is a gap in the
@@ -159,6 +176,30 @@ impl Plan {
                     continue;
                 }
             };
+
+            // Refused here rather than left to each check, for the same reason the
+            // request ceiling is enforced by the lab a check is handed: a rule every
+            // author has to remember separately holds until the first author who
+            // forgets. One did — the reflection check happily queued `POST /transfer`
+            // because it has headers worth probing, and a scheduler working through an
+            // engagement's traffic meets a lot of those.
+            //
+            // Safe by RFC 9110's definition, which is a statement about intent rather
+            // than a guarantee. It is the best signal available without asking a
+            // person, and what it excludes is reported rather than dropped.
+            if is_state_changing(&draft.request.method) {
+                skipped.push(Skipped {
+                    claim: hypothesis.claim.clone(),
+                    detector: hypothesis.detector.clone(),
+                    why: format!(
+                        "{} may change data on the target, and an experiment would send \
+                         it again. Nothing in an automated run replays a request that is \
+                         not safe to repeat",
+                        draft.request.method
+                    ),
+                });
+                continue;
+            }
 
             // Asked here so an out-of-scope target is one line in a dry run rather
             // than a failure per experiment. Asked *again* before every send, because

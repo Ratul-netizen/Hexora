@@ -40,6 +40,7 @@ influenced part of the process.
 | `core/types::inject` | Where a value sits in a request and how to put a different one there — shared by constructed authorization tests and by input probing | **Implemented** (M13.4) |
 | `core/types::echo` | Where a value came back and which of its characters survived, under the response's declared content type | **Implemented** (M13.4) |
 | `core/types::redirect` | Where a `Location` header would send a browser, resolved rather than matched — and never followed | **Implemented** (M13.5) |
+| `core/types::credential` | Breaking a session on purpose without ever writing one down: no `Display`, a redacting `Debug`, one named accessor | **Implemented** (M13.6) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |

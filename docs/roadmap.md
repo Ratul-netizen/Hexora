@@ -637,10 +637,44 @@ somebody buying the domain named in the report.
 Deliberately not built: header-driven redirects, which have a different shape and want
 their own check; and any attempt to follow a destination to see what is there.
 
-**M13.6 — Authentication and session verification** · PLANNED — where Hexora's identity
-model pays off: the same request as User A, User B and Anonymous, compared
-differentially. This is potentially the strongest area of the scanner, because it is
-built on machinery that already produces evidence rather than scores.
+**M13.6 — Authentication enforcement** · DONE
+
+Two failures a cross-identity matrix cannot see, because every identity in one holds a
+*valid* credential — an endpoint that accepts any token looks exactly like one that
+checks properly.
+
+```text
+replayed as captured       →  200   the baseline: this session still works
+sent with no credential    →  200   the endpoint needs no session
+sent with a broken one     →  200   it has a session and does not check it
+```
+
+The third is the sharp one. The probe is the captured token with one character of its
+**JWT signature** changed and its header and payload byte-identical, so an application
+that accepts it is not verifying signatures — a different sentence from "authentication
+is missing".
+
+The baseline is replayed rather than read back. Without it an expired session makes
+every probe come back 401 and the run would report *authentication is enforced* having
+established nothing: M12.8's lesson, applied one endpoint at a time.
+
+Three outcomes, not two. Same status with *different* content is its own answer and
+reaches a report as a lead, because that is what a sign-in page answered 200 looks
+like — and also what a partly populated view of the real resource looks like. The
+structural comparison names the fields so a reader can tell which.
+
+Credentials are broken without ever being written down (invariant 17), and nothing
+that might change data is replayed (invariant 18) — the second enforced by the
+scheduler after the reflection check was caught queueing `POST /transfer`.
+
+**Scope.** This milestone's roadmap line named two things. What shipped is the
+anonymous and broken-credential half. The multi-identity differential — the same
+request as User A, User B and Anonymous — is M12.1, which does it on demand today, and
+scheduling it across an engagement is M13.7. Recorded so nobody reads
+`auth.enforcement` as covering cross-identity access.
+
+Deliberately not built: session fixation, rotation and expiry, which need a login flow
+rather than one captured request.
 
 **M13.7 — IDOR/BOLA automation** · PLANNED — M12.5 becomes a scanner primitive:
 identifier → ownership → cross-identity substitution → control → constructed request →

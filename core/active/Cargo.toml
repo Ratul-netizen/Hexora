@@ -14,6 +14,7 @@ hexora-verify.workspace = true
 hexora-repeater.workspace = true
 hexora-scan.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 chrono.workspace = true
 futures.workspace = true
 tokio.workspace = true

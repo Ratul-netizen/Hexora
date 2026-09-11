@@ -764,6 +764,77 @@ somebody else's machine.
 
 ---
 
+## 17. A credential Hexora breaks is still a credential
+
+Testing whether an application verifies a session means sending it one that is wrong —
+and the only probe that proves anything is *derived from a credential the server
+issued*. A random string is rejected for being unparseable and establishes nothing; the
+same token with one character of its signature changed is well-formed, belongs to a
+real session, and is invalid.
+
+Which means the probe is, for disclosure purposes, **the credential**. One character is
+not a meaningful difference when the risk is that somebody reads it out of a report.
+
+So:
+
+```text
+wrong:  sent `Bearer eyJhbGciOi...Qs4w` and it was accepted
+right:  sent the captured token with one character of its JWT signature changed
+```
+
+`Credential` and `Tampered` in `core/types/src/credential.rs` have **no `Display`** and
+a `Debug` that prints `<redacted>` — `Debug` being how a value reaches a log or an
+error message by accident. The bytes leave through exactly one accessor,
+`Tampered::expose_value`, named so a reviewer can grep for every use; today there is
+one, and it writes the header onto a draft about to be sent. Evidence notes carry
+`Tampered::describe`, which names the header and what was done to it and nothing else.
+
+**The signature, and only the signature.** For a JWT the changed character is taken
+from the third part, leaving header and payload byte-identical. An application that
+accepts the result is not verifying the signature — a far more precise statement than
+"a modified token was accepted", which could equally mean the token was never parsed.
+The broken value also stays inside the alphabet it started in, so a rejection is a
+rejection of the *value* rather than of the shape.
+
+**Tests.** `core/types/src/credential.rs` —
+`neither_form_of_the_credential_can_be_printed_by_accident`,
+`describing_the_tampering_names_the_header_and_nothing_else`,
+`only_the_signature_of_a_jwt_is_changed`,
+`a_broken_value_stays_in_the_alphabet_it_started_in`,
+`the_session_cookie_is_broken_and_the_others_travel_unchanged`. Verified live against a
+demo: neither the real signature nor the one-character-different one appears in the
+Markdown report, the HTML report or the scan JSON.
+
+---
+
+## 18. An automated run never repeats a request that might change something
+
+A scheduler working through an engagement's traffic meets `POST /transfers` and
+`DELETE /accounts/42`. Sending those again — three times each, once per experiment —
+is not a test anybody consented to, and no amount of value from the result would make
+it acceptable to find out that way.
+
+`Plan::prepare` refuses anything but `GET`, `HEAD` and `OPTIONS`, and reports it as
+skipped with the reason rather than dropping it. **Enforced by the scheduler, not by
+each check** — the same argument as the request ceiling being enforced by the `Lab` a
+check is handed. A rule every author has to remember separately holds until the first
+author who forgets, and one did: the reflection check queued `POST /transfer` because
+it has headers worth probing, and the scanner sent it twice before this was caught by
+reading the `requests` table after a live run.
+
+A method nobody recognises is treated as unsafe. That is the direction to be wrong in.
+
+This is a *scheduler* rule and not a *tool* rule: `hexora authz` will replay a
+`DELETE` if a tester asks it to, after telling them what it is about to do. A person
+deciding to do something is different from a queue deciding for them.
+
+**Tests.** `core/active/tests/scheduling.rs` —
+`a_request_that_might_change_data_is_never_queued_by_any_check`,
+`the_safe_methods_are_still_queued`; `core/active/src/checks/auth.rs` —
+`nothing_that_changes_data_is_ever_queued`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the
