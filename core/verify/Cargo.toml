@@ -1,0 +1,19 @@
+[package]
+name = "hexora-verify"
+description = "Hexora's verification framework: a detector's suspicion and a finding's claim are different things, and only one of them can be stored"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-engine.workspace = true
+hexora-repeater.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hexora-types = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

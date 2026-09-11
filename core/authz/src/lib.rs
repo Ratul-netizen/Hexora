@@ -83,8 +83,10 @@ use hexora_engine::transport::HttpTransport;
 use hexora_repeater::{Repeater, SendAs};
 use hexora_storage::{IdentityStore, ObjectStore, TrafficStore};
 use hexora_types::error::Result;
+use hexora_types::finding::Hypothesis;
 use hexora_types::identity::{Identity, PrivilegeLevel};
-use hexora_types::ids::{IdentityId, RequestId};
+use hexora_types::ids::{IdentityId, RequestId, TargetId};
+use hexora_verify::Detector;
 
 use crate::compare::{contains_any, Fingerprint, SAME_RESOURCE};
 
@@ -189,8 +191,11 @@ pub struct Cell {
     /// document of exactly the owner's shape to every caller — the application is
     /// working, and only the identifiers inside say so.
     pub own_object_ids: Vec<String>,
-    /// Whether a second replay reproduced the same outcome.
-    pub reproduced: bool,
+    /// What verification established about this cell, once it has run.
+    ///
+    /// `None` means nothing re-examined it — which is not the same as "it did not
+    /// reproduce", and the difference is the whole reason this is not a `bool`.
+    pub verification: Option<hexora_types::verify::Verification>,
     /// Why the cell has no request, when it failed.
     pub error: Option<String>,
     /// Why a violation was demoted, when it was.
@@ -323,7 +328,7 @@ impl<T: HttpTransport> AuthzTester<T> {
     /// cell records [`Outcome::Failed`] with the reason and the rest continue. A
     /// matrix with a hole in it is still evidence; five cells thrown away because the
     /// sixth timed out is not.
-    pub async fn run(&self, plan: &Plan) -> Result<Matrix> {
+    pub async fn run(&self, plan: &Plan) -> Result<Run> {
         let draft = self.repeater.draft_from(plan.base)?;
         let url = draft.request.url();
         let method = draft.request.method.clone();
@@ -366,7 +371,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             verdict: Verdict::Expected,
             leaked_object_ids: Vec::new(),
             own_object_ids: Vec::new(),
-            reproduced: false,
+            verification: None,
             error: None,
             note: None,
         };
@@ -409,27 +414,92 @@ impl<T: HttpTransport> AuthzTester<T> {
             }
         }
 
-        let mut matrix = Matrix {
-            base: plan.base,
-            method,
-            url,
-            owner: owner_cell,
-            cells,
-            appears_public,
-        };
+        Ok(Run {
+            matrix: Matrix {
+                base: plan.base,
+                method,
+                url,
+                owner: owner_cell,
+                cells,
+                appears_public,
+            },
+            draft,
+            identities,
+            owner: plan.owner.clone(),
+            baseline: owner_fingerprint,
+            repeat: plan.verify,
+        })
+    }
 
-        if plan.verify {
-            self.reproduce(
-                &draft,
-                &identities,
-                &owner_fingerprint,
-                &plan.owner,
-                &mut matrix,
-            )
-            .await;
+    /// Runs the matrix, raises hypotheses from it, and verifies each one.
+    ///
+    /// The whole check, in the shape every check has. The matrix is the first
+    /// experiment; `--verify` makes the verifier run a second one. Nothing here
+    /// produces a `Finding` directly — it cannot, because
+    /// [`Verified::conclude`](hexora_types::verify::Verified::conclude) is the only
+    /// thing that does and it needs a verification.
+    pub async fn assess(&self, plan: &Plan, target: TargetId) -> Result<Assessment> {
+        let mut run = self.run(plan).await?;
+
+        let detector = crate::analysis::MatrixDetector;
+        let hypotheses = detector.examine(&run.matrix);
+
+        let work: Vec<(Hypothesis, crate::analysis::CellCase)> = hypotheses
+            .into_iter()
+            .filter_map(|hypothesis| {
+                let cell = run
+                    .matrix
+                    .cells
+                    .iter()
+                    .find(|cell| cell.request == Some(hypothesis.source_request))?
+                    .clone();
+                let identity = run
+                    .identities
+                    .iter()
+                    .find(|identity| identity.id == cell.identity)
+                    .cloned();
+                Some((hypothesis, crate::analysis::CellCase { cell, identity }))
+            })
+            .collect();
+
+        let verifier = crate::analysis::ReplayVerifier {
+            draft: &run.draft,
+            owner: &run.owner,
+            baseline: &run.baseline,
+            owner_request: run.matrix.owner.request,
+            repeat: run.repeat,
+        };
+        let lab = hexora_verify::RepeaterLab::new(&self.repeater);
+
+        let matrix_for_writeup = run.matrix.clone();
+        let judged = hexora_verify::verify_all(&verifier, &work, &lab, |hypothesis, _| {
+            let cell = matrix_for_writeup
+                .cells
+                .iter()
+                .find(|cell| cell.request == Some(hypothesis.source_request))
+                .expect("the hypothesis came from this matrix");
+            crate::analysis::matrix_writeup(&matrix_for_writeup, cell, target)
+        })
+        .await?;
+
+        // Written back so the matrix a tester reads says what verification found,
+        // rather than leaving the table and the findings list telling different
+        // stories about the same cell.
+        for outcome in &judged {
+            if let Some(cell) = run
+                .matrix
+                .cells
+                .iter_mut()
+                .find(|cell| cell.request == Some(outcome.hypothesis.source_request))
+            {
+                cell.verification = Some(outcome.verification.clone());
+            }
         }
 
-        Ok(matrix)
+        Ok(Assessment {
+            matrix: run.matrix,
+            judged,
+        })
     }
 
     /// Sends the draft as one identity and classifies what came back.
@@ -440,6 +510,31 @@ impl<T: HttpTransport> AuthzTester<T> {
         owner: &Identity,
         baseline: &Fingerprint,
     ) -> Cell {
+        replay_once(
+            &hexora_verify::RepeaterLab::new(&self.repeater),
+            draft,
+            identity,
+            owner,
+            baseline,
+        )
+        .await
+    }
+}
+
+/// Sends a draft as one identity through a lab and classifies what came back.
+///
+/// Free rather than a method, and taking a [`Lab`](hexora_verify::Lab) rather than the
+/// repeater, because the verifier needs exactly this and must not be handed a
+/// transport of its own. Both callers go through the same scope guard because there
+/// is only one way to send.
+pub(crate) async fn replay_once(
+    lab: &dyn hexora_verify::Lab,
+    draft: &hexora_repeater::Draft,
+    identity: &Identity,
+    owner: &Identity,
+    baseline: &Fingerprint,
+) -> Cell {
+    {
         let mut cell = Cell {
             identity: identity.id,
             label: identity.label.clone(),
@@ -451,12 +546,12 @@ impl<T: HttpTransport> AuthzTester<T> {
             verdict: Verdict::Inconclusive,
             leaked_object_ids: Vec::new(),
             own_object_ids: Vec::new(),
-            reproduced: false,
+            verification: None,
             error: None,
             note: None,
         };
 
-        let sent = match self.repeater.send_as(draft, SendAs::authz(identity)).await {
+        let sent = match lab.experiment(draft, Some(identity)).await {
             Ok(sent) => sent,
             Err(e) => {
                 cell.error = Some(e.to_string());
@@ -487,43 +582,59 @@ impl<T: HttpTransport> AuthzTester<T> {
         cell.verdict = verdict_for(&cell, identity, owner);
         cell
     }
+}
 
-    /// Replays every violation once more and records whether it happened again.
-    ///
-    /// Reproduction is what separates [`Confidence::Tentative`] from
-    /// [`Confidence::Confirmed`](hexora_types::Confidence::Confirmed): a one-off that
-    /// does not repeat was a cache, a race or a session that had not expired yet, and
-    /// a report that cannot tell those apart from a real bug wastes a developer's
-    /// afternoon.
-    async fn reproduce(
-        &self,
-        draft: &hexora_repeater::Draft,
-        identities: &[Identity],
-        baseline: &Fingerprint,
-        owner: &Identity,
-        matrix: &mut Matrix,
-    ) {
-        for index in 0..matrix.cells.len() {
-            if matrix.cells[index].verdict != Verdict::Violation {
-                continue;
-            }
-            let Some(identity) = identities
-                .iter()
-                .find(|i| i.id == matrix.cells[index].identity)
-            else {
-                continue;
-            };
+/// The checks this crate provides.
+///
+/// Listed rather than discovered: adding a check means adding it here, and that is
+/// the honest cost of not having a plugin mechanism.
+pub fn checks() -> [hexora_types::verify::DetectorInfo; 2] {
+    [
+        crate::analysis::CROSS_IDENTITY,
+        crate::analysis::CONSTRUCTED_OBJECT,
+    ]
+}
 
-            let again = self.replay(draft, identity, owner, baseline).await;
-            matrix.cells[index].reproduced =
-                again.outcome == matrix.cells[index].outcome && again.verdict == Verdict::Violation;
-            if !matrix.cells[index].reproduced {
-                matrix.cells[index].note = Some(format!(
-                    "did not reproduce on a second replay ({} the second time)",
-                    again.outcome.as_str()
-                ));
-            }
-        }
+/// A completed matrix, with what a verifier needs to run any of it again.
+///
+/// The context is held rather than rebuilt because re-deriving a draft and a baseline
+/// would mean sending the owner's request a second time just to have something to
+/// compare against — extra traffic on a client's system to recover state the run
+/// already had.
+#[derive(Debug)]
+pub struct Run {
+    /// What the run saw.
+    pub matrix: Matrix,
+    draft: hexora_repeater::Draft,
+    identities: Vec<Identity>,
+    owner: Identity,
+    baseline: Fingerprint,
+    repeat: bool,
+}
+
+/// A run, and what verification made of it.
+pub struct Assessment {
+    /// The matrix, with each verified cell carrying its verification.
+    pub matrix: Matrix,
+    /// Every hypothesis the detector raised and what became of it.
+    pub judged: Vec<hexora_verify::Judged>,
+}
+
+impl Assessment {
+    /// The findings, dropping every hypothesis verification did not support.
+    pub fn findings(&self) -> Vec<hexora_types::verify::Verified> {
+        self.judged
+            .iter()
+            .filter_map(|outcome| outcome.finding.clone())
+            .collect()
+    }
+
+    /// Hypotheses an experiment knocked down, for a tester who wants to see that the
+    /// check ran and produced nothing rather than assuming it did not run.
+    pub fn unsupported(&self) -> impl Iterator<Item = &hexora_verify::Judged> {
+        self.judged
+            .iter()
+            .filter(|outcome| outcome.finding.is_none())
     }
 }
 
@@ -738,7 +849,8 @@ mod tests {
                 vec![Identity::bearer("User B", "TOKEN_B")],
             ))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         let cell = &matrix.cells[0];
         assert_eq!(cell.outcome, Outcome::Allowed);
@@ -765,7 +877,8 @@ mod tests {
                 vec![Identity::bearer("User B", "TOKEN_B")],
             ))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         assert_eq!(matrix.cells[0].outcome, Outcome::Denied);
         assert_eq!(matrix.cells[0].verdict, Verdict::Expected);
@@ -819,7 +932,8 @@ mod tests {
                 vec![Identity::bearer("User B", "TOKEN_B")],
             ))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         assert_eq!(matrix.cells.len(), 2);
         assert_eq!(matrix.cells[1].privilege, PrivilegeLevel::Anonymous);
@@ -845,7 +959,8 @@ mod tests {
                 vec![Identity::bearer("User B", "TOKEN_B")],
             ))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         assert!(matrix.appears_public);
         assert_eq!(
@@ -888,7 +1003,8 @@ mod tests {
         let matrix = tester
             .run(&Plan::new(base, owner(), vec![peer]))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         let cell = &matrix.cells[0];
         assert_eq!(cell.own_object_ids, ["acct-2000"]);
@@ -928,7 +1044,8 @@ mod tests {
         let matrix = tester
             .run(&Plan::new(base, owner(), vec![peer]))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         assert_eq!(matrix.cells[0].leaked_object_ids, ["acct-1000"]);
         assert_eq!(matrix.cells[0].verdict, Verdict::Violation);
@@ -948,7 +1065,8 @@ mod tests {
         let matrix = tester
             .run(&Plan::new(base, owner(), vec![admin]))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         assert_eq!(matrix.cells[0].outcome, Outcome::Allowed);
         assert_eq!(matrix.cells[0].verdict, Verdict::Expected);
@@ -969,7 +1087,8 @@ mod tests {
         let matrix = tester
             .run(&Plan::new(base, owner(), vec![identity.clone()]))
             .await
-            .unwrap();
+            .unwrap()
+            .matrix;
 
         let stored = store.request(matrix.cells[0].request.unwrap()).unwrap();
         assert_eq!(stored.origin, "authz");
@@ -1025,8 +1144,19 @@ mod tests {
         plan.verify = true;
         plan.anonymous_control = false;
 
-        let matrix = tester.run(&plan).await.unwrap();
-        assert!(matrix.cells[0].reproduced);
+        // The second experiment is the verifier's, so this goes through `assess`.
+        let assessment = tester
+            .assess(&plan, hexora_types::ids::TargetId::new())
+            .await
+            .unwrap();
+        assert!(matches!(
+            assessment.matrix.cells[0].verification,
+            Some(hexora_types::verify::Verification::Reproduced { .. })
+        ));
+        assert_eq!(
+            assessment.findings()[0].finding().confidence,
+            hexora_types::Confidence::Confirmed
+        );
     }
 
     #[tokio::test]
@@ -1082,7 +1212,7 @@ mod tests {
             verdict: Verdict::Inconclusive,
             leaked_object_ids: Vec::new(),
             own_object_ids: Vec::new(),
-            reproduced: false,
+            verification: None,
             error: None,
             note: None,
         };
@@ -1103,7 +1233,7 @@ mod tests {
             verdict: Verdict::Inconclusive,
             leaked_object_ids: vec!["acct-1000".into()],
             own_object_ids: Vec::new(),
-            reproduced: false,
+            verification: None,
             error: None,
             note: None,
         };

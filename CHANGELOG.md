@@ -508,6 +508,80 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.1, the verification framework
+
+Everything after this is a scanner, and a scanner is only worth having if a detector's
+suspicion and a finding's claim are different things that cannot be confused. They are
+now different **types**, and the compiler enforces it.
+
+```text
+Detector  →  Hypothesis   ──✗──▶  FindingStore
+                 │
+             Verifier  (a controlled experiment, through a Lab)
+                 ▼
+            Verification  ──▶  Verified  ──✓──▶  FindingStore
+```
+
+**The rule is the signature.** `FindingStore::save` and `record` take a `Verified`,
+and the only way to get one is `Verified::conclude`, which requires a `Verification`.
+There is no `From<Hypothesis>`, no `into_finding`, no constructor that takes a bare
+`Finding`. A check that is merely suspicious does not get an error when it tries to
+record a claim — the call does not compile. Security invariant 6 moved from a runtime
+check into the type system; `Finding::validate` stays wired up inside `conclude` as
+the backstop for a verifier that returns support with nothing behind it.
+
+**Confidence is derived, never chosen.** `Verification::confidence` is a total
+function from what the experiment showed to what may be claimed:
+
+```text
+Reproduced                  the effect happened again        → Confirmed
+Supported { Distinctive }   hard to explain another way      → Firm
+Supported { Consistent }    consistent, other causes too     → Tentative
+Observed                    nothing to experiment on         → Reported (a lead)
+Refuted / Inconclusive      —                                → no finding at all
+```
+
+`Observed` is the rung a passive check climbs: a missing `Strict-Transport-Security`
+header is a fact, not a hypothesis, and there is no second send that would establish
+it more firmly. Its ceiling is `Reported`, which is not actionable — it reaches a
+report as a lead, never as a claimed vulnerability.
+
+**A verifier gets a `Lab`, not a transport.** One method — *send this request as this
+principal* — backed by the repeater, so scope enforcement, attribution and storage as
+evidence are the lab's business and a check cannot forget any of them. A detector's
+`examine` is synchronous and receives no lab at all, which puts the passive/active
+distinction in the signature instead of a comment.
+
+**M12.1 and M12.5 were rewritten onto it**, so the framework has a real user rather
+than a hypothetical one:
+
+- `MatrixDetector` raises a hypothesis per violating cell; `ConstructionDetector` does
+  the same for constructed attempts.
+- `ReplayVerifier` runs the second experiment — what `--verify` always did — through a
+  `Lab`, and returns a `Verification` rather than setting a bool.
+- `AuthzTester::assess` is run-detect-verify in one call. `Cell::reproduced: bool`
+  became `Cell::verification: Option<Verification>`, because "it did not reproduce"
+  and "nothing re-examined it" were the same missing tag in the matrix and are not the
+  same fact.
+- An out-of-scope or unrunnable second experiment is `Inconclusive`, not a failure and
+  not a quiet pass.
+
+**`hexora detectors`** lists what this build checks for, each check's version, and
+**whether it sends** — the difference between something safe to run against production
+at 3pm and something that is not. The registry is assembled from the crates the binary
+links rather than discovered; there is no plugin mechanism and the docs say so.
+
+### Changed
+
+- **A violation that does not reproduce is now capped at a lead.** It used to keep
+  whatever confidence the first result earned, with a note attached; a `Firm` claim
+  could therefore rest on two experiments that disagreed. Two experiments that
+  disagree cannot be "hard to explain any other way", so the claim comes out
+  `Tentative` and the note says it was seen once and not again. The information is
+  kept; the certainty is not.
+- `ScopeRule` now implements `Display`, and `Cell` carries a verification rather than
+  a bool. The desktop matrix shows which it was.
+
 ### Added — M12.8, engagement snapshots
 
 A consultant tests in March, the client fixes through April, the consultant comes back

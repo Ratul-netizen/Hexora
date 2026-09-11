@@ -385,6 +385,11 @@ mod tests {
             .unwrap()
     }
 
+    /// Wraps a finding the way a verification would. Tests only; see `findings.rs`.
+    fn verified(finding: Finding) -> hexora_types::verify::Verified {
+        hexora_types::verify::Verified::from_trusted_finding(finding)
+    }
+
     fn finding(target: TargetId, title: &str, severity: Severity) -> Finding {
         let now = chrono::Utc::now();
         Finding {
@@ -438,13 +443,19 @@ mod tests {
         let project = project();
         let target = target(&project);
         let mut original = finding(target, "IDOR in GET /accounts/{id}", Severity::High);
-        project.findings().record(&original).unwrap();
+        project
+            .findings()
+            .record(&verified(original.clone()))
+            .unwrap();
 
         let before = take(&project, "before the fix", "0.1.0");
 
         original.severity = Severity::Low;
         original.confidence = Confidence::Tentative;
-        project.findings().record(&original).unwrap();
+        project
+            .findings()
+            .record(&verified(original.clone()))
+            .unwrap();
 
         let reread = project.snapshots().get(before.id).unwrap();
         assert_eq!(reread.contents.findings[0].state.severity, Severity::High);
@@ -510,12 +521,12 @@ mod tests {
         let target = target(&project);
         project
             .findings()
-            .record(&finding(target, "One", Severity::Low))
+            .record(&verified(finding(target, "One", Severity::Low)))
             .unwrap();
         let first = take(&project, "day 1", "0.1.0");
         project
             .findings()
-            .record(&finding(target, "Two", Severity::High))
+            .record(&verified(finding(target, "Two", Severity::High)))
             .unwrap();
         let second = take(&project, "day 2", "0.1.0");
 
@@ -534,8 +545,8 @@ mod tests {
         let target = target(&project);
         let gone = finding(target, "IDOR in GET /accounts/{id}", Severity::High);
         let stays = finding(target, "IDOR in GET /invoices/{id}", Severity::Medium);
-        project.findings().record(&gone).unwrap();
-        project.findings().record(&stays).unwrap();
+        project.findings().record(&verified(gone.clone())).unwrap();
+        project.findings().record(&verified(stays.clone())).unwrap();
         let before = take(&project, "before the fix", "0.1.0");
 
         // The client fixed one endpoint. The matrix still runs, and still reports the
@@ -590,7 +601,11 @@ mod tests {
         for index in 0..(Limit::MAX + 5) {
             project
                 .findings()
-                .record(&finding(target, &format!("Claim {index}"), Severity::Low))
+                .record(&verified(finding(
+                    target,
+                    &format!("Claim {index}"),
+                    Severity::Low,
+                )))
                 .unwrap();
         }
         let contents = capture(&project).unwrap();

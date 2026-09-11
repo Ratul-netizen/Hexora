@@ -26,6 +26,7 @@ use hexora_types::finding::Finding;
 use hexora_types::http::HttpService;
 use hexora_types::ids::{FindingId, RequestId, TargetId};
 use hexora_types::scope::Scope;
+use hexora_types::verify::Verified;
 
 use crate::blob::BlobRef;
 use crate::error::Result;
@@ -124,12 +125,16 @@ pub trait TrafficStore: Send + Sync {
 
 /// Reading and writing findings.
 pub trait FindingStore: Send + Sync {
-    /// Persists a finding.
+    /// Persists a verified finding.
     ///
-    /// Backends reject a finding that fails [`Finding::validate`], so an unverified
-    /// claim cannot reach a report by going around the verification engine. See
+    /// Takes a [`Verified`], which only a
+    /// [`Verification`](hexora_types::verify::Verification) produces, so a detector's
+    /// suspicion cannot reach a report by going around the verification engine — the
+    /// call does not compile rather than being rejected at runtime. See
     /// `docs/security-invariants.md`, invariant 6.
-    fn save(&self, finding: &Finding) -> Result<()>;
+    ///
+    /// A future backend cannot weaken this: the signature is the invariant.
+    fn save(&self, verified: &Verified) -> Result<()>;
 
     /// Fetches a finding.
     fn get(&self, id: FindingId) -> Result<Finding>;

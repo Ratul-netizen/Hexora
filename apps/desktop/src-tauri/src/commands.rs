@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.8",
+        milestone: "M13.1",
     }
 }
 
@@ -1101,7 +1101,12 @@ pub struct CellView {
     pub violation: bool,
     pub leaked_object_ids: Vec<String>,
     pub own_object_ids: Vec<String>,
-    pub reproduced: bool,
+    /// What a second experiment established, when one ran: `reproduced`,
+    /// `supported`, `refuted` or `inconclusive`. `None` means nothing re-examined it,
+    /// which is not the same as "it did not reproduce".
+    pub verification: Option<String>,
+    /// The verification in a sentence.
+    pub verification_note: Option<String>,
     pub error: Option<String>,
     /// Why a violation was demoted, when it was.
     pub note: Option<String>,
@@ -1251,9 +1256,11 @@ pub async fn authz_run(
     plan.anonymous_control = anonymous;
     plan.verify = verify;
 
-    let matrix = tester.run(&plan).await.map_err(fail)?;
     let target = store.target_of(base).map_err(fail)?;
-    let mut findings = analysis::findings(&matrix, target);
+    // Run, detect, verify. Nothing here can produce a `Finding` directly.
+    let assessment = tester.assess(&plan, target).await.map_err(fail)?;
+    let matrix = assessment.matrix.clone();
+    let mut findings = assessment.findings();
 
     // Constructed attempts run after the matrix and against the same base request, so
     // a tester who only wanted the replay results already has them if this fails.
@@ -1310,7 +1317,7 @@ pub async fn authz_run(
             .as_ref()
             .map(|c| c.skipped.clone())
             .unwrap_or_default(),
-        findings: findings.iter().map(finding_row).collect(),
+        findings: findings.iter().map(|v| finding_row(v.finding())).collect(),
         saved,
         updated,
     })
@@ -1857,7 +1864,8 @@ fn cell_view(cell: &Cell) -> CellView {
         violation: cell.verdict == Verdict::Violation,
         leaked_object_ids: cell.leaked_object_ids.clone(),
         own_object_ids: cell.own_object_ids.clone(),
-        reproduced: cell.reproduced,
+        verification: cell.verification.as_ref().map(|v| v.as_str().to_string()),
+        verification_note: cell.verification.as_ref().map(|v| v.note().to_string()),
         error: cell.error.clone(),
         note: cell.note.clone(),
     }
@@ -2257,7 +2265,10 @@ mod tests {
             verdict: Verdict::Violation,
             leaked_object_ids: vec!["acct-1000".into()],
             own_object_ids: Vec::new(),
-            reproduced: true,
+            verification: Some(hexora_types::verify::Verification::Reproduced {
+                note: "it happened again".into(),
+                evidence: Vec::new(),
+            }),
             error: None,
             note: None,
         };

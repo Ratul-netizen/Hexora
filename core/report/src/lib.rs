@@ -1028,7 +1028,22 @@ mod tests {
             .unwrap()
     }
 
-    fn finding(target: TargetId, confidence: Confidence, evidence: Vec<Evidence>) -> Finding {
+    /// A finding wrapped the way a verification would wrap it.
+    ///
+    /// These tests are about rendering, not about the verification ladder, so they
+    /// use the test-only constructor rather than staging an experiment. It is off in
+    /// every shipped binary.
+    fn finding(
+        target: TargetId,
+        confidence: Confidence,
+        evidence: Vec<Evidence>,
+    ) -> hexora_types::verify::Verified {
+        hexora_types::verify::Verified::from_trusted_finding(raw_finding(
+            target, confidence, evidence,
+        ))
+    }
+
+    fn raw_finding(target: TargetId, confidence: Confidence, evidence: Vec<Evidence>) -> Finding {
         let now = Utc::now();
         Finding {
             id: FindingId::new(),
@@ -1240,10 +1255,15 @@ mod tests {
     #[test]
     fn a_false_positive_is_counted_but_not_printed() {
         let (project, request, target) = project_with_traffic();
-        let mut dismissed = finding(target, Confidence::Confirmed, one_exchange(request));
+        let mut dismissed = raw_finding(target, Confidence::Confirmed, one_exchange(request));
         dismissed.title = "A claim somebody dismissed".into();
         dismissed.status = FindingStatus::FalsePositive;
-        project.findings().save(&dismissed).unwrap();
+        project
+            .findings()
+            .save(&hexora_types::verify::Verified::from_trusted_finding(
+                dismissed,
+            ))
+            .unwrap();
 
         let report = Report::build(&project, &options()).unwrap();
         assert!(report.findings.is_empty());
@@ -1265,9 +1285,12 @@ mod tests {
     #[test]
     fn a_severity_filter_reports_what_it_dropped() {
         let (project, request, target) = project_with_traffic();
-        let mut low = finding(target, Confidence::Confirmed, one_exchange(request));
+        let mut low = raw_finding(target, Confidence::Confirmed, one_exchange(request));
         low.severity = Severity::Low;
-        project.findings().save(&low).unwrap();
+        project
+            .findings()
+            .save(&hexora_types::verify::Verified::from_trusted_finding(low))
+            .unwrap();
 
         let report = Report::build(
             &project,

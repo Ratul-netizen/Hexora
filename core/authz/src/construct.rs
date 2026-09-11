@@ -1730,23 +1730,23 @@ mod tests {
         let target_id = fixture.traffic.target_of(base).unwrap();
         let findings = crate::analysis::construction_findings(&construction, target_id);
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].severity, Severity::High);
+        assert_eq!(findings[0].finding().severity, Severity::High);
         assert_eq!(
-            findings[0].confidence,
+            findings[0].finding().confidence,
             Confidence::Firm,
             "an identity received a document of the object's shape carrying the              identifier it asked for: that is a fact about the bytes, not a guess"
         );
-        assert!(findings[0].confidence.is_actionable());
+        assert!(findings[0].finding().confidence.is_actionable());
         assert!(
-            findings[0].title.contains("User B can reach"),
+            findings[0].finding().title.contains("User B can reach"),
             "{}",
-            findings[0].title
+            findings[0].finding().title
         );
         assert!(matches!(
-            findings[0].evidence[0],
+            findings[0].finding().evidence[0],
             Evidence::Comparison { .. }
         ));
-        assert!(findings[0].validate().is_ok());
+        assert!(findings[0].finding().validate().is_ok());
     }
 
     #[tokio::test]
@@ -1873,15 +1873,15 @@ mod tests {
         let findings = crate::analysis::construction_findings(&construction, target_id);
         assert_eq!(findings.len(), 1);
         assert_eq!(
-            findings[0].confidence,
+            findings[0].finding().confidence,
             Confidence::Tentative,
             "ownership could not be established, so this is a lead"
         );
-        assert!(!findings[0].confidence.is_actionable());
+        assert!(!findings[0].finding().confidence.is_actionable());
         assert!(
-            findings[0].title.starts_with("Unproven"),
+            findings[0].finding().title.starts_with("Unproven"),
             "{}",
-            findings[0].title
+            findings[0].finding().title
         );
     }
 
@@ -2143,7 +2143,7 @@ mod tests {
 
         let target_id = fixture.traffic.target_of(base).unwrap();
         let findings = crate::analysis::construction_findings(&construction, target_id);
-        assert_eq!(findings[0].confidence, Confidence::Confirmed);
+        assert_eq!(findings[0].finding().confidence, Confidence::Confirmed);
     }
 
     #[tokio::test]

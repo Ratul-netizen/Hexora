@@ -1,22 +1,35 @@
-//! Turning a matrix into findings somebody can defend.
+//! The authorization checks, as a detector and a verifier.
 //!
-//! A run produces outcomes. This module decides which of them are worth putting in a
-//! report, how firmly each may be stated, and what evidence goes with it — and the
-//! rules are deliberately conservative, because the failure mode that destroys trust
-//! in a security tool is not a missed bug, it is a confident wrong one.
+//! A run produces outcomes. Deciding which of them are worth putting in a report, and
+//! how firmly each may be stated, used to happen here in one function that built a
+//! `Finding` directly. It now happens in the shape every check in Hexora has:
 //!
-//! # The confidence ladder, applied
+//! ```text
+//! Matrix ──▶ MatrixDetector ──▶ Hypothesis ──▶ ReplayVerifier ──▶ Verification
+//!                                                                     │
+//!                                                          Verified ◀─┘
+//! ```
 //!
-//! | What the run saw | Confidence |
-//! | ---------------- | ---------- |
-//! | Another identity got a response of the same shape | [`Confidence::Tentative`] |
-//! | The owner's own object identifier appeared in that response | [`Confidence::Firm`] |
-//! | Either of the above, reproduced by a second replay | [`Confidence::Confirmed`] |
+//! The rules are unchanged and still deliberately conservative, because the failure
+//! mode that destroys trust in a security tool is not a missed bug, it is a confident
+//! wrong one. What changed is where they live: the confidence ladder is no longer
+//! prose applied by hand here, it is [`Verification::confidence`] in
+//! [`hexora_types::verify`], which every future check climbs too.
 //!
-//! Nothing here can produce [`Confidence::Confirmed`] without `--verify` having
-//! actually re-sent the request, and nothing produces [`Confidence::Firm`] from a
-//! similarity score alone. A score says "the same kind of document came back"; only a
-//! declared object identifier says "this is the other person's data".
+//! # The ladder, as this check uses it
+//!
+//! | What the run saw | Verification | Confidence |
+//! | ---------------- | ------------ | ---------- |
+//! | Another identity got a response of the same shape | `Supported(Consistent)` | `Tentative` |
+//! | The owner's own object identifier appeared in it | `Supported(Distinctive)` | `Firm` |
+//! | A second experiment produced the same result | `Reproduced` | `Confirmed` |
+//! | A second experiment did not | `Supported(Consistent)` | `Tentative` |
+//!
+//! The last row is a deliberate change of behaviour. A violation that did not happen
+//! again used to keep whatever confidence the first result had earned, with a note
+//! attached. Two experiments that disagree cannot be "hard to explain any other way",
+//! so the claim is now capped at a lead — the information is kept, the certainty is
+//! not.
 //!
 //! # Severity
 //!
@@ -32,16 +45,33 @@
 //! how many records, whose, and how easily enumerated — and that is the tester's call
 //! after looking at the endpoint, not a matrix's call after looking at one object.
 
-use chrono::Utc;
-use hexora_types::finding::{
-    Confidence, Evidence, Finding, FindingSource, FindingStatus, Location, MessagePart, Severity,
-};
-use hexora_types::identity::PrivilegeLevel;
-use hexora_types::ids::{FindingId, TargetId};
+use async_trait::async_trait;
+use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
+use hexora_types::identity::{Identity, PrivilegeLevel};
+use hexora_types::ids::TargetId;
 use hexora_types::object::ObjectLocation;
+use hexora_types::verify::{DetectorId, DetectorInfo, Support, Verification, Verified, Writeup};
+use hexora_types::Result;
+use hexora_verify::{Detector, Lab, Verifier};
 
 use crate::construct::{Attempt, Construction};
-use crate::{Cell, Matrix, Outcome, Verdict};
+use crate::{Cell, Fingerprint, Matrix, Outcome, Verdict};
+
+/// The check that replays one captured request as everybody.
+pub const CROSS_IDENTITY: DetectorInfo = DetectorInfo {
+    id: DetectorId("authz.cross_identity"),
+    version: 1,
+    about: "one identity reaching a resource that belongs to another",
+    sends: true,
+};
+
+/// The check that builds the request nobody captured.
+pub const CONSTRUCTED_OBJECT: DetectorInfo = DetectorInfo {
+    id: DetectorId("authz.constructed_object"),
+    version: 1,
+    about: "a request built to ask for somebody else's declared object",
+    sends: true,
+};
 
 /// The longest excerpt quoted as evidence from a response body.
 ///
@@ -49,72 +79,239 @@ use crate::{Cell, Matrix, Outcome, Verdict};
 /// not carry a copy of somebody's personal data around with it.
 const EXCERPT_LEN: usize = 160;
 
-/// Builds the findings a matrix supports, most severe first.
+/// Raises a hypothesis for every cell the matrix judged a violation.
 ///
-/// Returns an empty vector for a clean run — which is the common and welcome case, and
-/// is reported as such rather than padded with informational noise.
-pub fn findings(matrix: &Matrix, target: TargetId) -> Vec<Finding> {
-    let mut findings: Vec<Finding> = matrix
-        .cells
-        .iter()
-        .filter(|cell| cell.verdict == Verdict::Violation)
-        .filter_map(|cell| finding_for(matrix, cell, target))
-        .collect();
+/// Cheap, and allowed to be wrong: a cell is a violation because one response looked
+/// like another, which is a reason to run an experiment and not yet a reason to tell
+/// anybody anything.
+pub struct MatrixDetector;
 
-    findings.sort_by_key(|finding| {
-        (
-            finding.severity.rank(),
-            std::cmp::Reverse(finding.confidence),
-        )
-    });
-    findings
+impl Detector for MatrixDetector {
+    type Subject = Matrix;
+
+    fn about(&self) -> DetectorInfo {
+        CROSS_IDENTITY
+    }
+
+    fn examine(&self, matrix: &Matrix) -> Vec<Hypothesis> {
+        matrix
+            .cells
+            .iter()
+            .filter(|cell| cell.verdict == Verdict::Violation)
+            .filter_map(|cell| {
+                // A violation with no stored request cannot be cited, and an
+                // uncitable claim is exactly what this crate exists not to produce.
+                let request = cell.request?;
+                Some(Hypothesis {
+                    detector: CROSS_IDENTITY.id.to_string(),
+                    claim: format!(
+                        "{} reached a resource that belongs to {}",
+                        cell.label, matrix.owner.label
+                    ),
+                    source_request: request,
+                    location: Some(Location {
+                        part: MessagePart::Path,
+                        name: path_of(&matrix.url),
+                    }),
+                    provisional_severity: severity_for(matrix, cell),
+                })
+            })
+            .collect()
+    }
 }
 
-fn finding_for(matrix: &Matrix, cell: &Cell, target: TargetId) -> Option<Finding> {
-    // A violation with no stored request cannot be cited, and an uncitable finding is
-    // exactly what this crate exists not to produce.
-    let variant = cell.request?;
-    let baseline = matrix.owner.request?;
+/// What the verifier needs in order to run the cell again.
+#[derive(Debug, Clone)]
+pub struct CellCase {
+    /// The cell the hypothesis was raised from.
+    pub cell: Cell,
+    /// The identity it was sent as, when the project still has it.
+    pub identity: Option<Identity>,
+}
 
-    let unauthenticated = cell.privilege == PrivilegeLevel::Anonymous;
-    let leaked = !cell.leaked_object_ids.is_empty();
+/// Sends the request a second time and says whether the same thing happened.
+///
+/// Reproduction is what separates a lead from a claim: a one-off that does not repeat
+/// was a cache, a race, or a session that had not expired yet, and a report that
+/// cannot tell those apart from a real bug wastes a developer's afternoon.
+///
+/// With `repeat` off there is no second experiment, and the verdict rests on what the
+/// first one showed — which is still an experiment, just not a repeated one.
+pub struct ReplayVerifier<'a> {
+    /// The request under test.
+    pub draft: &'a hexora_repeater::Draft,
+    /// The identity the captured request belonged to.
+    pub owner: &'a Identity,
+    /// The owner's response, to compare a second reply against.
+    pub baseline: &'a Fingerprint,
+    /// The owner's own request, so a comparison cites both sides.
+    pub owner_request: Option<hexora_types::ids::RequestId>,
+    /// Whether to perform the second experiment.
+    pub repeat: bool,
+}
 
-    let confidence = match (cell.reproduced, leaked) {
-        (true, _) => Confidence::Confirmed,
-        (false, true) => Confidence::Firm,
-        (false, false) => Confidence::Tentative,
+#[async_trait]
+impl Verifier for ReplayVerifier<'_> {
+    type Case = CellCase;
+
+    fn about(&self) -> DetectorInfo {
+        CROSS_IDENTITY
+    }
+
+    async fn verify(
+        &self,
+        _hypothesis: &Hypothesis,
+        case: &CellCase,
+        lab: &dyn Lab,
+    ) -> Result<Verification> {
+        let cell = &case.cell;
+        let distinctive = !cell.leaked_object_ids.is_empty();
+        let evidence = evidence_for(cell, self.owner_request, &self.owner.label);
+
+        if !self.repeat {
+            let _ = (distinctive, evidence);
+            return Ok(judge(cell, &self.owner.label, self.owner_request));
+        }
+
+        let Some(identity) = &case.identity else {
+            return Ok(Verification::Inconclusive {
+                why: format!(
+                    "{} is no longer in the project, so the result could not be re-run",
+                    cell.label
+                ),
+            });
+        };
+
+        // Asked before sending: an out-of-scope second experiment is not a failed
+        // experiment, it is one that never happened, and the two must not read alike.
+        if lab.would_leave_scope(self.draft, Some(identity)) {
+            return Ok(Verification::Inconclusive {
+                why: "the target left the project's scope before it could be re-run".into(),
+            });
+        }
+
+        let again = crate::replay_once(lab, self.draft, identity, self.owner, self.baseline).await;
+
+        if again.outcome == cell.outcome && again.verdict == Verdict::Violation {
+            Ok(Verification::Reproduced {
+                note: format!(
+                    "{} received {}'s resource again on a second request",
+                    cell.label, self.owner.label
+                ),
+                evidence,
+            })
+        } else {
+            // Not `Refuted`: the first experiment did show it. Two experiments that
+            // disagree cannot support a firm claim, so this is capped at a lead
+            // whatever the first one saw — including when an identifier leaked.
+            Ok(Verification::Supported {
+                support: Support::Consistent,
+                note: format!(
+                    "seen once and not again ({} the second time), so this is a lead \
+                     rather than a reproduced result",
+                    again.outcome.as_str()
+                ),
+                evidence,
+            })
+        }
+    }
+}
+
+/// The verdict when no second experiment was run.
+///
+/// Separated from [`ReplayVerifier`] because it is the half that needs no network:
+/// what the first experiment showed, judged. The verifier adds the second experiment
+/// on top of it.
+pub(crate) fn judge(
+    cell: &Cell,
+    owner_label: &str,
+    owner_request: Option<hexora_types::ids::RequestId>,
+) -> Verification {
+    supported(
+        !cell.leaked_object_ids.is_empty(),
+        cell,
+        owner_label,
+        evidence_for(cell, owner_request, owner_label),
+    )
+}
+
+fn supported(
+    distinctive: bool,
+    cell: &Cell,
+    owner_label: &str,
+    evidence: Vec<Evidence>,
+) -> Verification {
+    if distinctive {
+        // Not a similarity score: a declared identifier belonging to somebody else,
+        // in a response served to this caller. That is a fact about the bytes.
+        Verification::Supported {
+            support: Support::Distinctive,
+            note: format!(
+                "the response served to {} contained {}, declared as {}'s",
+                cell.label,
+                cell.leaked_object_ids.join(", "),
+                owner_label
+            ),
+            evidence,
+        }
+    } else {
+        Verification::Supported {
+            support: Support::Consistent,
+            note: format!(
+                "{} received a response {:.0}% alike the one served to {}",
+                cell.label,
+                cell.similarity * 100.0,
+                owner_label
+            ),
+            evidence,
+        }
+    }
+}
+
+/// The traffic behind a cell.
+fn evidence_for(
+    cell: &Cell,
+    baseline: Option<hexora_types::ids::RequestId>,
+    owner_label: &str,
+) -> Vec<Evidence> {
+    let Some(variant) = cell.request else {
+        return Vec::new();
     };
 
-    let severity = if unauthenticated || leaked {
-        Severity::High
-    } else {
-        Severity::Medium
-    };
-
-    let difference = if leaked {
-        format!(
-            "{} received the same resource as {}, including {} that belongs to {}",
-            cell.label,
-            matrix.owner.label,
-            cell.leaked_object_ids.join(", "),
-            matrix.owner.label,
-        )
-    } else {
+    let difference = if cell.leaked_object_ids.is_empty() {
         format!(
             "{} received a response {:.0}% alike the one served to {} (status {})",
             cell.label,
             cell.similarity * 100.0,
-            matrix.owner.label,
+            owner_label,
             cell.status.unwrap_or(0),
+        )
+    } else {
+        format!(
+            "{} received the same resource as {}, including {} that belongs to {}",
+            cell.label,
+            owner_label,
+            cell.leaked_object_ids.join(", "),
+            owner_label,
         )
     };
 
-    let mut evidence = vec![Evidence::Comparison {
-        baseline,
-        variant,
-        difference: difference.clone(),
-    }];
-    if leaked {
+    let mut evidence = Vec::new();
+    if let Some(baseline) = baseline {
+        evidence.push(Evidence::Comparison {
+            baseline,
+            variant,
+            difference,
+        });
+    } else {
+        evidence.push(Evidence::Exchange {
+            request: variant,
+            response: None,
+            note: difference,
+        });
+    }
+
+    if !cell.leaked_object_ids.is_empty() {
         // Cited as the exchange rather than as a `ResponseExcerpt`: the excerpt
         // variant wants a `ResponseId`, and the only honest way to supply one is to
         // read it back from the project. Minting an id that resembles the request's
@@ -125,10 +322,27 @@ fn finding_for(matrix: &Matrix, cell: &Cell, target: TargetId) -> Option<Finding
             note: format!(
                 "the response body contains {}, declared as belonging to {}",
                 excerpt(&cell.leaked_object_ids),
-                matrix.owner.label
+                owner_label
             ),
         });
     }
+    evidence
+}
+
+/// How bad this cell would be if the experiment supports it.
+fn severity_for(matrix: &Matrix, cell: &Cell) -> Severity {
+    let _ = matrix;
+    if cell.privilege == PrivilegeLevel::Anonymous || !cell.leaked_object_ids.is_empty() {
+        Severity::High
+    } else {
+        Severity::Medium
+    }
+}
+
+/// The prose a verified cell becomes.
+pub fn matrix_writeup(matrix: &Matrix, cell: &Cell, target: TargetId) -> Writeup {
+    let unauthenticated = cell.privilege == PrivilegeLevel::Anonymous;
+    let leaked = !cell.leaked_object_ids.is_empty();
 
     let title = if unauthenticated {
         format!(
@@ -161,22 +375,13 @@ fn finding_for(matrix: &Matrix, cell: &Cell, target: TargetId) -> Option<Finding
         )
     };
 
-    let now = Utc::now();
-    let finding = Finding {
-        id: FindingId::new(),
+    Writeup {
         target,
         title,
-        severity,
-        confidence,
-        location: Some(Location {
-            part: MessagePart::Path,
-            name: path_of(&matrix.url),
-        }),
         description,
         impact: impact(unauthenticated, leaked),
         remediation: REMEDIATION.into(),
         reproduction: reproduction(matrix, cell),
-        evidence,
         cwe: Some(
             if unauthenticated {
                 "CWE-306"
@@ -193,20 +398,13 @@ fn finding_for(matrix: &Matrix, cell: &Cell, target: TargetId) -> Option<Finding
             }
             .into(),
         ),
-        // Left unset on purpose. A CVSS vector implies somebody weighed scope, blast
-        // radius and the data involved; inventing one here would put a number in a
-        // report that nobody had actually thought about.
-        cvss: None,
         source: FindingSource::AuthorizationTest,
-        created_at: now,
-        updated_at: now,
-        status: FindingStatus::New,
-    };
-
-    // The model's own rule, enforced rather than trusted: nothing above Reported
-    // without evidence, nothing actionable without reproduction steps.
-    debug_assert!(finding.validate().is_ok(), "{:?}", finding.validate());
-    Some(finding)
+        severity: severity_for(matrix, cell),
+        location: Some(Location {
+            part: MessagePart::Path,
+            name: path_of(&matrix.url),
+        }),
+    }
 }
 
 /// Builds the findings a construction run supports, most severe first.
@@ -225,48 +423,138 @@ fn finding_for(matrix: &Matrix, cell: &Cell, target: TargetId) -> Option<Finding
 /// data produces nothing at all. A run against a correctly built endpoint should be
 /// silent, and a tool that fills that silence with informational rows is a tool people
 /// stop reading.
-pub fn construction_findings(construction: &Construction, target: TargetId) -> Vec<Finding> {
-    let mut findings: Vec<Finding> = construction
-        .attempts
-        .iter()
-        .filter_map(|attempt| finding_for_attempt(construction, attempt, target))
+pub fn construction_findings(construction: &Construction, target: TargetId) -> Vec<Verified> {
+    let detector = ConstructionDetector;
+    let mut findings: Vec<Verified> = detector
+        .examine(construction)
+        .into_iter()
+        .filter_map(|hypothesis| {
+            let attempt = construction
+                .attempts
+                .iter()
+                .find(|attempt| attempt.request == Some(hypothesis.source_request))?;
+            let verification = judge_attempt(construction, attempt);
+            Verified::conclude(
+                &hypothesis,
+                &verification,
+                attempt_writeup(construction, attempt, target)?,
+            )
+        })
         .collect();
 
-    findings.sort_by_key(|finding| {
+    findings.sort_by_key(|verified| {
         (
-            finding.severity.rank(),
-            std::cmp::Reverse(finding.confidence),
+            verified.finding().severity.rank(),
+            std::cmp::Reverse(verified.finding().confidence),
         )
     });
     findings
 }
 
-fn finding_for_attempt(
+/// Raises a hypothesis for every constructed attempt worth an opinion.
+pub struct ConstructionDetector;
+
+impl Detector for ConstructionDetector {
+    type Subject = Construction;
+
+    fn about(&self) -> DetectorInfo {
+        CONSTRUCTED_OBJECT
+    }
+
+    fn examine(&self, construction: &Construction) -> Vec<Hypothesis> {
+        construction
+            .attempts
+            .iter()
+            .filter(|attempt| worth_judging(attempt))
+            .filter_map(|attempt| {
+                // An attempt with no stored request cannot be cited, and an uncitable
+                // claim is exactly what this crate exists not to produce.
+                let request = attempt.request?;
+                attempt.control?;
+                Some(Hypothesis {
+                    detector: CONSTRUCTED_OBJECT.id.to_string(),
+                    claim: format!(
+                        "{} reached {}'s {}",
+                        attempt.sender_label, attempt.owner_label, attempt.object_name
+                    ),
+                    source_request: request,
+                    location: Some(Location {
+                        part: message_part(&attempt.location),
+                        name: attempt.location.describe(),
+                    }),
+                    provisional_severity: if attempt.is_violation() {
+                        Severity::High
+                    } else {
+                        Severity::Medium
+                    },
+                })
+            })
+            .collect()
+    }
+}
+
+/// Whether an attempt is worth an opinion at all.
+///
+/// Anything the application refused, redirected, or answered with the caller's own
+/// data produces nothing. A run against a correctly built endpoint should be silent.
+fn worth_judging(attempt: &Attempt) -> bool {
+    let unidentified = attempt.verdict == Verdict::Inconclusive;
+    attempt.is_violation() || (unidentified && attempt.outcome == Outcome::Allowed)
+}
+
+/// What the construction run's experiments established about one attempt.
+///
+/// The construction runner performs both experiments itself — it has to, because
+/// building the request is the experiment — so this judges what they showed rather
+/// than running a third. The ladder is the shared one either way.
+pub(crate) fn judge_attempt(construction: &Construction, attempt: &Attempt) -> Verification {
+    let Some(evidence) = attempt_evidence(construction, attempt) else {
+        return Verification::Inconclusive {
+            why: "the attempt was not recorded, so nothing can be cited".into(),
+        };
+    };
+
+    if !attempt.is_violation() {
+        // The shape-only case: the document looks right and nothing in it says whose
+        // object it is. Worth a tester's time, and not a claim.
+        return Verification::Supported {
+            support: Support::Consistent,
+            note: "the response looks like the object document and contains nothing \
+                   that establishes whose object it is"
+                .into(),
+            evidence,
+        };
+    }
+
+    if attempt.reproduced {
+        return Verification::Reproduced {
+            note: format!(
+                "a second constructed attempt was served {}'s {} again",
+                attempt.owner_label, attempt.object_name
+            ),
+            evidence,
+        };
+    }
+
+    // A violation means the response either carried identifiers the caller never
+    // sent, or quoted the one it asked for inside a document shaped like the
+    // caller's own. Both are facts about the bytes rather than a similarity score.
+    Verification::Supported {
+        support: Support::Distinctive,
+        note: format!(
+            "{} asked for {}, declared as {}'s, and the application served it",
+            attempt.sender_label, attempt.object_value, attempt.owner_label
+        ),
+        evidence,
+    }
+}
+
+fn attempt_writeup(
     construction: &Construction,
     attempt: &Attempt,
     target: TargetId,
-) -> Option<Finding> {
-    // An attempt with no stored request cannot be cited, and an uncitable finding is
-    // exactly what this crate exists not to produce.
-    let variant = attempt.request?;
-    let baseline = attempt.control?;
-
+) -> Option<Writeup> {
     let disclosed = !attempt.disclosed_object_ids.is_empty();
-    let unidentified = attempt.verdict == Verdict::Inconclusive;
-    if !attempt.is_violation() && !(unidentified && attempt.outcome == Outcome::Allowed) {
-        return None;
-    }
-
-    // The verdict has already done the hard part. A violation means the response
-    // either carried identifiers the caller never sent, or quoted the one it asked
-    // for inside a document shaped like the caller's own — both are facts about the
-    // bytes, so both are Firm. A second attempt that reproduces it makes it Confirmed.
-    // Everything else that gets this far is the shape-only case, which is a lead.
-    let confidence = match (attempt.reproduced, attempt.is_violation()) {
-        (true, true) => Confidence::Confirmed,
-        (_, true) => Confidence::Firm,
-        (_, false) => Confidence::Tentative,
-    };
 
     let severity = if attempt.is_violation() {
         Severity::High
@@ -323,24 +611,7 @@ fn finding_for_attempt(
         )
     };
 
-    let mut evidence = vec![Evidence::Comparison {
-        baseline,
-        variant,
-        difference: difference.clone(),
-    }];
-    if disclosed {
-        evidence.push(Evidence::Exchange {
-            request: variant,
-            response: None,
-            note: format!(
-                "the response body contains {}, declared as belonging to {} and never \
-                 sent by {}",
-                excerpt(&attempt.disclosed_object_ids),
-                attempt.owner_label,
-                attempt.sender_label,
-            ),
-        });
-    }
+    let _ = difference;
 
     let description = format!(
         "This request was not captured; it was constructed. {} was taken from the \
@@ -357,34 +628,79 @@ fn finding_for_attempt(
         },
     );
 
-    let now = Utc::now();
-    let finding = Finding {
-        id: FindingId::new(),
+    Some(Writeup {
         target,
         title,
-        severity,
-        confidence,
-        location: Some(Location {
-            part: message_part(&attempt.location),
-            name: attempt.location.describe(),
-        }),
         description,
         impact: construction_impact(attempt, disclosed),
         remediation: REMEDIATION.into(),
         reproduction: construction_reproduction(construction, attempt),
-        evidence,
         cwe: Some("CWE-639".into()),
         owasp: Some("API1:2023 Broken Object Level Authorization".into()),
-        // Left unset deliberately; see the note on the replay path.
-        cvss: None,
         source: FindingSource::AuthorizationTest,
-        created_at: now,
-        updated_at: now,
-        status: FindingStatus::New,
+        severity,
+        location: Some(Location {
+            part: message_part(&attempt.location),
+            name: attempt.location.describe(),
+        }),
+    })
+}
+
+/// The traffic behind one constructed attempt.
+fn attempt_evidence(construction: &Construction, attempt: &Attempt) -> Option<Vec<Evidence>> {
+    let _ = construction;
+    let variant = attempt.request?;
+    let baseline = attempt.control?;
+    let disclosed = !attempt.disclosed_object_ids.is_empty();
+
+    let difference = if disclosed {
+        format!(
+            "{} asked for {}, declared as {}'s, and received a response containing {}",
+            attempt.sender_label,
+            attempt.object_value,
+            attempt.owner_label,
+            attempt.disclosed_object_ids.join(", "),
+        )
+    } else if attempt.echoed {
+        format!(
+            "{} asked for {}, declared as {}'s, and received a response {:.0}% alike \
+             the document it receives for its own object, quoting that identifier",
+            attempt.sender_label,
+            attempt.object_value,
+            attempt.owner_label,
+            attempt.similarity * 100.0,
+        )
+    } else {
+        format!(
+            "{} asked for {}, declared as {}'s, and received a response {:.0}% alike \
+             the document it receives for its own object — but nothing in it \
+             establishes whose object it is",
+            attempt.sender_label,
+            attempt.object_value,
+            attempt.owner_label,
+            attempt.similarity * 100.0,
+        )
     };
 
-    debug_assert!(finding.validate().is_ok(), "{:?}", finding.validate());
-    Some(finding)
+    let mut evidence = vec![Evidence::Comparison {
+        baseline,
+        variant,
+        difference,
+    }];
+    if disclosed {
+        evidence.push(Evidence::Exchange {
+            request: variant,
+            response: None,
+            note: format!(
+                "the response body contains {}, declared as belonging to {} and never \
+                 sent by {}",
+                excerpt(&attempt.disclosed_object_ids),
+                attempt.owner_label,
+                attempt.sender_label,
+            ),
+        });
+    }
+    Some(evidence)
 }
 
 fn construction_impact(attempt: &Attempt, disclosed: bool) -> String {
@@ -524,7 +840,9 @@ fn path_of(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use hexora_types::finding::{Confidence, Finding};
     use hexora_types::ids::{IdentityId, RequestId};
+    use hexora_types::verify::Verified;
 
     use super::*;
     use crate::Outcome;
@@ -541,7 +859,7 @@ mod tests {
             verdict,
             leaked_object_ids: Vec::new(),
             own_object_ids: Vec::new(),
-            reproduced: false,
+            verification: None,
             error: None,
             note: None,
         }
@@ -556,6 +874,53 @@ mod tests {
             cells,
             appears_public: false,
         }
+    }
+
+    /// The whole check, minus the second experiment: detect, judge, conclude.
+    ///
+    /// The second experiment needs a transport, so it is tested in `lib.rs` against
+    /// the fake one. Everything here is about what the *first* experiment supports.
+    fn findings(matrix: &Matrix, target: TargetId) -> Vec<Finding> {
+        let mut findings: Vec<Finding> = MatrixDetector
+            .examine(matrix)
+            .into_iter()
+            .filter_map(|hypothesis| {
+                let cell = matrix
+                    .cells
+                    .iter()
+                    .find(|cell| cell.request == Some(hypothesis.source_request))?;
+                let verification = judge(cell, &matrix.owner.label, matrix.owner.request);
+                Verified::conclude(
+                    &hypothesis,
+                    &verification,
+                    matrix_writeup(matrix, cell, target),
+                )
+                .map(Verified::into_finding)
+            })
+            .collect();
+
+        findings.sort_by_key(|finding| {
+            (
+                finding.severity.rank(),
+                std::cmp::Reverse(finding.confidence),
+            )
+        });
+        findings
+    }
+
+    /// The same, with a verification supplied rather than judged.
+    fn finding_with(matrix: &Matrix, verification: &Verification) -> Option<Finding> {
+        let hypothesis = MatrixDetector.examine(matrix).into_iter().next()?;
+        let cell = matrix
+            .cells
+            .iter()
+            .find(|cell| cell.request == Some(hypothesis.source_request))?;
+        Verified::conclude(
+            &hypothesis,
+            verification,
+            matrix_writeup(matrix, cell, TargetId::new()),
+        )
+        .map(Verified::into_finding)
     }
 
     #[test]
@@ -597,10 +962,52 @@ mod tests {
     }
 
     #[test]
+    fn a_detector_raises_a_hypothesis_and_cannot_produce_anything_more() {
+        // The rule this milestone is about. The detector's whole output is a
+        // hypothesis; there is no method on it that yields a finding, and this test
+        // exists so that a future refactor that adds one has to delete a test saying
+        // it must not.
+        let matrix = matrix(vec![cell(
+            "User B",
+            PrivilegeLevel::User,
+            Verdict::Violation,
+        )]);
+        let raised = MatrixDetector.examine(&matrix);
+
+        assert_eq!(raised.len(), 1);
+        assert_eq!(raised[0].detector, "authz.cross_identity");
+        assert_eq!(raised[0].provisional_severity, Severity::Medium);
+    }
+
+    #[test]
+    fn an_experiment_that_refutes_the_hypothesis_produces_nothing() {
+        let matrix = matrix(vec![cell(
+            "User B",
+            PrivilegeLevel::User,
+            Verdict::Violation,
+        )]);
+        let refuted = Verification::Refuted {
+            note: "denied on the second request".into(),
+        };
+        assert!(finding_with(&matrix, &refuted).is_none());
+    }
+
+    #[test]
     fn only_a_reproduced_violation_reaches_confirmed() {
-        let mut violating = cell("User B", PrivilegeLevel::User, Verdict::Violation);
-        violating.reproduced = true;
-        let findings = findings(&matrix(vec![violating]), TargetId::new());
+        let matrix = matrix(vec![cell(
+            "User B",
+            PrivilegeLevel::User,
+            Verdict::Violation,
+        )]);
+        let reproduced = Verification::Reproduced {
+            note: "it happened again".into(),
+            evidence: judge(&matrix.cells[0], &matrix.owner.label, matrix.owner.request)
+                .evidence()
+                .to_vec(),
+        };
+        let findings = finding_with(&matrix, &reproduced)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert_eq!(findings[0].confidence, Confidence::Confirmed);
     }
 
@@ -635,8 +1042,7 @@ mod tests {
     fn every_finding_passes_the_models_own_validation() {
         let mut leaked = cell("User B", PrivilegeLevel::User, Verdict::Violation);
         leaked.leaked_object_ids = vec!["acct-1000".into()];
-        let mut reproduced = cell("User C", PrivilegeLevel::User, Verdict::Violation);
-        reproduced.reproduced = true;
+        let reproduced = cell("User C", PrivilegeLevel::User, Verdict::Violation);
 
         for finding in findings(
             &matrix(vec![
@@ -678,7 +1084,6 @@ mod tests {
     fn nothing_is_emitted_at_critical() {
         let mut leaked = cell("Anonymous", PrivilegeLevel::Anonymous, Verdict::Violation);
         leaked.leaked_object_ids = vec!["acct-1000".into()];
-        leaked.reproduced = true;
         let findings = findings(&matrix(vec![leaked]), TargetId::new());
         assert_eq!(findings[0].severity, Severity::High);
     }

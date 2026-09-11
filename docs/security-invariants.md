@@ -180,21 +180,72 @@ exist without attached evidence that points at real, re-runnable traffic.
 delivered confidently costs the tester their credibility; a hallucinated one costs
 more.
 
-**Enforced by.** `Finding::validate`, called before a finding is persisted or
-exported, plus `FindingSource::max_unverified_confidence` — passive checks and the AI
-layer can only ever self-assert `Reported`. Promotion beyond that requires the
-verification engine.
+**Enforced by the type system, since M13.1.** `FindingStore::save` and
+`FindingStore::record` take a `Verified`, and the only way to obtain one is
+`Verified::conclude`, which requires a `Verification`. A detector's output is a
+`Hypothesis`, and there is no `From`, no `into_finding`, and no constructor anywhere
+that turns one into the other. A check that is merely suspicious does not get an
+error when it tries to store a claim — it does not compile.
+
+```text
+Detector  →  Hypothesis   ──✗──▶  FindingStore
+                 │
+             Verifier  (a controlled experiment, through a Lab)
+                 ▼
+            Verification  ──▶  Verified  ──✓──▶  FindingStore
+```
+
+**Confidence is derived, never chosen.** `Verification::confidence` is a total
+function from what the experiment showed to what may be claimed, and it is the only
+place the decision is made:
+
+| Verification | Confidence |
+| ------------ | ---------- |
+| `Reproduced` — the effect happened again | `Confirmed` |
+| `Supported { Distinctive }` — hard to explain another way | `Firm` |
+| `Supported { Consistent }` — consistent, and with other causes too | `Tentative` |
+| `Observed` — nothing to experiment on, e.g. a missing header | `Reported` |
+| `Refuted` / `Inconclusive` | **no finding at all** |
+
+A detector cannot assert its own confidence, so
+`FindingSource::max_unverified_confidence` is no longer the only thing standing
+between a passive check and a confident claim.
+
+**Still enforced at runtime, as the backstop.** `Finding::validate` runs inside
+`Verified::conclude`, so a verifier that returns `Supported` with no evidence gets
+`None` rather than a finding. The type keeps honest code honest; the check catches the
+bug.
+
+**The one door, named so it cannot be taken by accident.**
+`Verified::asserted_by_a_human` accepts a `FindingSource::Manual` finding and nothing
+else — a person who says they reproduced something *is* the verifier. `validate` still
+applies, so a human cannot record an evidence-free `Confirmed` either. A separate
+`Verified::from_trusted_finding` exists for tests behind the `test-support` feature,
+which no shipped binary enables.
 
 **Corollaries.**
 
 - Evidence references request and response IDs, not prose, so the UI can open the
   exact exchange behind any claim.
 - Findings at `Reported` are legitimate and useful — they are *leads*. They must be
-  labelled as unconfirmed everywhere they appear.
+  labelled as unconfirmed everywhere they appear, and `Confidence::is_actionable` is
+  false there.
 - An actionable finding without reproduction steps is rejected.
+- A refuted hypothesis is reported to the tester and stored nowhere. "The check ran
+  and knocked it down" is worth seeing; it is not worth recording as a claim.
 
-**Tests.** `core/types/src/finding.rs` — `a_confident_finding_without_evidence_is_rejected`,
-`ai_cannot_self_certify_above_reported`.
+**Tests.** `core/types/src/finding.rs` —
+`a_confident_finding_without_evidence_is_rejected`,
+`ai_cannot_self_certify_above_reported`; `core/types/src/verify.rs` —
+`the_confidence_ladder_is_a_function_of_the_experiment`,
+`an_experiment_that_did_not_support_the_hypothesis_produces_no_finding`,
+`a_verifier_that_supports_a_claim_with_no_evidence_still_gets_nothing`,
+`an_observation_with_nothing_to_experiment_on_is_a_lead_and_not_more`,
+`a_human_may_assert_a_finding_and_nothing_else_may`; `core/storage/src/findings.rs` —
+`a_finding_with_no_evidence_has_no_way_to_reach_the_store`;
+`core/authz/src/analysis.rs` —
+`a_detector_raises_a_hypothesis_and_cannot_produce_anything_more`,
+`an_experiment_that_refutes_the_hypothesis_produces_nothing`.
 
 ---
 

@@ -22,4 +22,5 @@ chrono.workspace = true
 bytes.workspace = true
 
 [dev-dependencies]
+hexora-types = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

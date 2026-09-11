@@ -1510,6 +1510,7 @@ dependencies = [
  "hexora-repeater",
  "hexora-storage",
  "hexora-types",
+ "hexora-verify",
  "proptest",
  "serde",
  "serde_json",
@@ -1533,6 +1534,7 @@ dependencies = [
  "hexora-report",
  "hexora-storage",
  "hexora-types",
+ "hexora-verify",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1679,6 +1681,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "uuid",
+]
+
+[[package]]
+name = "hexora-verify"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hexora-engine",
+ "hexora-repeater",
+ "hexora-types",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

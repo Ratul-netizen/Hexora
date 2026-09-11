@@ -49,6 +49,7 @@ pub mod redact;
 pub mod scope;
 pub mod snapshot;
 pub mod tls;
+pub mod verify;
 
 pub use candidate::{CandidateStatus, IdentifierCandidate, Signal, SignalKind, Strength};
 pub use error::{HexoraError, Result};
@@ -61,7 +62,8 @@ pub use raw::{RawRequest, RequestMode, RequestSource};
 pub use redact::{RedactionPolicy, Secret};
 pub use scope::{Scope, ScopeRule};
 pub use snapshot::{Comparison, Contents as SnapshotContents, Snapshot};
-pub use tls::{CertificateSummary, TlsInfo, Verification};
+pub use tls::{CertificateSummary, TlsInfo};
+pub use verify::{DetectorId, DetectorInfo, Support, Verification, Verified, Writeup};
 
 /// The version of this crate, exposed for the RPC handshake between UI and engine.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

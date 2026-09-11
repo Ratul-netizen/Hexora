@@ -31,6 +31,7 @@ influenced part of the process.
 | `core/http` | HTTP/1.x parser and transport, TLS, chunked framing, content decoding, streaming bodies | **Implemented** |
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
 | `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
+| `core/verify` | The verification framework: detector and verifier traits, the one way to run an experiment, and the registry of what a build checks for | **Implemented** (M13.1) |
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic | **Implemented** (M12.3) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
@@ -45,7 +46,9 @@ types ← storage ← http ← proxy
   ↑        ↑        ↑       ↑
   └────  engine ────┴───────┤
            ↑                │
-       repeater ← authz ────┤
+       repeater ← verify ───┤
+           ↑        ↑       │
+           └─── authz ──────┤
            ↑                │
         report ─────────────┤
            ↑                │
@@ -55,6 +58,12 @@ types ← storage ← http ← proxy
 `core/report` depends on `core/storage` and `core/types` and on nothing else: a report
 is a read of a finished project, so it has no reason to reach the network and no way
 to. That is why `hexora report` can be trusted to change nothing.
+
+`core/verify` sits below `core/authz` rather than inside it, which is the whole point:
+the framework must not depend on the first thing built on it, or the second thing will
+have to bend to fit the first. The data types it works with — `Hypothesis`,
+`Verification`, `Verified` — live in `core/types` instead, because `core/storage` has
+to see `Verified` in order to refuse everything else.
 
 The suggestion analyzer inside `core/authz` goes the other way: it takes no transport
 *at all*. Its whole signature is stores in, suggestions out —
@@ -160,8 +169,39 @@ Every subsystem that can send a request receives its transport already wrapped i
 `ScopeGuard`. If each subsystem checked scope itself, the invariant would hold until
 someone added a sixth subsystem — and someone always does.
 
+Since M13.1 a verifier does not even receive a transport. It receives a `Lab`, whose
+entire interface is *send this request as this principal*, and whose only
+implementation is backed by the repeater — so a check has no way to reach the network
+except through the guard, and no way to forget to record what it sent.
+
 The same reasoning applies to `GrantSet` (no `add` method, so no code path can widen a
 permission) and `ToolGate` (the AI proposes; it does not call).
+
+## A suspicion and a claim are different types
+
+The distinction every scanner after M13.1 is built on, and the reason it is a type
+rather than a convention:
+
+| | Says | Produced by | Can be stored |
+| - | ---- | ----------- | ------------- |
+| `Hypothesis` | "this looks suspicious" | a `Detector`, cheaply | **no** |
+| `Verification` | what an experiment showed | a `Verifier`, through a `Lab` | — |
+| `Verified` | "this is true, and here is the traffic" | `Verified::conclude` | yes |
+
+`FindingStore` accepts only the third. There is no conversion from the first, so a
+noisy check cannot become a noisy report by taking a shortcut — the call does not
+compile. Confidence is derived from the verification rather than chosen by the
+detector, so the ladder from *lead* to *confirmed* is written once, in
+`core/types/src/verify.rs`, instead of once per check.
+
+A detector's `examine` is synchronous and takes no `Lab`; a verifier's `verify` takes
+one and nothing else that can send. The passive/active distinction is therefore
+visible in the signature rather than in a comment.
+
+M12.1 and M12.5 were rewritten onto this in the same change, so the framework has a
+real user rather than a hypothetical one: `MatrixDetector` raises a hypothesis per
+violating cell, `ReplayVerifier` runs the second experiment through a `Lab`, and the
+findings come out the far end identical to what the hand-written path produced.
 
 ## Three statements about a string, and why only one is machine-made
 

@@ -15,9 +15,9 @@ use hexora_engine::guard::ScopeGuard;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_repeater::Repeater;
 use hexora_storage::{FindingStore, Recorded};
-use hexora_types::finding::Finding;
 use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
+use hexora_types::verify::Verified;
 use hexora_types::{HexoraError, Result};
 
 /// Options for `hexora authz`.
@@ -94,13 +94,16 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
         .enable_all()
         .build()
         .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
-    let matrix = runtime.block_on(tester.run(&plan))?;
-
     // The target the base request was actually sent to. A finding that named a
     // freshly minted id would cite a target the project has never heard of, and the
     // foreign key would refuse it — correctly.
     let target = store.target_of(base)?;
-    let mut findings = analysis::findings(&matrix, target);
+
+    // Run, detect, verify. Nothing between here and the store produces a `Finding`
+    // directly — it cannot, because only a verification makes one.
+    let assessment = runtime.block_on(tester.assess(&plan, target))?;
+    let matrix = assessment.matrix.clone();
+    let mut findings = assessment.findings();
 
     // Constructed attempts run after the matrix and against the same base request, so
     // the replay results are on screen before anything new is sent — and so a tester
@@ -213,7 +216,7 @@ fn print_construction(construction: &Construction) {
 /// Uses `record` rather than `save`, so running the same matrix again after a fix
 /// updates the claim instead of adding a second copy of it — and leaves whatever
 /// triage decision a human already made about it alone.
-fn save(store: &FindingStore, findings: &[Finding]) -> Result<Vec<Recorded>> {
+fn save(store: &FindingStore, findings: &[Verified]) -> Result<Vec<Recorded>> {
     findings.iter().map(|f| Ok(store.record(f)?)).collect()
 }
 
@@ -240,7 +243,7 @@ fn choose(
 fn print_human(
     matrix: &Matrix,
     construction: Option<&Construction>,
-    findings: &[Finding],
+    findings: &[Verified],
     saved: &[Recorded],
     no_save: bool,
 ) {
@@ -297,7 +300,8 @@ fn print_human(
     }
 
     println!("{} candidate finding(s):", findings.len());
-    for finding in findings {
+    for verified in findings {
+        let finding = verified.finding();
         println!();
         // Rendered by the same helper the findings list uses: a finding that reads
         // one way when it is produced and another when it is read back is a finding
@@ -335,7 +339,7 @@ fn print_human(
 fn print_json(
     matrix: &Matrix,
     construction: Option<&Construction>,
-    findings: &[Finding],
+    findings: &[Verified],
     saved: &[Recorded],
 ) {
     let cells: Vec<_> = matrix
@@ -353,7 +357,8 @@ fn print_json(
                 "verdict": cell.verdict.as_str(),
                 "leaked_object_ids": cell.leaked_object_ids,
                 "own_object_ids": cell.own_object_ids,
-                "reproduced": cell.reproduced,
+                "verification": cell.verification.as_ref().map(|v| v.as_str()),
+                "verification_note": cell.verification.as_ref().map(|v| v.note()),
                 "note": cell.note,
                 "error": cell.error,
             })
@@ -401,7 +406,7 @@ fn print_json(
                     .collect::<Vec<_>>(),
             })
         }),
-        "findings": findings,
+        "findings": findings.iter().map(|v| v.finding()).collect::<Vec<_>>(),
         "recorded": saved
             .iter()
             .map(|r| {
@@ -458,7 +463,7 @@ mod tests {
             verdict,
             leaked_object_ids: Vec::new(),
             own_object_ids: Vec::new(),
-            reproduced: false,
+            verification: None,
             error: None,
             note: None,
         }

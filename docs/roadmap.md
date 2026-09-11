@@ -63,7 +63,7 @@ top of them rather than beside them.
 ```text
 M12.7  Identifier suggestions        candidates a human confirms, never assertions  ✔
 M12.8  Engagement snapshots          what changed since the last assessment  ✔
-M13.1  Verification framework        detector ≠ finding, enforced by the type system
+M13.1  Verification framework        detector ≠ finding, enforced by the type system  ✔
 M13.2  Passive scanner               observations over captured traffic, no new requests
 M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
 M13.4  Reflected-input verification  context-aware, not "the string came back"
@@ -373,7 +373,7 @@ The scanner is the thing buyers compare on and the thing most likely to waste a
 tester's day. It is built as a verification framework with detectors plugged into it,
 not as a pile of checks, and the ordering below is the frozen one.
 
-**M13.1 — Verification framework** · PLANNED
+**M13.1 — Verification framework** · DONE
 
 The universal shape, before a single detector exists:
 
@@ -391,6 +391,25 @@ noisy report by taking a shortcut.
 
 Every generated request goes through the same `ScopeGuard` as everything else. That is
 an architectural invariant, not a scanner setting.
+
+Built as described, with four decisions worth recording:
+
+- **The rule is the signature.** `FindingStore` takes a `Verified`, which only a
+  `Verification` produces. A detector that tries to store a hypothesis does not get an
+  error; it does not compile.
+- **Confidence is derived, not chosen.** A fifth rung, `Observed`, was added for
+  passive checks — a missing header is a fact with no experiment to run, and its
+  honest ceiling is a lead.
+- **A verifier gets a `Lab`, not a transport.** One method: send this as this
+  principal. Scope, attribution and storage are the lab's business, so a check cannot
+  forget any of them.
+- **M12.1 and M12.5 were rewritten onto it in the same change**, so the framework has
+  a real user rather than a hypothetical one, and the live behaviour is unchanged.
+
+Deliberately not built: the object-safe registry and the scheduler. `Detector` and
+`Verifier` carry associated types, which is honest about today — nothing yet
+dispatches over a heterogeneous set — and the queue belongs to M13.3, where the
+requirements are real.
 
 **M13.2 — Passive scanner** · PLANNED
 

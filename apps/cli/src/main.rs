@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 use hexora_storage::{migrations, Project};
 
 mod authz;
+mod detectors;
 mod findings;
 mod history;
 mod identifiers;
@@ -37,7 +38,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.8. The proxy, HTTP/1.x engine \
+                  Development status: M13.1. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -318,6 +319,13 @@ enum Command {
     /// asking for another's object.
     #[command(subcommand)]
     Object(ObjectCommand),
+
+    /// List the checks this build has, and which of them send traffic.
+    ///
+    /// A scanner that will not say what it looks for is one whose silence means
+    /// nothing. Every check raises a hypothesis; only a verification turns one into a
+    /// finding.
+    Detectors,
 
     /// Record what the engagement looks like now, and compare two moments.
     ///
@@ -774,6 +782,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }),
         Command::Object(ObjectCommand::List { path }) => object::list(path, cli.json),
         Command::Object(ObjectCommand::Remove { path, id }) => object::remove(path, id, cli.json),
+        Command::Detectors => detectors::list(cli.json),
         Command::Snapshot(SnapshotCommand::Take { path, label, note }) => {
             snapshot::take(path, label.as_deref(), note.as_deref(), cli.json)
         }
@@ -1010,14 +1019,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.8",
+            "milestone": "M13.1",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.8 (engagement snapshots)");
+        println!("  milestone:               M13.1 (the verification framework)");
     }
 }
 
@@ -1088,7 +1097,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.8"),
+            help.contains("M13.1"),
             "users must not mistake this for a finished tool"
         );
     }

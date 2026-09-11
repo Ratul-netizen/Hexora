@@ -588,9 +588,15 @@ function Result({
                 <td className="numeric">{cell.similarity.toFixed(2)}</td>
                 <td>
                   <span className={verdictClass(cell)}>{cell.verdict}</span>
-                  {cell.reproduced && (
-                    <span className="tag" title="a second replay reproduced this">
-                      reproduced
+                  {cell.verification && (
+                    /* What the second experiment established, in its own words.
+                       "reproduced" and "nothing re-ran this" used to look the same
+                       here, because both were a missing tag. */
+                    <span
+                      className="tag"
+                      title={cell.verification_note ?? undefined}
+                    >
+                      {cell.verification}
                     </span>
                   )}
                 </td>

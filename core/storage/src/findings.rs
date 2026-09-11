@@ -5,13 +5,19 @@
 //! back to the exact exchanges that support it — which requires the claim to be in the
 //! project alongside the traffic, not in a scrollback buffer.
 //!
-//! # Validation is a gate, not a suggestion
+//! # The door is a type, not a check
 //!
-//! [`FindingStore::save`] refuses anything [`Finding::validate`] rejects. That is
-//! security invariant 6 (`docs/security-invariants.md`): a claim above
-//! [`Confidence::Reported`](hexora_types::Confidence::Reported) with no evidence
-//! attached cannot reach a report by taking the storage route around the verification
-//! engine. A detector with a bug gets an error, not a row.
+//! [`FindingStore::save`] and [`FindingStore::record`] take a
+//! [`Verified`](hexora_types::verify::Verified), which is the only thing a
+//! [`Verification`](hexora_types::verify::Verification) can produce. A detector emits
+//! a [`Hypothesis`](hexora_types::finding::Hypothesis), and there is no path from one
+//! to the other — so a check that is merely suspicious cannot reach a report by
+//! taking the storage route around the verification engine. It is not that the store
+//! refuses it; it is that the call does not compile.
+//!
+//! That is security invariant 6, moved from a runtime check into the type system.
+//! `Finding::validate` still runs inside `Verified::conclude`, as the backstop for a
+//! verifier that returned support with nothing behind it.
 //!
 //! # Re-running a test does not pile up duplicates
 //!
@@ -35,6 +41,7 @@ use hexora_types::finding::{
     Confidence, Evidence, Finding, FindingSource, FindingStatus, Location, Severity,
 };
 use hexora_types::ids::{FindingId, TargetId};
+use hexora_types::verify::Verified;
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Result, StorageError};
@@ -90,21 +97,26 @@ impl FindingStore {
         Self { db }
     }
 
-    /// Writes a finding, failing if it does not satisfy its own invariants.
+    /// Writes a verified finding.
     ///
     /// Always inserts. Callers that re-run a test want [`Self::record`].
-    pub fn save(&self, finding: &Finding) -> Result<()> {
+    ///
+    /// Takes a [`Verified`] rather than a [`Finding`]: see the module documentation.
+    pub fn save(&self, verified: &Verified) -> Result<()> {
+        let finding = verified.finding();
         self.write(finding, finding.id, false)
     }
 
-    /// Writes a finding, or refreshes the one already recording the same claim.
+    /// Writes a verified finding, or refreshes the one already recording the same
+    /// claim.
     ///
     /// See the module documentation for what "the same claim" means and what survives
     /// an update.
-    pub fn record(&self, finding: &Finding) -> Result<Recorded> {
+    pub fn record(&self, verified: &Verified) -> Result<Recorded> {
+        let finding = verified.finding();
         match self.find_matching(finding)? {
             None => {
-                self.save(finding)?;
+                self.save(verified)?;
                 Ok(Recorded::Created(finding.id))
             }
             Some(existing) => {
@@ -422,8 +434,8 @@ fn placeholder() -> Finding {
 }
 
 impl crate::repository::FindingStore for FindingStore {
-    fn save(&self, finding: &Finding) -> Result<()> {
-        Self::save(self, finding)
+    fn save(&self, verified: &Verified) -> Result<()> {
+        Self::save(self, verified)
     }
 
     fn get(&self, id: FindingId) -> Result<Finding> {
@@ -707,6 +719,15 @@ mod tests {
         (FindingStore::new(db), target)
     }
 
+    /// Wraps a finding the way a verification would, without staging one.
+    ///
+    /// These tests are about the *store* — ordering, paging, triage, the claim key —
+    /// not about the verification ladder, which is tested where it lives. The feature
+    /// this uses is off in every shipped binary.
+    fn verified(finding: Finding) -> hexora_types::verify::Verified {
+        hexora_types::verify::Verified::from_trusted_finding(finding)
+    }
+
     fn finding(target: TargetId, severity: Severity, confidence: Confidence) -> Finding {
         let now = chrono::Utc::now();
         Finding {
@@ -749,7 +770,7 @@ mod tests {
     fn a_finding_survives_a_round_trip_with_its_evidence() {
         let (store, target) = store();
         let finding = finding(target, Severity::High, Confidence::Firm);
-        store.save(&finding).unwrap();
+        store.save(&verified(finding.clone())).unwrap();
 
         let read = store.get(finding.id).unwrap();
         assert_eq!(read.title, finding.title);
@@ -762,17 +783,53 @@ mod tests {
     }
 
     #[test]
-    fn a_finding_with_no_evidence_is_refused_rather_than_stored() {
+    fn a_finding_with_no_evidence_has_no_way_to_reach_the_store() {
+        // Invariant 6 used to be enforced here, at the last moment, by validate().
+        // It is now enforced one step earlier and one level up: an evidence-free
+        // claim cannot be turned into a `Verified` at all, and `Verified` is the only
+        // thing `save` accepts. The runtime check below is the backstop, still wired
+        // up, for a finding assembled some other way.
         let (store, target) = store();
         let mut invalid = finding(target, Severity::High, Confidence::Firm);
         invalid.evidence.clear();
 
-        let error = store.save(&invalid).unwrap_err();
+        let hypothesis = hexora_types::finding::Hypothesis {
+            detector: "test".into(),
+            claim: "something".into(),
+            source_request: RequestId::new(),
+            location: None,
+            provisional_severity: Severity::High,
+        };
+        let empty = hexora_types::verify::Verification::Supported {
+            support: hexora_types::verify::Support::Distinctive,
+            note: "nothing behind it".into(),
+            evidence: Vec::new(),
+        };
         assert!(
-            error.to_string().contains("evidence"),
-            "invariant 6 has to be enforced here too, not only in the detector: {error}"
+            hexora_types::verify::Verified::conclude(&hypothesis, &empty, writeup_for(&invalid))
+                .is_none(),
+            "a claim with no evidence must not become a Verified"
         );
+
+        let error = store.save(&verified(invalid)).unwrap_err();
+        assert!(error.to_string().contains("evidence"), "{error}");
         assert_eq!(store.count().unwrap(), 0);
+    }
+
+    fn writeup_for(finding: &Finding) -> hexora_types::verify::Writeup {
+        hexora_types::verify::Writeup {
+            target: finding.target,
+            title: finding.title.clone(),
+            description: finding.description.clone(),
+            impact: finding.impact.clone(),
+            remediation: finding.remediation.clone(),
+            reproduction: finding.reproduction.clone(),
+            cwe: finding.cwe.clone(),
+            owasp: finding.owasp.clone(),
+            source: finding.source.clone(),
+            severity: finding.severity,
+            location: finding.location.clone(),
+        }
     }
 
     #[test]
@@ -792,7 +849,7 @@ mod tests {
             ] {
                 let mut f = finding(target, severity, confidence);
                 f.title = format!("{severity:?}/{confidence:?}");
-                store.save(&f).unwrap();
+                store.save(&verified(f.clone())).unwrap();
                 let read = store.get(f.id).unwrap();
                 assert_eq!(read.severity, severity);
                 assert_eq!(read.confidence, confidence);
@@ -804,7 +861,7 @@ mod tests {
     fn every_triage_status_round_trips() {
         let (store, target) = store();
         let f = finding(target, Severity::Low, Confidence::Tentative);
-        store.save(&f).unwrap();
+        store.save(&verified(f.clone())).unwrap();
 
         for status in [
             FindingStatus::New,
@@ -825,11 +882,11 @@ mod tests {
     fn re_running_a_test_updates_the_claim_instead_of_duplicating_it() {
         let (store, target) = store();
         let first = finding(target, Severity::Medium, Confidence::Tentative);
-        assert!(store.record(&first).unwrap().is_new());
+        assert!(store.record(&verified(first.clone())).unwrap().is_new());
 
         // A second run: new ids, same claim.
         let mut second = finding(target, Severity::High, Confidence::Confirmed);
-        let outcome = store.record(&second).unwrap();
+        let outcome = store.record(&verified(second.clone())).unwrap();
         assert_eq!(outcome, Recorded::Updated(first.id));
         assert_eq!(store.count().unwrap(), 1);
 
@@ -847,13 +904,17 @@ mod tests {
     fn a_re_run_never_resurrects_a_triaged_finding() {
         let (store, target) = store();
         let first = finding(target, Severity::Medium, Confidence::Tentative);
-        store.record(&first).unwrap();
+        store.record(&verified(first.clone())).unwrap();
         store
             .set_status(first.id, FindingStatus::FalsePositive)
             .unwrap();
 
         store
-            .record(&finding(target, Severity::Medium, Confidence::Tentative))
+            .record(&verified(finding(
+                target,
+                Severity::Medium,
+                Confidence::Tentative,
+            )))
             .unwrap();
 
         assert_eq!(
@@ -867,10 +928,14 @@ mod tests {
     fn a_re_run_that_did_not_reproduce_lowers_the_confidence_it_can_no_longer_support() {
         let (store, target) = store();
         let confirmed = finding(target, Severity::High, Confidence::Confirmed);
-        store.record(&confirmed).unwrap();
+        store.record(&verified(confirmed.clone())).unwrap();
 
         store
-            .record(&finding(target, Severity::High, Confidence::Tentative))
+            .record(&verified(finding(
+                target,
+                Severity::High,
+                Confidence::Tentative,
+            )))
             .unwrap();
 
         assert_eq!(
@@ -890,8 +955,8 @@ mod tests {
             name: "/accounts/acct-2000".into(),
         });
 
-        store.record(&first).unwrap();
-        assert!(store.record(&other).unwrap().is_new());
+        store.record(&verified(first.clone())).unwrap();
+        assert!(store.record(&verified(other.clone())).unwrap().is_new());
         assert_eq!(store.count().unwrap(), 2);
     }
 
@@ -906,7 +971,7 @@ mod tests {
         ] {
             let mut f = finding(target, severity, confidence);
             f.title = title.into();
-            store.save(&f).unwrap();
+            store.save(&verified(f.clone())).unwrap();
         }
 
         let titles: Vec<_> = all(&store).into_iter().map(|f| f.title).collect();
@@ -923,7 +988,7 @@ mod tests {
         for i in 0..7 {
             let mut f = finding(target, Severity::High, Confidence::Firm);
             f.title = format!("finding {i}");
-            store.save(&f).unwrap();
+            store.save(&verified(f.clone())).unwrap();
         }
 
         let mut seen = Vec::new();
@@ -954,7 +1019,7 @@ mod tests {
         ] {
             let mut f = finding(target, severity, Confidence::Firm);
             f.title = title.into();
-            store.save(&f).unwrap();
+            store.save(&verified(f.clone())).unwrap();
         }
 
         let filter = FindingFilter {
@@ -976,10 +1041,10 @@ mod tests {
         let (store, target) = store();
         let mut lead = finding(target, Severity::High, Confidence::Tentative);
         lead.title = "a lead".into();
-        store.save(&lead).unwrap();
+        store.save(&verified(lead.clone())).unwrap();
         let mut real = finding(target, Severity::High, Confidence::Firm);
         real.title = "established".into();
-        store.save(&real).unwrap();
+        store.save(&verified(real.clone())).unwrap();
 
         let filter = FindingFilter {
             actionable_only: true,
@@ -994,7 +1059,7 @@ mod tests {
     fn filtering_by_status_finds_what_triage_left_behind() {
         let (store, target) = store();
         let f = finding(target, Severity::High, Confidence::Firm);
-        store.save(&f).unwrap();
+        store.save(&verified(f.clone())).unwrap();
         store
             .set_status(f.id, FindingStatus::FalsePositive)
             .unwrap();
@@ -1038,7 +1103,7 @@ mod tests {
     fn deleting_takes_the_evidence_with_it() {
         let (store, target) = store();
         let f = finding(target, Severity::High, Confidence::Firm);
-        store.save(&f).unwrap();
+        store.save(&verified(f.clone())).unwrap();
 
         assert!(store.delete(f.id).unwrap());
         assert!(!store.delete(f.id).unwrap());
@@ -1059,7 +1124,7 @@ mod tests {
             offset: 12,
             excerpt: "third".into(),
         });
-        store.save(&f).unwrap();
+        store.save(&verified(f.clone())).unwrap();
 
         assert_eq!(store.get(f.id).unwrap().evidence, f.evidence);
     }
@@ -1069,7 +1134,7 @@ mod tests {
         let (store, _) = store();
         let orphan = finding(TargetId::new(), Severity::High, Confidence::Firm);
         assert!(
-            store.save(&orphan).is_err(),
+            store.save(&verified(orphan.clone())).is_err(),
             "evidence has to point at a target the project knows about"
         );
     }

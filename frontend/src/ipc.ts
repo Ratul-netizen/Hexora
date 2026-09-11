@@ -308,7 +308,14 @@ export interface CellView {
   violation: boolean;
   leaked_object_ids: string[];
   own_object_ids: string[];
-  reproduced: boolean;
+  /**
+   * What a second experiment established: `reproduced`, `supported`, `refuted` or
+   * `inconclusive`. `null` means nothing re-examined this cell, which is not the
+   * same as "it did not reproduce".
+   */
+  verification: string | null;
+  /** The verification in a sentence. */
+  verification_note: string | null;
   error: string | null;
   note: string | null;
 }

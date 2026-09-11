@@ -19,6 +19,7 @@ hexora-http.workspace = true
 hexora-proxy.workspace = true
 hexora-repeater.workspace = true
 hexora-authz.workspace = true
+hexora-verify.workspace = true
 hexora-report.workspace = true
 tokio.workspace = true
 bytes.workspace = true

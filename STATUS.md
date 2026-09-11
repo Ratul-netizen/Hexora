@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M12.8 (engagement snapshots)
+- **Last updated:** M13.1 (the verification framework)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -35,8 +35,15 @@ milestone.
 | **M12.6** — Wire-exact traffic | Response bodies are kept in both forms — the bytes that arrived and the bytes they decode to — so `--wire` returns the gzip stream and `--body` the JSON inside it. Requests can be sent byte for byte: `RequestSource::{Structured, Raw}`, a `--raw` flag and a mode switch in the window. Bare LF stays bare LF, casing and duplicates survive, a wrong `Content-Length` is sent wrong. Raw mode still goes through the same scope guard, and Hexora no longer claims byte-preservation it does not have |
 | **M12.7** — Identifier suggestions | Hexora reads a project's own traffic and offers the values that behave like object identifiers. It stops there: a candidate has no owner field, accepting one declares nothing, and the analyzer takes no transport so it cannot send. A value is offered because it *varies where an identifier would* against a path that is holding still — not because it looks numeric — so `v2` is never suggested and `/status` against `/profile` suggests neither. Each suggestion carries the signed signals behind it rather than a confidence number, so "why did it suggest this?" has an answer you can disagree with. Suggestions persist across sessions; a decision survives re-analysis. `hexora identifiers` and an Identifiers tab in the window |
 | **M12.8** — Engagement snapshots | A retest can finally answer *what changed*. `hexora snapshot take` records the project as it stood — claims, scope, identities, declared objects — as copies rather than references, so a later run cannot rewrite its own past. `snapshot diff` compares two moments, or one moment against the project as it stands, and it never says *fixed*: a claim that stopped appearing is reported as gone **with the reason**, and only one of the three reasons is about the application at all. A claim nothing re-tested between the two is listed as standing-but-untested rather than counted as unchanged, which is the failure a real retest run exposed. Credentials never reach a snapshot |
+| **M13.1** — The verification framework | A detector's suspicion and a finding's claim are different types, and the compiler keeps them apart: `FindingStore` takes a `Verified`, which only a `Verification` produces, so a check that is merely suspicious cannot record a claim — the call does not compile. Confidence is derived from what the experiment showed rather than chosen by the detector, which puts the ladder from lead to confirmed in one place instead of one per check. A verifier receives a `Lab` — send this as this principal — not a transport, so scope and attribution cannot be forgotten. M12.1 and M12.5 were rewritten onto it in the same change, with identical live results. `hexora detectors` says what this build looks for and which of it sends |
 
 ## Next
+
+**The gate everything else is built behind is in place.** M13.1 makes the distinction
+between *a check thought something* and *an experiment established something* a fact
+about the types rather than a discipline somebody has to keep. Every scanner after
+this inherits it for free, which is the only reason it was worth building before there
+were any scanners to inherit it.
 
 **A second visit is now answerable.** M12.8 gives the engagement a memory: what was
 true then, frozen, so what is true now can be compared against it. The discipline is
@@ -62,7 +69,6 @@ making every automated result explainable, reproducible and safe.* Full detail i
 [`docs/roadmap.md`](docs/roadmap.md).
 
 ```text
-M13.1  Verification framework        detector ≠ finding, enforced by the type system
 M13.2  Passive scanner               observations over captured traffic, no new requests
 M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
 M13.4  Reflected-input verification  context-aware, not "the string came back"
@@ -73,10 +79,9 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
-- **M13.1 — the verification framework.** Everything after it is a scanner, and a
-  scanner is only worth having if a detector's suspicion and a finding's claim are
-  different things the type system will not let anybody confuse. That is the gate the
-  passive and active scanners are built behind, not a refactor to do afterwards.
+- **M13.2 — the passive scanner.** Observations over traffic already captured, with
+  no new requests: the first real user of `Detector` that is not an authorization
+  check, and the thing that will show whether the `Observed` rung was the right shape.
 
 Still open in M12: **attack chains** that retain evidence at every step.
 

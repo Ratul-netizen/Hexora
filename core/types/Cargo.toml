@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Exposes `Verified::from_trusted_finding`, so a test can build a stored finding
+# without staging an experiment first. Never enabled by a shipped binary.
+test-support = []
+
 [dependencies]
 serde.workspace = true
 thiserror.workspace = true

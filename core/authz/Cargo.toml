@@ -12,6 +12,8 @@ hexora-types.workspace = true
 hexora-engine.workspace = true
 hexora-storage.workspace = true
 hexora-repeater.workspace = true
+hexora-verify.workspace = true
+async-trait.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 serde.workspace = true
@@ -19,7 +21,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
+hexora-types = { workspace = true, features = ["test-support"] }
 proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
