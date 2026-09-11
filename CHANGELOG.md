@@ -508,6 +508,55 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Fixed — the identifier analyzer could not tell a venue id from the word `boolean`
+
+Against a demo application it looked fine. Against a real one it offered **1,091
+candidates from 756 exchanges**, showed the strongest 200, and scored every one of them
+**29** — which is `high`.
+
+```text
+29  high   200                   query parameter w
+29  high   boolean               JSON field 0/eventProperties/6/propertyType
+29  high   advertising_metadata  JSON field 2/eventProperties/26/propertyName
+29  high   Small Talgar №24      JSON field events/2/attributes/venue_name
+29  high   background            JSON field events/1/event_name
+```
+
+A type name, a property name, a restaurant's name and a number. And scored identically,
+in the same list, `events/2/attributes/venue_id` — a **real venue identifier**.
+
+29 was the ceiling for anything that varies in place, repeats, and comes back in a
+response, which is the entire positive case. An application's telemetry satisfies all
+three for every string it carries: one endpoint, one shape, arbitrary content. Nothing
+in the analyzer could separate that from a resource address, so nothing did.
+
+Four signals, and between them they read the two things that were being ignored — **what
+the field is called**, and **what the value looks like**:
+
+- **`NamesALabel`** (−12). `propertyName`, `event_name`, `venue_name`, `propertyType` —
+  a field named for what a thing is *called* rather than which thing it is. `slug` is
+  deliberately not on the list: some applications address resources by one, and this
+  target does.
+- **`NamesAnIdentifier`** (+10). `venue_id`, `section_id`, `user_uuid`. The more
+  valuable half: the real identifiers in that traffic were sitting in fields that said
+  so.
+- **`ContainsWhitespace`** (−14). `Small Talgar №24` is a restaurant's name. Nothing an
+  application addresses a resource by has a space in it.
+- **`LooksLikeACount`** (−10) and **`LooksLikeAVersion`** (−12). `200`, `50`;
+  `120.0.6050.0`, `2025.7.24.0`. Weighed rather than excluded — a numeric primary key is
+  real, and one in a resource-like path takes eight points from the path to say so.
+
+And **`ReadsLikeAWord` now applies everywhere**, not only to path segments. That
+restriction was the single largest hole: `boolean` and `background` were exempt for
+being JSON values.
+
+**Measured on the same 1,000 exchanges, analysed fresh.** Every value above is gone. The
+top of the list is now entirely ObjectIds and UUIDs, drawn from `venue_id`, `section_id`
+and `session_id`. Scores spread across **13 distinct values from 25 to 39** instead of
+everything sitting on 29.
+
+Five tests, written from the values the real traffic produced.
+
 ### Fixed — the last of the authentication leads, which were the control working
 
 Eight `medium · tentative` leads survived the earlier fixes: *"answered without a

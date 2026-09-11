@@ -138,6 +138,41 @@ pub enum SignalKind {
     /// `/status` vary between requests without either being an identifier — and a
     /// reviewer looking at the list will say so, so the list may as well say it first.
     ReadsLikeAWord,
+    /// The field holding this value is named for a label, not for an identity.
+    ///
+    /// Negative, and it is the signal that was missing. Against a real application's
+    /// analytics traffic the analyzer offered `boolean` from `propertyType`,
+    /// `advertising_metadata` from `propertyName` and `background` from `event_name` —
+    /// all of them varying in place, repeated and echoed, which is the whole of the
+    /// positive case. What told them apart from an identifier sat in the field name,
+    /// and nothing read it.
+    NamesALabel,
+    /// The field holding this value is named for an identity — `venue_id`, `user_uuid`.
+    ///
+    /// The other half, and the more valuable one: in the same traffic
+    /// `events/2/attributes/venue_id` held a real venue id and scored identically to
+    /// `boolean`. A name is not proof, which is why this is worth ten points rather
+    /// than a decision.
+    NamesAnIdentifier,
+    /// The value contains whitespace.
+    ///
+    /// Negative, and close to decisive. `Small Talgar №24` is a restaurant's name; an
+    /// identifier an application addresses a resource by essentially never has a space
+    /// in it.
+    ContainsWhitespace,
+    /// A small whole number, which is more often a count than an identity.
+    ///
+    /// Negative. `200`, `50`, `24` vary in place and repeat like anything else. Weighed
+    /// rather than excluded, because a numeric primary key in a resource-like path is
+    /// real and picks up eight points from the path to say so.
+    LooksLikeACount,
+    /// A dotted numeric sequence, which is a version rather than an identity.
+    ///
+    /// Negative. `120.0.6050.0`, `2025.7.24.0`, `6.43.1` — a browser build, an app
+    /// release, a library. They vary between requests, repeat across them and come back
+    /// in responses, which is every positive signal this analyzer has, and no
+    /// application addresses a resource by one.
+    LooksLikeAVersion,
 }
 
 impl SignalKind {
@@ -149,6 +184,11 @@ impl SignalKind {
             Self::ResourceLikePath => "resource-like path",
             Self::AppearsInResponse => "appears in response",
             Self::MatchesDeclaredObject => "matches a declared object",
+            Self::NamesALabel => "the field is named for a label",
+            Self::NamesAnIdentifier => "the field is named for an identity",
+            Self::ContainsWhitespace => "contains whitespace",
+            Self::LooksLikeACount => "looks like a count",
+            Self::LooksLikeAVersion => "looks like a version",
             Self::CommonPaginationName => "common paging parameter",
             Self::VeryShort => "very short value",
             Self::ReadsLikeAWord => "reads like a word",

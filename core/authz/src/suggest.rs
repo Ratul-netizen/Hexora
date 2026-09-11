@@ -572,16 +572,75 @@ fn signals_for(
                 detail: format!("{leaf} usually means paging or formatting, not identity"),
             });
         }
+        // The field name, which is the signal that was missing entirely. Both
+        // directions: `venue_id` held a real venue id and `propertyType` held the word
+        // `boolean`, and they scored the same because nothing looked at either name.
+        if names_a_label(&leaf) {
+            signals.push(Signal {
+                kind: SignalKind::NamesALabel,
+                weight: -12,
+                detail: format!("{leaf} holds what a thing is called, not which thing it is"),
+            });
+        } else if names_an_identifier(&leaf) {
+            signals.push(Signal {
+                kind: SignalKind::NamesAnIdentifier,
+                weight: 10,
+                detail: format!("{leaf} is named for an identity"),
+            });
+        }
     }
 
-    // Weak evidence against, and only for the path: a plain lowercase word in a URL is
-    // far more often an endpoint name than an object. Never evidence *for* anything —
-    // nothing is suggested because it has digits in it.
-    if matches!(first.location, ObjectLocation::PathSegment { .. }) && reads_like_a_word(value) {
+    // Evidence against, wherever it appears. Never evidence *for* anything — nothing is
+    // suggested because it has digits in it.
+    //
+    // This used to apply to path segments only, on the reasoning that a lowercase word
+    // in a URL is an endpoint name. True, and far too narrow: against a real
+    // application's analytics traffic it offered `boolean`, `background` and
+    // `advertising_metadata` as object identifiers, every one of them a JSON value and
+    // so exempt. A plain word is not an identifier wherever it is written.
+    if reads_like_a_word(value) {
+        let detail = match first.location {
+            ObjectLocation::PathSegment { .. } => {
+                "a plain word in a path is usually an endpoint name"
+            }
+            _ => "a plain word is a label or an enum, not something a resource is addressed by",
+        };
         signals.push(Signal {
             kind: SignalKind::ReadsLikeAWord,
             weight: -10,
-            detail: "a plain word in a path is usually an endpoint name".into(),
+            detail: detail.into(),
+        });
+    }
+
+    // A space says label. `Small Talgar №24` is a restaurant's name, and it was offered
+    // as an object identifier because it varies where an identifier would.
+    if value.chars().any(char::is_whitespace) {
+        signals.push(Signal {
+            kind: SignalKind::ContainsWhitespace,
+            weight: -14,
+            detail: "an identifier a resource is addressed by does not contain spaces".into(),
+        });
+    }
+
+    // A version, not an identity: `120.0.6050.0` is a browser build and `2025.7.24.0`
+    // an app release. Both vary in place, repeat and echo — every positive signal here
+    // — and nothing is addressed by one.
+    if looks_like_a_version(value) {
+        signals.push(Signal {
+            kind: SignalKind::LooksLikeAVersion,
+            weight: -12,
+            detail: "a dotted number is a version, not something a resource is addressed by".into(),
+        });
+    }
+
+    // A small whole number is a count, a limit, a status or a page. Weighed rather than
+    // excluded: a numeric primary key is real, and one sitting in a resource-like path
+    // takes eight points from the path to say so.
+    if value.len() <= 4 && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
+        signals.push(Signal {
+            kind: SignalKind::LooksLikeACount,
+            weight: -10,
+            detail: "a small whole number is more often a count or a status".into(),
         });
     }
 
@@ -596,6 +655,18 @@ fn signals_for(
     signals
 }
 
+/// Whether a value is a dotted numeric version — `1.2`, `6.43.1`, `120.0.6050.0`.
+///
+/// Two components at least, so a decimal price is not mistaken for one, and digits
+/// throughout: `v2.1` is a label somebody chose and reaches the word rule instead.
+fn looks_like_a_version(value: &str) -> bool {
+    let parts: Vec<&str> = value.split('.').collect();
+    parts.len() >= 2
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// Whether a value reads as an English-ish word rather than an identifier.
 fn reads_like_a_word(value: &str) -> bool {
     value.len() > 2
@@ -606,15 +677,64 @@ fn reads_like_a_word(value: &str) -> bool {
         && !value.contains('_')
 }
 
-/// Whether a header field name suggests it carries an identifier.
+/// Whether a field name suggests it carries an identifier.
 fn names_an_identifier(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with("-id")
         || lower.ends_with("_id")
+        || lower.ends_with("id")
         || lower.ends_with("-ids")
+        || lower.ends_with("_ids")
+        || lower.ends_with("uuid")
+        || lower.ends_with("_key")
         || lower.contains("-object")
         || lower.contains("tenant")
         || lower.contains("account")
+}
+
+/// Whether a field name says it holds what a thing is *called* rather than which thing.
+///
+/// The distinction the analyzer was missing. An application's telemetry is full of
+/// fields that vary in place, repeat and come back in responses — every positive signal
+/// there is — and hold a word: `propertyName`, `event_name`, `venue_name`,
+/// `propertyType`. What separates them from an identifier is written on the field.
+///
+/// `slug` is deliberately absent: a slug *is* how some applications address a resource,
+/// and one of the endpoints in the traffic that prompted this is
+/// `/venue/slug/{slug}`.
+fn names_a_label(leaf: &str) -> bool {
+    const LABEL_LEAVES: &[&str] = &[
+        "name",
+        "title",
+        "label",
+        "type",
+        "kind",
+        "status",
+        "state",
+        "description",
+        "message",
+        "text",
+        "caption",
+        "heading",
+        "category",
+        "colour",
+        "color",
+        "currency",
+        "language",
+        "locale",
+        "country",
+        "timezone",
+    ];
+    const LABEL_SUFFIXES: &[&str] = &[
+        "_name", "-name", "name", "_type", "-type", "type", "_label", "-label", "_title", "-title",
+        "title", "_status", "-status", "_text", "-text",
+    ];
+
+    if LABEL_LEAVES.contains(&leaf) {
+        return true;
+    }
+    // `propertyname`, `eventname`, `venue_name`, `propertytype` — but not `nameid`.
+    LABEL_SUFFIXES.iter().any(|suffix| leaf.ends_with(suffix))
 }
 
 /// Whether a path segment reads like a collection: `/accounts/1000`.
@@ -1346,5 +1466,95 @@ mod tests {
         fixture.capture("GET", "/api/accounts/1000/invoices", "", "{}");
         let result = fixture.run();
         assert_eq!(result.total(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // What a real application's telemetry looked like
+    //
+    // Every value below was actually offered as an object identifier against a live
+    // target: 1,091 candidates from 756 exchanges, 200 shown, and all of them scored
+    // 29 — the ceiling for anything that varies, repeats and comes back, which is the
+    // whole of the positive case. The analyzer had nothing that could tell a venue id
+    // from the word `boolean`.
+    // -----------------------------------------------------------------------
+
+    /// The signals a value would collect from its field name alone.
+    fn named(leaf: &str) -> Vec<SignalKind> {
+        let mut kinds = Vec::new();
+        if names_a_label(leaf) {
+            kinds.push(SignalKind::NamesALabel);
+        } else if names_an_identifier(leaf) {
+            kinds.push(SignalKind::NamesAnIdentifier);
+        }
+        kinds
+    }
+
+    #[test]
+    fn a_field_named_for_a_label_counts_against_its_value() {
+        // `propertyName`, `propertyType`, `event_name`, `venue_name` — the fields that
+        // produced `advertising_metadata`, `boolean`, `background` and
+        // `Small Talgar №24`.
+        for leaf in [
+            "propertyname",
+            "propertytype",
+            "event_name",
+            "venue_name",
+            "name",
+            "type",
+            "status",
+            "title",
+        ] {
+            assert_eq!(
+                named(leaf),
+                vec![SignalKind::NamesALabel],
+                "{leaf} holds what a thing is called"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_named_for_an_identity_counts_for_its_value() {
+        // The half that matters more: in the same traffic `venue_id` held a real venue
+        // id and scored the same as `boolean`.
+        for leaf in [
+            "venue_id",
+            "menu_item_id",
+            "section_id",
+            "user_uuid",
+            "eventid",
+        ] {
+            assert_eq!(
+                named(leaf),
+                vec![SignalKind::NamesAnIdentifier],
+                "{leaf} is named for an identity"
+            );
+        }
+    }
+
+    #[test]
+    fn a_slug_is_not_treated_as_a_label() {
+        // Some applications address resources by slug, and one of the endpoints in the
+        // traffic that prompted all this is `/venue/slug/{slug}`.
+        assert!(named("slug").is_empty());
+    }
+
+    #[test]
+    fn a_plain_word_is_not_an_identifier_wherever_it_is_written() {
+        // The rule used to apply to path segments only, so every one of these was
+        // exempt for being a JSON value.
+        for value in ["boolean", "background", "homedelivery", "pending"] {
+            assert!(reads_like_a_word(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_version_is_not_an_identifier() {
+        for value in ["1.1.0.3", "120.0.6050.0", "2025.7.24.0", "6.43.1"] {
+            assert!(looks_like_a_version(value), "{value}");
+        }
+        // Not versions: an id with dots in it, and a lone number.
+        for value in ["1", "v2.1", "681c6300.60810b6d", ""] {
+            assert!(!looks_like_a_version(value), "{value}");
+        }
     }
 }

@@ -5,7 +5,8 @@ only file that needs to be current for you to resume. Updated at the end of ever
 milestone.
 
 - **Last updated:** M15.2, plus every false positive the first real engagement
-  produced: `auth.enforcement` went 23 findings → 0, all of them wrong
+  produced: `auth.enforcement` went 23 findings → 0, and the identifier analyzer
+  stopped offering `boolean` as an object identifier
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
