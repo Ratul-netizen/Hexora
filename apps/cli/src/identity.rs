@@ -227,10 +227,28 @@ fn read_secret(args: &AddArgs<'_>) -> Result<String> {
     }
 }
 
+/// Drops a leading auth scheme, so a pasted header value works as a token.
+fn strip_scheme<'a>(value: &'a str, scheme: &str) -> &'a str {
+    let trimmed = value.trim();
+    match trimmed.len() > scheme.len()
+        && trimmed[..scheme.len()].eq_ignore_ascii_case(scheme)
+        && trimmed.as_bytes()[scheme.len()] == b' '
+    {
+        true => trimmed[scheme.len() + 1..].trim_start(),
+        false => trimmed,
+    }
+}
+
 fn build_credential(kind: &str, value: String) -> Result<Credential> {
     match kind.to_ascii_lowercase().as_str() {
+        // Stored without the scheme, because `Credential::apply` writes `Bearer ` back
+        // on. Copying a whole `Authorization:` value out of a captured request is the
+        // obvious way to get a token, and keeping the prefix here sends
+        // `Authorization: Bearer Bearer eyJ...` — which the application rejects, while
+        // every attribution silently fails to match and cross-identity testing reports
+        // that nobody owns the traffic. Both failures look like something else.
         "bearer" => Ok(Credential::Bearer {
-            token: Secret::new(value),
+            token: Secret::new(strip_scheme(&value, "bearer").to_string()),
         }),
         "cookie" => Ok(Credential::Cookie {
             value: Secret::new(value),

@@ -4,8 +4,8 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M15.2 (which cookie says who you are), after a full evening
-  against a real bug bounty target
+- **Last updated:** M15.2, plus the JWT tamper that was not tampering anything —
+  found only once real authenticated traffic reached it
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 

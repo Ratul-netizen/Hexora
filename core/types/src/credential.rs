@@ -252,9 +252,27 @@ impl Tampered {
 fn break_value(value: &str) -> (String, What) {
     // A JWT is three dot-separated parts. Breaking the signature and nothing else is
     // what turns "a modified token was accepted" into "the signature is not verified".
+    //
+    // The **first** character of the signature, not the last, and this is not a detail.
+    //
+    // base64url packs 6 bits per character, and a signature's byte count rarely divides
+    // by three — so the final character carries *padding bits that every decoder
+    // throws away*. Measured against a real token: an 86-character signature carries
+    // 516 bits for 64 bytes of data, leaving **4 bits in the last character that mean
+    // nothing**. Change it and the decoded signature is byte-for-byte identical. The
+    // token is still valid. The server accepts it, correctly.
+    //
+    // This shipped, and against a live target it reported "the session is accepted
+    // without being verified" — high, firm — on eight authenticated endpoints of an
+    // application that verifies signatures perfectly well, including its wallet and
+    // order history. The check was not misreading the evidence; it was never running
+    // the experiment.
+    //
+    // Every character *except* the last contributes 6 meaningful bits to the decoded
+    // bytes, so the first is always a real change.
     let parts: Vec<&str> = value.split('.').collect();
     if parts.len() == 3 && parts.iter().all(|part| !part.is_empty()) {
-        if let Some(signature) = flip_last(parts[2]) {
+        if let Some(signature) = flip_first(parts[2]) {
             return (
                 format!("{}.{}.{}", parts[0], parts[1], signature),
                 What::JwtSignature,
@@ -270,6 +288,19 @@ fn break_value(value: &str) -> (String, What) {
     }
 }
 
+/// The same string with its **first** character replaced by a different one.
+///
+/// For a base64url signature this always changes the decoded bytes, which the last
+/// character does not: see [`break_value`] for what that cost.
+fn flip_first(value: &str) -> Option<String> {
+    let first = value.chars().next()?;
+    let replacement = swap(first);
+    let mut broken = String::with_capacity(value.len());
+    broken.push(replacement);
+    broken.extend(value.chars().skip(1));
+    Some(broken)
+}
+
 /// The same string with its last character replaced by a different one.
 ///
 /// Stays inside the alphabet the value already uses, so a base64url token remains
@@ -277,8 +308,21 @@ fn break_value(value: &str) -> (String, What) {
 /// being unparseable.
 fn flip_last(value: &str) -> Option<String> {
     let last = value.chars().next_back()?;
-    let replacement = match last {
-        'a'..='y' | 'A'..='Y' | '0'..='8' => char::from_u32(last as u32 + 1)?,
+    let replacement = swap(last);
+    let mut broken: String = value.chars().collect();
+    broken.pop();
+    broken.push(replacement);
+    Some(broken)
+}
+
+/// A different character from the same broad class.
+///
+/// Staying inside the alphabet the value already uses, so a base64url token remains
+/// base64url and is rejected — if it is rejected — for being *wrong* rather than for
+/// being unparseable.
+fn swap(c: char) -> char {
+    match c {
+        'a'..='y' | 'A'..='Y' | '0'..='8' => char::from_u32(c as u32 + 1).unwrap_or('A'),
         'z' => 'a',
         'Z' => 'A',
         '9' => '0',
@@ -287,11 +331,7 @@ fn flip_last(value: &str) -> Option<String> {
         // An unexpected character: change it to something from the same broad class
         // rather than guessing.
         _ => 'A',
-    };
-    let mut broken: String = value.chars().collect();
-    broken.pop();
-    broken.push(replacement);
-    Some(broken)
+    }
 }
 
 #[cfg(test)]
@@ -305,6 +345,90 @@ mod tests {
     // -----------------------------------------------------------------------
     // What counts as a credential
     // -----------------------------------------------------------------------
+
+    /// A signature whose base64url length carries padding bits, as real ones do.
+    ///
+    /// 86 characters is 516 bits; a 64-byte signature uses 512. The last four bits are
+    /// padding and every decoder discards them.
+    const PADDED_SIGNATURE: &str = "\
+        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa";
+
+    #[test]
+    fn a_jwt_signature_is_broken_where_the_bytes_actually_change() {
+        // The defect this exists to prevent, and it shipped. `tamper` changed the
+        // *last* character of the signature — which for base64url is padding the
+        // decoder throws away. Measured against a real token: an 86-character signature
+        // carries 516 bits for 64 bytes of data, so changing the last character left
+        // the decoded signature byte-for-byte identical and the token still valid.
+        //
+        // Against a live application that verifies signatures correctly, the check then
+        // reported "the session is accepted without being verified" — high, firm — on
+        // eight authenticated endpoints including a wallet balance and an order
+        // history. It was not misreading the evidence. It was never running the
+        // experiment.
+        let token = format!("header.payload.{PADDED_SIGNATURE}");
+        let credential = Credential::read(&header("Authorization", &format!("Bearer {token}")))
+            .expect("a bearer token");
+        let broken = credential.tamper();
+
+        let sent = broken.expose_value();
+        let signature = sent
+            .strip_prefix("Bearer header.payload.")
+            .expect("the header and payload are untouched");
+
+        assert_ne!(signature, PADDED_SIGNATURE, "nothing was changed at all");
+        assert_eq!(
+            signature.chars().next_back(),
+            PADDED_SIGNATURE.chars().next_back(),
+            "the last character is padding bits a decoder ignores; changing it proves \
+             nothing and is what made this fire on working applications"
+        );
+        assert_ne!(
+            signature.chars().next(),
+            PADDED_SIGNATURE.chars().next(),
+            "every character but the last carries six bits that reach the decoded \
+             signature, so the first is always a real change"
+        );
+        assert_eq!(
+            signature.len(),
+            PADDED_SIGNATURE.len(),
+            "a base64url signature that changed length would be rejected for being \
+             unparseable, which answers a different question"
+        );
+    }
+
+    #[test]
+    fn the_header_and_payload_of_a_tampered_jwt_are_untouched() {
+        // "A modified token was accepted" only means "the signature is not verified" if
+        // the part the signature covers is identical. Change the payload as well and a
+        // rejection could be about either.
+        let credential = Credential::read(&header(
+            "Authorization",
+            &format!("Bearer aaaaaaaa.bbbbbbbb.{PADDED_SIGNATURE}"),
+        ))
+        .expect("a bearer token");
+
+        let sent = credential.tamper().expose_value().to_string();
+        assert!(
+            sent.starts_with("Bearer aaaaaaaa.bbbbbbbb."),
+            "the signed material changed: {sent}"
+        );
+    }
+
+    #[test]
+    fn an_opaque_token_is_still_broken_at_its_last_character() {
+        // Nothing to decode and no padding: a session id's last character is as
+        // meaningful as any other, and the old behaviour was right for it.
+        let credential =
+            Credential::read(&header("X-Api-Key", "abcdefghijklmnop")).expect("an api key");
+        let broken = credential.tamper();
+
+        assert_eq!(broken.what, What::LastCharacter);
+        let sent = broken.expose_value();
+        assert_eq!(sent.len(), "abcdefghijklmnop".len());
+        assert_ne!(sent, "abcdefghijklmnop");
+        assert!(sent.starts_with("abcdefghijklmno"), "{sent}");
+    }
 
     #[test]
     fn a_bearer_token_is_read_with_its_scheme_kept_apart() {

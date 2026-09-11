@@ -508,6 +508,55 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Fixed — the JWT tamper that did not tamper anything
+
+The worst defect found in this codebase so far, and it only appeared once real
+authenticated traffic reached it.
+
+`auth.enforcement` asks whether an application *verifies* the session it reads: replay
+the request with one character of the JWT signature changed, and if the same document
+comes back, the signature is not being checked. A good experiment. It was changing the
+**last** character of the signature.
+
+base64url packs six bits per character, and a signature's byte count rarely divides by
+three — so the final character carries padding bits that every decoder throws away.
+Measured on a real token:
+
+```text
+signature length (chars): 86
+decoded length (bytes):   64
+bits carried by 86 base64url characters: 516
+bits actually used by 64 bytes:          512
+=> the last character holds 4 padding bits a decoder ignores
+
+DECODED SIGNATURE BYTES IDENTICAL: True
+```
+
+The "tampered" token was cryptographically **the same token**. The application accepted
+it, correctly. Hexora read that as acceptance of a forged signature and filed
+`high · firm`: *"Session accepted without being verified"* — on eight authenticated
+endpoints of a company that verifies signatures perfectly well, including its **wallet
+balance** and **order history**.
+
+This is worse than a misjudged severity. The check was not misreading its evidence; it
+was **never running the experiment**, and it would fire on every authenticated endpoint
+of nearly every JWT application. Submitted, it would have cost a researcher their
+standing with a programme.
+
+It breaks the **first** character of the signature now — every character but the last
+contributes six bits to the decoded bytes, so the first is always a real change. The
+header and payload stay byte-identical, because "a modified token was accepted" only
+means "the signature is not verified" if the signed material is untouched. An opaque
+token is still broken at its last character, where there is no padding and every
+character counts.
+
+Verified against the live target that produced it: eight `high/firm` claims became
+**zero**, and the application's 401 to the tampered token was confirmed by hand.
+
+**No test caught this.** Twenty-three covered the module, including several on tampering,
+and every one passed before and after. Three now pin the decoded-bytes property that
+matters, written from the measurements above.
+
 ### Added — M15.2, which cookie says who you are
 
 Cross-identity testing rests on knowing whose session a captured request carried, and
