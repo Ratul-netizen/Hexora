@@ -571,8 +571,10 @@ believable one.
 
 Fixing the identifier analyzer created this. Once it stopped offering `boolean` and
 started offering real identifiers, the list it produced was full of **working
-restaurants** — `681c630060810b6dd12fa130` is a shop in Almaty that takes orders. It
-looks exactly like a test venue's id, because it is the same kind of thing.
+restaurants** — ordinary businesses taking ordinary orders, surfaced out of ordinary
+browsing. Their ids look exactly like a test venue's, because they are the same kind of
+thing. (The examples below are illustrative; a real one is nobody's business but its
+owner's.)
 
 The programme is explicit:
 
@@ -603,7 +605,7 @@ Exercised against the live engagement, on the real restaurant id the analyzer su
 
 ```text
 Constructed 0 cross-identity attempt(s):
-  not constructed — 681c630060810b6dd12fa130 is not one of the entities this
+  not constructed — aaaabbbbccccddddeeeeffff is not one of the entities this
   programme permits testing against, and interacting with data that is not yours
   is the line it draws. It permits: 670e7897e3c56dcc5b5a0989 (venue test account),
   670fa3e9ead6e49d65cc3614 (consumer test account)

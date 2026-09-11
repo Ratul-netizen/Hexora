@@ -385,12 +385,13 @@ mod tests {
         assert!(programme.refuses("670fa3e9ead6e49d65cc3614").is_none());
         assert!(programme.refuses("670e7897e3c56dcc5b5a0989").is_none());
 
-        // A real restaurant's id, surfaced by the analyzer out of ordinary browsing.
-        // It looks exactly like the permitted ones, which is the whole problem.
+        // Standing in for what the analyzer actually surfaces out of ordinary
+        // browsing: a working business's id, which looks exactly like the permitted
+        // ones. That resemblance is the whole problem.
         let refusal = programme
-            .refuses("681c630060810b6dd12fa130")
+            .refuses("aaaabbbbccccddddeeeeffff")
             .expect("a venue nobody authorised");
-        assert!(refusal.contains("681c630060810b6dd12fa130"), "{refusal}");
+        assert!(refusal.contains("aaaabbbbccccddddeeeeffff"), "{refusal}");
         assert!(
             refusal.contains("670fa3e9ead6e49d65cc3614"),
             "it says what is permitted, or the tester has to go and look: {refusal}"
