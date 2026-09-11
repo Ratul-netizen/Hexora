@@ -32,6 +32,7 @@ pub struct AppState {
 struct Inner {
     project: Option<OpenProject>,
     proxy: Option<RunningProxy>,
+    scan: Option<hexora_active::Cancel>,
 }
 
 /// A project the window is working in.
@@ -187,6 +188,50 @@ impl AppState {
         }
     }
 
+    /// Records the token for a scan that is starting, and hands back a clone.
+    ///
+    /// Held here rather than in the command, because the whole point is that a
+    /// *different* command — the one the stop button calls — has to be able to reach
+    /// it while the run is still going.
+    pub fn begin_scan(&self) -> Result<hexora_active::Cancel> {
+        let mut inner = self.lock()?;
+        let cancel = hexora_active::Cancel::new();
+        inner.scan = Some(cancel.clone());
+        Ok(cancel)
+    }
+
+    /// Forgets the token for a scan that has ended.
+    ///
+    /// Called whether the run finished or failed. A token left behind would make the
+    /// stop button look live when there is nothing to stop, and — worse — a later run
+    /// would find a token somebody had already pulled.
+    pub fn end_scan(&self) -> Result<()> {
+        let mut inner = self.lock()?;
+        inner.scan = None;
+        Ok(())
+    }
+
+    /// Stops a running scan before its next request. Returns whether there was one.
+    ///
+    /// What it can promise is exactly what [`hexora_active::Cancel`] promises: no
+    /// further request is sent. A request already on the wire completes, because
+    /// nothing can recall one.
+    pub fn stop_scan(&self) -> Result<bool> {
+        let inner = self.lock()?;
+        match &inner.scan {
+            Some(cancel) => {
+                cancel.stop();
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Whether a scan is running that could be stopped.
+    pub fn scan_running(&self) -> Result<bool> {
+        Ok(self.lock()?.scan.is_some())
+    }
+
     /// Where the proxy is listening, if it is.
     ///
     /// Clears a handle whose task has ended, so a proxy that died is reported as
@@ -233,6 +278,45 @@ mod tests {
         let state = AppState::new();
         assert!(state.project_summary().unwrap().is_none());
         assert!(state.proxy_address().unwrap().is_none());
+        assert!(!state.scan_running().unwrap());
+    }
+
+    #[test]
+    fn a_stop_button_reaches_the_run_it_is_meant_to_stop() {
+        // The whole reason the token lives here. The run holds a clone and the stop
+        // command holds the state, and they have to be the same signal or the button
+        // does nothing while looking as though it did something.
+        let state = AppState::new();
+        let cancel = state.begin_scan().unwrap();
+        assert!(state.scan_running().unwrap());
+        assert!(!cancel.stopped());
+
+        assert!(state.stop_scan().unwrap(), "there was a run to stop");
+        assert!(cancel.stopped(), "the run's own token was not pulled");
+    }
+
+    #[test]
+    fn stopping_when_nothing_is_running_says_so_rather_than_pretending() {
+        let state = AppState::new();
+        assert!(!state.stop_scan().unwrap());
+    }
+
+    #[test]
+    fn a_finished_run_leaves_no_token_behind() {
+        // A token left behind would make the stop button look live with nothing to
+        // stop — and, worse, the next run would find a signal somebody had already
+        // pulled and would refuse to send anything.
+        let state = AppState::new();
+        let first = state.begin_scan().unwrap();
+        first.stop();
+        state.end_scan().unwrap();
+
+        assert!(!state.scan_running().unwrap());
+        let second = state.begin_scan().unwrap();
+        assert!(
+            !second.stopped(),
+            "a new run inherited the previous run's stop signal"
+        );
     }
 
     #[test]

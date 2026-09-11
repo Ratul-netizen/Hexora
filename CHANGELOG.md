@@ -508,6 +508,28 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — stopping a run
+
+`Cancel` existed from M13.3 and nothing pulled it: the CLI constructed a token and
+dropped it, and the window had no stop button. A tester who started a run against a
+client's staging system and watched it slow down had no way to end it, which undercuts
+the point of having a budget at all.
+
+- **A Stop button in the window**, live for exactly as long as there is a run. The
+  token lives in `AppState` because the whole point is that a *different* command has
+  to reach it while the run is going.
+- **Ctrl-C in the CLI pulls the run's token** instead of killing the process, so the
+  normal report is printed — including the sentence saying the run is unfinished.
+  A second Ctrl-C is not intercepted; somebody who wants the process gone still gets
+  it.
+- The promise is stated exactly where it is made: no further request is sent, and one
+  already on the wire finishes, because nothing can recall it.
+
+Verified in the window against a deliberately slowed target: 6 of a planned 48
+requests went out and the result reported itself as unfinished above its findings. The
+CLI's signal path could not be confirmed with a real console Ctrl-C from this
+environment — see STATUS.md.
+
 ### Added — M13.3, the active scheduler
 
 The first thing in Hexora that sends traffic nobody typed. M13.2's passive checks

@@ -131,9 +131,15 @@ application with a deliberately reflecting endpoint and a correctly allowlisted 
 over plain HTTP on loopback. The pacing and ceiling are unit-tested against a
 recording lab with real timing, and the whole thing has never been pointed at a large
 application, a rate-limited one, or one behind a CDN that answers differently to an
-unfamiliar `Origin`. The cancellation path has not been exercised from the window,
-which has no stop button yet — `Cancel` exists and the CLI constructs one, but nothing
-pulls it mid-run.
+unfamiliar `Origin`.
+
+**Stopping is wired, and one half of it is unverified.** The window's Stop button was
+clicked mid-run against a deliberately slowed target: 6 of a planned 48 requests went
+out, and the result reported itself as unfinished above its findings. The CLI's Ctrl-C
+path is written and compiles, but **it has not been confirmed with a real console
+signal** — this environment cannot deliver one to a background Windows process, and
+`kill -INT` from MSYS kills the process instead of raising the handler. Somebody
+should press Ctrl-C during a real run before that path is trusted.
 
 **Two honesty notes carried forward:**
 

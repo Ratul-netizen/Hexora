@@ -1207,10 +1207,33 @@ pub async fn scan_active_run(
     max_requests: Option<usize>,
 ) -> CommandResult<ActiveRunView> {
     let path = state.project_path().map_err(fail)?;
+    // Registered before the work starts and cleared however it ends, so the stop
+    // button is live for exactly as long as there is something to stop.
+    let cancel = state.begin_scan().map_err(fail)?;
 
-    tauri::async_runtime::spawn_blocking(move || active_run_blocking(path, host, max_requests))
-        .await
-        .map_err(fail)?
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        active_run_blocking(path, host, max_requests, cancel)
+    })
+    .await;
+
+    state.end_scan().map_err(fail)?;
+    outcome.map_err(fail)?
+}
+
+/// Stops a running scan before its next request.
+///
+/// Promises exactly what it can: no further request is sent. A request already on the
+/// wire completes, because nothing can recall one — and a button whose tooltip said
+/// otherwise would be a lie somebody might rely on during an engagement.
+#[tauri::command]
+pub fn scan_active_stop(state: State<'_, AppState>) -> CommandResult<bool> {
+    state.stop_scan().map_err(fail)
+}
+
+/// Whether a scan is running that could be stopped.
+#[tauri::command]
+pub fn scan_active_running(state: State<'_, AppState>) -> CommandResult<bool> {
+    state.scan_running().map_err(fail)
 }
 
 /// The run itself, owning everything it touches.
@@ -1218,6 +1241,7 @@ fn active_run_blocking(
     path: std::path::PathBuf,
     host: Option<String>,
     max_requests: Option<usize>,
+    cancel: hexora_active::Cancel,
 ) -> CommandResult<ActiveRunView> {
     let project = Project::open(&path).map_err(fail)?;
     let budget = active_budget(max_requests)?;
@@ -1234,8 +1258,6 @@ fn active_run_blocking(
 
     let plan = hexora_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
         .map_err(fail)?;
-    let cancel = hexora_active::Cancel::new();
-
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

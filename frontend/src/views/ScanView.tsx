@@ -5,6 +5,7 @@ import {
   listDetectors,
   scanActivePlan,
   scanActiveRun,
+  scanActiveStop,
   scanPassive,
   type ActiveRunView,
   type DetectorView,
@@ -278,6 +279,7 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
   const [ceiling, setCeiling] = useState("200");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   const maxRequests = () => {
     const parsed = Number.parseInt(ceiling, 10);
@@ -299,6 +301,7 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
 
   async function send() {
     setBusy(true);
+    setStopping(false);
     setError(null);
     try {
       setOutcome(await scanActiveRun(maxRequests()));
@@ -307,6 +310,16 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
       setError(describeError(e));
     } finally {
       setBusy(false);
+      setStopping(false);
+    }
+  }
+
+  async function stop() {
+    setStopping(true);
+    try {
+      await scanActiveStop();
+    } catch (e) {
+      setError(describeError(e));
     }
   }
 
@@ -336,7 +349,16 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
 
       {error && <p className="notice warn">{error}</p>}
 
-      {plan && <Plan plan={plan} busy={busy} onSend={() => void send()} onOpenExchange={onOpenExchange} />}
+      {plan && (
+        <Plan
+          plan={plan}
+          busy={busy}
+          stopping={stopping}
+          onSend={() => void send()}
+          onStop={() => void stop()}
+          onOpenExchange={onOpenExchange}
+        />
+      )}
       {outcome && <Outcome outcome={outcome} />}
     </section>
   );
@@ -346,12 +368,16 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
 function Plan({
   plan,
   busy,
+  stopping,
   onSend,
+  onStop,
   onOpenExchange,
 }: {
   plan: PlanView;
   busy: boolean;
+  stopping: boolean;
   onSend: () => void;
+  onStop: () => void;
   onOpenExchange: (id: string) => void;
 }) {
   if (plan.experiments.length === 0) {
@@ -429,7 +455,18 @@ function Plan({
         <button className="primary" onClick={onSend} disabled={busy}>
           {busy ? "Running…" : `Send ${plan.requests_at_most} request(s) at most`}
         </button>
+        {busy && (
+          <button className="danger" onClick={onStop} disabled={stopping}>
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        )}
       </div>
+      {busy && (
+        <p className="muted small">
+          Stopping means no further request is sent. One already on the wire will
+          finish, because nothing can recall it.
+        </p>
+      )}
     </div>
   );
 }

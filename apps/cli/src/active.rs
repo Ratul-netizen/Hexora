@@ -139,9 +139,7 @@ pub fn active(args: Args<'_>) -> Result<()> {
         .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let cancel = Cancel::new();
-    let outcome = runtime.block_on(hexora_active::run_into(
-        &plan, &lab, &checks, &cancel, &project,
-    ))?;
+    let outcome = runtime.block_on(stoppable(&plan, &lab, &checks, &cancel, &project))?;
 
     let saved = if args.no_save {
         Vec::new()
@@ -160,6 +158,51 @@ pub fn active(args: Args<'_>) -> Result<()> {
         print_human(&outcome, &saved, args.no_save);
     }
     Ok(())
+}
+
+/// Runs the plan, with Ctrl-C wired to the run's own stop signal.
+///
+/// Without this, Ctrl-C kills the process: the requests already sent are in the
+/// project and nothing says what was done or how far it got. With it, the first
+/// Ctrl-C stops the run before its next request and the normal report is printed,
+/// including the sentence saying the run is unfinished.
+///
+/// A second Ctrl-C is not intercepted — the signal handler is dropped as soon as the
+/// select resolves — so somebody who wants the process gone still gets it. A tool that
+/// swallowed the second one would be worse than one that never handled the first.
+async fn stoppable(
+    plan: &Plan,
+    lab: &dyn hexora_verify::Lab,
+    checks: &[Box<dyn hexora_active::ActiveCheck>],
+    cancel: &Cancel,
+    project: &hexora_storage::Project,
+) -> Result<hexora_active::Outcome> {
+    let run = hexora_active::run_into(plan, lab, checks, cancel, project);
+    tokio::pin!(run);
+
+    // One `select!` and no loop: whichever arm wins, the run is then awaited to
+    // completion. Pulling the signal does not abandon the run — it stops the *next*
+    // request and lets the current one finish, which is the only promise `Cancel` can
+    // keep and therefore the only one worth writing here.
+    tokio::select! {
+        outcome = &mut run => outcome,
+        signal = tokio::signal::ctrl_c() => {
+            if signal.is_err() {
+                // No handler available on this platform or terminal. The run is still
+                // going and still bounded by its budget; saying so is better than
+                // pretending Ctrl-C will work.
+                eprintln!(
+                    "Ctrl-C could not be handled here; the run will finish within its budget."
+                );
+            } else {
+                eprintln!();
+                eprintln!("Stopping. No further request will be sent — one already on the");
+                eprintln!("wire will finish, because nothing can recall it.");
+                cancel.stop();
+            }
+            (&mut run).await
+        }
+    }
 }
 
 /// The budget, from the flags, refusing rather than clamping.

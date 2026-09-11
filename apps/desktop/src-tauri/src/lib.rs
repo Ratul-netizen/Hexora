@@ -75,6 +75,8 @@ pub fn run() {
             commands::scan_passive,
             commands::scan_active_plan,
             commands::scan_active_run,
+            commands::scan_active_stop,
+            commands::scan_active_running,
             commands::detectors_list,
             commands::snapshots_list,
             commands::snapshot_take,

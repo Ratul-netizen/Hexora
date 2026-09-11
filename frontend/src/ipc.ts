@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 10;
+export const EXPECTED_RPC_CONTRACT_VERSION = 11;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -667,6 +667,15 @@ export const scanActiveRun = (
   maxRequests: number | null,
 ): Promise<ActiveRunView> =>
   invoke<ActiveRunView>("scan_active_run", { host: null, maxRequests });
+
+/**
+ * Stops a running scan before its next request.
+ *
+ * Promises exactly that. A request already on the wire completes, because nothing can
+ * recall one. Resolves to whether there was a run to stop.
+ */
+export const scanActiveStop = (): Promise<boolean> =>
+  invoke<boolean>("scan_active_stop");
 
 /* ------------------------------------------------------------------ *
  * Engagement snapshots

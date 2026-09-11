@@ -47,6 +47,9 @@ tokio = { version = "1.43", features = [
     "time",
     "net",
     "io-util",
+    # Ctrl-C during an active scan pulls the run's cancel token instead of killing the
+    # process, so a tester who wants a scan to stop gets a report of what it had done.
+    "signal",
 ] }
 async-trait = "0.1"
 # Concurrency without spawning: a bounded set of futures driven on one task, so the
