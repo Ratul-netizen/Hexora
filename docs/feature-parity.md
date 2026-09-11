@@ -106,6 +106,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Scanner refuses to replay state-changing requests | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | Invariant 18, enforced by the scheduler rather than by each check |
 | Cross-identity access tested across captured traffic | ⚠️ | ⚠️ | **IMPLEMENTED M13.7** | Owner inferred from the captured credential by exact match, never guessed. Same `replay_once` and confidence ladder as the on-demand matrix |
 | Correctly-scoped endpoints are cleared without a declaration | ❌ | ❌ | **IMPLEMENTED M13.7** | Every value differing is the shape of per-caller data; an IDOR returns the owner's values, not different ones |
+| Intruder / payload iteration | ✅ | ✅ | **IMPLEMENTED M14.1** | `hexora fuzz`. Responses grouped by `(status, length)` so the outlier is one short row; concludes nothing, because what a difference means is the tester's judgement |
+| Payload iteration is rate-limited and stoppable | ⚠️ | ⚠️ | **IMPLEMENTED M14.1** | Reuses the scheduler's budget, pause and Ctrl-C. A truncated list says so rather than reading as "nothing stood out" |
 
 ## 5. Extensibility
 

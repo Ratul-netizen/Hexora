@@ -12,6 +12,7 @@ members = [
     "core/verify",
     "core/scan",
     "core/active",
+    "core/fuzz",
     "core/authz",
     "core/report",
     "apps/cli",
@@ -36,6 +37,7 @@ hexora-repeater = { path = "core/repeater" }
 hexora-verify = { path = "core/verify" }
 hexora-scan = { path = "core/scan" }
 hexora-active = { path = "core/active" }
+hexora-fuzz = { path = "core/fuzz" }
 hexora-authz = { path = "core/authz" }
 hexora-report = { path = "core/report" }
 

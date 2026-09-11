@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M13.7 — the same endpoint, as everybody else
+## Status: M14.1 — one request, many values, and the row that does not match
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -96,6 +96,7 @@ work.
 | Redirect verification: the `Location` header resolved the way a browser resolves it, and never followed | **IMPLEMENTED** |
 | Authentication enforcement: whether an endpoint needs a session, and whether it verifies the one it is given | **IMPLEMENTED** |
 | Cross-identity access, scheduled: every authenticated endpoint replayed as every other identity, owner inferred from the captured credential | **IMPLEMENTED** |
+| Intruder: one request, a payload list, and responses grouped by behaviour so the outlier is one short row (`hexora fuzz`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings, the report and snapshots | **IMPLEMENTED** |

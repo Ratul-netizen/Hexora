@@ -22,6 +22,7 @@ hexora-authz.workspace = true
 hexora-verify.workspace = true
 hexora-scan.workspace = true
 hexora-active.workspace = true
+hexora-fuzz.workspace = true
 hexora-report.workspace = true
 tokio.workspace = true
 bytes.workspace = true

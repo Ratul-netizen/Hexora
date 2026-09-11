@@ -508,6 +508,60 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M14.1, the intruder
+
+The tool a tester reaches for between the repeater and the scanner, and the biggest
+thing Hexora was missing against Burp and Caido. Take a request that already works,
+vary one thing in it, read the row that does not match:
+
+```text
+STATUS      BYTES  COUNT  PAYLOADS
+500          1208      7  html/index.html, html/contact.html, html/privacy.html, …
+200          2763      2  ../../../../windows/win.ini, ..\..\..\..\windows\win.ini
+200          4594      1  html/about.html   ← as the unchanged request
+200          4598      1  html%2fabout.html
+200          4626      1  html/../html/about.html
+```
+
+**The grouping is the feature.** A tester sends two hundred values and reads *one* row,
+so the crowd is collapsed to a single line and sorted to the top where a reader's eye
+starts. Grouped exactly on `(status, body length)` with no tolerance: a one-byte
+difference is the difference between `true` and `false`, which is what a blind test is
+looking for.
+
+**Outliers are measured against the majority, not the baseline.** In a list of two
+hundred usernames the unchanged request is one more wrong answer; the row worth reading
+is the one that broke the pattern the other hundred and ninety-nine made. Nothing is
+reported as an outlier when everything is the same, or when everything is different —
+twenty payloads and twenty behaviours is a page that varies, not a signal.
+
+**It concludes nothing.** No findings, no hypotheses, nothing written to the findings
+store. A response that differs is a response that differs, and what that means is a
+judgement about the application made by the person who chose the payload list. Keeping
+it that way is what stops it becoming a second scanner with worse evidence.
+
+**It will replay a POST, and says so first.** Invariant 18 is a rule about what a
+*queue* may decide on its own; a tester who types the command has decided, and the
+method and request count are printed before anything goes out — the same bargain
+`hexora authz` makes. It still borrows the budget, the pause and the Ctrl-C stop,
+because a payload list can generate more traffic in a minute than every automated check
+in this build put together.
+
+- `hexora fuzz <project> <request> --at <name> --payloads <file> [--dry-run] [--yes]`,
+  or `--replacing <value>` to put the payload wherever a value currently appears.
+- Payloads go through `hexora_types::inject::substitute` — the same addressing M12.5
+  uses for object identifiers and M13.4 for markers. There is one substitution in this
+  codebase and everything goes through it.
+- `--at` with a name the request does not have lists what it *does* have, rather than
+  leaving a tester to guess.
+
+**Found a real vulnerability on its first use.** Against `testasp.vulnweb.com`,
+12 payloads into `Templatize.asp?item=`: the two path-traversal values came back 200 at
+a length nothing else shared, and the response body contains the contents of
+`win.ini`. Local file inclusion, surfaced in twelve requests by the grouping — and
+confirmed by a person reading the body, which is the division of labour the tool is
+built around.
+
 ### Added — M13.7, cross-identity access across an engagement
 
 M12.1 replays one captured request as every identity, when a tester names it. This is

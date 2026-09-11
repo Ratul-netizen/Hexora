@@ -1566,6 +1566,7 @@ dependencies = [
  "hexora-active",
  "hexora-authz",
  "hexora-engine",
+ "hexora-fuzz",
  "hexora-http",
  "hexora-proxy",
  "hexora-repeater",
@@ -1619,6 +1620,20 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "hexora-fuzz"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "hexora-active",
+ "hexora-engine",
+ "hexora-repeater",
+ "hexora-types",
+ "hexora-verify",
+ "tokio",
 ]
 
 [[package]]

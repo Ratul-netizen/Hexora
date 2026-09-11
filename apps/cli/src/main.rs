@@ -18,6 +18,7 @@ mod active;
 mod authz;
 mod detectors;
 mod findings;
+mod fuzz;
 mod history;
 mod identifiers;
 mod identity;
@@ -41,7 +42,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M13.7. The proxy, HTTP/1.x engine \
+                  Development status: M14.1. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -451,6 +452,58 @@ enum Command {
         /// Continue from the cursor printed by a previous page.
         #[arg(long, value_name = "CURSOR")]
         after: Option<String>,
+    },
+
+    /// Send one request many times, once per payload, and compare what came back.
+    ///
+    /// The tool between the repeater and the scanner: take a request that already
+    /// works, vary one thing in it, and read the row that does not match the others.
+    ///
+    /// It concludes nothing. A response that differs is a response that differs, and
+    /// what that means is a judgement about the application — so nothing is written
+    /// into the findings store.
+    ///
+    /// Unlike `scan active`, this will replay a POST if you ask it to: a queue
+    /// deciding that on its own is not a test anybody consented to, and a person
+    /// typing the command has decided. It says what it is about to do first.
+    Fuzz {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The request to vary, from `hexora history`.
+        id: String,
+
+        /// Where the payload goes: a query parameter or header name.
+        #[arg(long, value_name = "NAME")]
+        at: Option<String>,
+
+        /// Or: the value in the request to replace, wherever it appears.
+        #[arg(long, value_name = "VALUE", conflicts_with = "at")]
+        replacing: Option<String>,
+
+        /// A file of payloads, one per line.
+        #[arg(long, value_name = "FILE")]
+        payloads: Option<PathBuf>,
+
+        /// Milliseconds to wait between requests.
+        #[arg(long, value_name = "MS")]
+        delay: Option<u64>,
+
+        /// The most requests this run may send. Defaults to the whole list.
+        #[arg(long, value_name = "N")]
+        max_requests: Option<usize>,
+
+        /// Work out what would be sent, print it, and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Send without asking first.
+        #[arg(long)]
+        yes: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
     },
 
     /// Compile a finding into steps somebody can run.
@@ -956,6 +1009,30 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             no_save: *no_save,
             json: cli.json,
         }),
+        Command::Fuzz {
+            path,
+            id,
+            at,
+            replacing,
+            payloads,
+            delay,
+            max_requests,
+            dry_run,
+            yes,
+            insecure,
+        } => fuzz::fuzz(fuzz::Args {
+            project: path,
+            id,
+            at: at.as_deref(),
+            replacing: replacing.as_deref(),
+            payloads: payloads.as_deref(),
+            delay_ms: *delay,
+            max_requests: *max_requests,
+            dry_run: *dry_run,
+            yes: *yes,
+            insecure: *insecure,
+            json: cli.json,
+        }),
         Command::Poc {
             path,
             id,
@@ -1207,14 +1284,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M13.7",
+            "milestone": "M14.1",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M13.7 (cross-identity access, scheduled)");
+        println!("  milestone:               M14.1 (the intruder)");
     }
 }
 
@@ -1269,13 +1346,13 @@ mod tests {
             .map(|command| command.get_name().to_lowercase())
             .collect();
 
-        for absent in ["fuzz", "intruder", "workflow", "collaborate"] {
+        for absent in ["intruder", "workflow", "collaborate"] {
             assert!(
                 !commands.iter().any(|name| name.starts_with(absent)),
                 "help offers a {absent} command that does not exist: {commands:?}"
             );
         }
-        for present in ["authz", "scan", "detectors"] {
+        for present in ["authz", "scan", "detectors", "fuzz"] {
             assert!(
                 commands.iter().any(|name| name == present),
                 "and it must still list the ones that do: {commands:?}"
@@ -1325,7 +1402,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M13.7"),
+            help.contains("M14.1"),
             "users must not mistake this for a finished tool"
         );
     }

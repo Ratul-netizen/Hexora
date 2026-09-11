@@ -1,0 +1,21 @@
+[package]
+name = "hexora-fuzz"
+description = "One request, many values, and a readable account of what came back"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-active.workspace = true
+hexora-repeater.workspace = true
+hexora-verify.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+hexora-engine.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

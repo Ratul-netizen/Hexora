@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M13.7, plus the first run against a real third-party target
+- **Last updated:** M14.1 (the intruder), after two runs against real targets
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -44,6 +44,7 @@ milestone.
 | **M13.5** — Redirect destination | The `Location` header is resolved the way a browser resolves it and **never followed** — following a destination the target chose is the one way an automated tool gets talked into traffic nobody authorized, and the scope guard is a backstop rather than a reason to try. The answer is a *host*, not a substring: `//elsewhere`, `/\elsewhere` and `https://trusted@elsewhere` are all taken and all invisible to a filter matching `http`, while `/redirect?to=https://elsewhere` is carried and is refuted **with the reason**. An application that refuses the absolute form and accepts the protocol-relative one is reported as what it is — a filter that does not cover a form browsers treat identically. Probe destinations are `.invalid`, so they never resolve and nobody can ever register them. New invariant 16 |
 | **M13.6** — Authentication enforcement | Two failures a cross-identity matrix cannot see, because every identity in one holds a *valid* credential. Three requests per endpoint: replayed as captured (the baseline — without it an expired session makes everything look refused and the run would report *enforced* having tested nothing), then with no credential, then with the captured credential's **JWT signature** changed by one character and its header and payload byte-identical. An application that accepts the third is not verifying signatures, which is a different sentence from *authentication is missing*. The middle outcome — same status, different content — is its own answer and reaches a report as a lead, because that is what a sign-in page answered 200 looks like. Credentials are broken without ever being written down: no `Display`, a redacting `Debug`, one named accessor. New invariants 17 and 18 |
 | **M13.7** — Cross-identity access, scheduled | M12.1's matrix across an engagement's traffic rather than one request a tester names. Whose session was captured is answered by **applying each declared credential and comparing byte for byte** — an exact answer or none at all, because proxy traffic announces no identity id and everything a cross-identity test concludes rests on getting it right. One implementation, two front doors: the check calls the same `replay_once` and `judge` that `hexora authz` does, so a scheduled verdict and an on-demand one cannot disagree. A budget too small for every identity sends **nothing** rather than testing a subset and reporting it as the whole. Against the IDOR demo it reached **Firm with no declared object ids**, through M12.10's same-document path behind a refused anonymous control |
+| **M14.1** — The intruder | One request, a payload list, and responses grouped by `(status, length)` so the crowd is one line and the outlier is a short row below it. Outliers are measured against the **majority** rather than the baseline — in two hundred usernames the unchanged request is one more wrong answer. It **concludes nothing**: no findings, no hypotheses, nothing in the findings store, because what a difference means is the judgement of whoever chose the payloads. It will replay a `POST` where the scheduler refuses to, and says the method and the count first. Found a real local file inclusion on `testasp.vulnweb.com` in twelve requests on its first use |
 
 ## Next
 
@@ -116,6 +117,16 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
+- **Reading one exchange.** Found by using the intruder on a real target: the CLI can
+  *list* traffic and dump a body by id, and cannot show one request and its response
+  together. Confirming the file-inclusion finding meant `history --body` plus a mental
+  reconstruction of what was sent. Burp and Caido let you click a row. This is small,
+  and it is in the way of every workflow the intruder feeds.
+- **Telling Hexora's traffic from the application's, in the interface.** `history` mixes
+  proxy captures with the scanner's own probes and the matrix's replays. The *analysis*
+  layer learned this distinction in M13.4 and M13.7; the interface has not, and the
+  first thing the intruder did was offer a scanner-generated URL as the request to
+  work from.
 - **Discovery.** The first real-target run found its one bug the moment the right page
   was in the project, and would have found nothing otherwise: coverage is exactly what
   somebody captured. Whether that gap is closed by a crawler, by better capture
@@ -172,6 +183,27 @@ that exist, on the inputs they tested.
   `Logout.asp` was in the project, and would never have found it otherwise — a human
   reading the site found that page, not Hexora. There is no crawler, and this is the
   single biggest limiter on what a scan is worth today.
+
+**A second real target, and the authorization checks' first real traffic.**
+`rest.vulnweb.com` — an API with JWT and Basic auth, ten endpoints captured under two
+declared identities. 80 requests, 40 experiments, **zero findings and zero false
+positives**, all correct: the API genuinely verifies both credential types and isolates
+them from each other. `auth.enforcement` and `authz.scheduled` met real traffic for the
+first time, and the owner of each captured request was identified from its credential
+without help.
+
+Checked by hand afterwards, because a clean result is only worth what its verification
+is: the API also refuses `alg: none`, a lower-cased `NONE`, a missing signature and a
+traversed `kid`. Hexora tests none of those four — it flips one character of the
+signature — so the clean result is *correct* rather than lucky, but the coverage gap is
+real and now measured rather than assumed.
+
+**Found with the intruder, not the scanner.** `Templatize.asp?item=` on
+`testasp.vulnweb.com` reads arbitrary files: twelve payloads, and the two traversal
+values came back at a length nothing else shared, carrying the contents of `win.ini`.
+There is no path-traversal or file-inclusion check in this build — a person found it
+using a tool that groups responses, which is the honest division of labour and also a
+named gap.
 
 Still untested: a rate-limited application, one behind a CDN that answers differently to
 an unfamiliar `Origin`, and anything at the scale where 20 000 exchanges and a
