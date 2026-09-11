@@ -723,7 +723,9 @@ not an object and an object is not an ownership claim.
 M15.1  Session adoption      a person logs in, Hexora notices  ✔
 M15.2  Which cookie is you   attribution through a jar that changes  ✔
 M15.4  Renewal sequence      a stored sequence with holes where secrets go
-M15.3  In-session detection  replay a known-good request, compare structurally
+M15.3  What a credential says  expiry and subject, read from the token  ✔
+M15.4  Runs outlive sessions  refresh before, stop when it dies  ✔
+M15.6  In-session detection  replay a known-good request, compare structurally
 ```
 
 **M15.5 — Custom scan checks** · PLANNED (a check DSL, in the spirit of BChecks)

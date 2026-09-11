@@ -508,6 +508,40 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M15.4, a run that outlives its session says so
+
+Sessions are short and runs are not. A token issued for half an hour, adopted with two
+minutes left on it, dies partway through a queue of two hundred experiments — and
+everything after that answers `401`. Measured on a live target: a run stopped being able
+to establish anything **forty-nine seconds in**, and spent the rest of its budget finding
+that out one request at a time.
+
+**`--refresh`** adopts the freshest session the proxy has recorded before anything is
+planned. It sends nothing — it reads traffic the project already holds — so it is the
+cheapest minute of any run. It can only adopt what a browser recently sent; when nothing
+fresher exists it says so and the run starts with what it had.
+
+**`StoppedBecause::CredentialExpired`** is its own reason, checked before each
+experiment rather than once at the start. A ceiling means *there was more to do*; an
+expired session means *nothing after this point could have answered anything*. The first
+is about scope and the second about evidence, and a retest comparing two runs needs to
+tell them apart — so they are separate values in the run record, with a test that they
+stay separate.
+
+Only what a credential states about itself. An opaque token knows nothing and is never
+assumed dead, and one live identity keeps a run going even when another has lapsed:
+an engagement with three sessions does not stop because one of them ended.
+
+Exercised on the live engagement, with the browser idle: `--refresh` adopted the newest
+credential, found it expired eleven minutes ago, and queued **nothing at all**. Zero
+requests sent, with the reason and what to do about it.
+
+**And the reason is said once.** The plan printed it 444 times — one per hypothesis —
+which is the wall of identical paragraphs that teaches a reader to skip the section
+explaining what was not tested. The run summary had grouped repeated reasons since
+M13.3; the plan now does too, keeping per-item detail while a reason applies to three or
+fewer.
+
 ### Added — M15.3, reading what a credential says about itself
 
 Getting `authz.scheduled` to a verdict against a real application took four fixes. Each

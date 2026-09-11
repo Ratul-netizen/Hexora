@@ -57,6 +57,27 @@ pub fn is_state_changing(method: &str) -> bool {
         .any(|safe| safe.eq_ignore_ascii_case(method))
 }
 
+/// Whether every credential that says anything has now said it is finished.
+///
+/// The anonymous principal is ignored: it has nothing to expire and its absence of a
+/// session is the point of it. So is a credential that states no lifetime — an opaque
+/// token knows nothing about itself, and assuming it dead would stop runs over a number
+/// nobody wrote.
+fn expired_now(identities: &[hexora_types::identity::Identity]) -> bool {
+    let now = chrono::Utc::now().timestamp();
+    let mut said_something = false;
+    for identity in identities {
+        if identity.lifetime().is_none() {
+            continue;
+        }
+        said_something = true;
+        if !identity.credential_expired(now) {
+            return false;
+        }
+    }
+    said_something
+}
+
 /// How many of these are the anonymous principal, which has nothing to expire.
 fn anonymous_count(identities: &[hexora_types::identity::Identity]) -> usize {
     identities
@@ -87,6 +108,19 @@ pub enum StoppedBecause {
     Cancelled,
     /// The run reached [`Budget::max_requests`].
     CeilingReached,
+    /// The credentials it was replaying as expired while it ran.
+    ///
+    /// Sessions are short and runs are not. A token issued for half an hour, adopted
+    /// with two minutes left, dies partway through a queue of two hundred experiments —
+    /// and everything after that answers `401`. Measured: a run stopped being able to
+    /// establish anything forty-nine seconds in, and spent the rest of its budget
+    /// finding that out one request at a time.
+    ///
+    /// Its own reason rather than a silent truncation, because the difference matters:
+    /// a ceiling means *there was more to do*, and this means *nothing after this point
+    /// could have answered anything*. The first is about scope, the second is about
+    /// evidence.
+    CredentialExpired,
 }
 
 impl StoppedBecause {
@@ -95,12 +129,19 @@ impl StoppedBecause {
         match self {
             Self::Cancelled => "cancelled",
             Self::CeilingReached => "ceiling",
+            Self::CredentialExpired => "credential_expired",
         }
     }
 
     /// How it reads, in the sentence that must never be mistaken for "found nothing".
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::CredentialExpired => {
+                "the session being replayed expired while the run was working, so the \
+                 experiments after that point could not have established anything and \
+                 were not attempted. Browse the application logged in, then `hexora \
+                 identity refresh`, and run it again"
+            }
             Self::Cancelled => {
                 "the run was stopped before it finished, so the experiments it had not \
                  reached were not performed"
@@ -128,6 +169,13 @@ pub struct Plan {
     /// drains: a plan a tester approved after reading a dry run must be the plan that
     /// runs, and re-reading could pick up an edit made in between.
     pub programme: Programme,
+    /// The identities the run replays as, for asking whether their sessions are still
+    /// alive while it works.
+    ///
+    /// The same list every subject holds. Kept here as well so the loop can ask the
+    /// question without a subject in hand — a queue that has just gone empty still
+    /// needs to say *why*.
+    pub programme_identities: Vec<hexora_types::identity::Identity>,
 }
 
 impl Plan {
@@ -344,6 +392,7 @@ impl Plan {
             skipped,
             budget: budget.clone(),
             programme,
+            programme_identities: identities.as_ref().clone(),
         })
     }
 
@@ -534,6 +583,13 @@ async fn run_recording(
                 if !spend.has_room(plan.budget.per_hypothesis) {
                     break;
                 }
+                // Checked here rather than once at the start: a token adopted with two
+                // minutes left dies in the middle of the queue, and every experiment
+                // after that spends a request to be told `401`. Free to ask — the
+                // answer is written in the credential.
+                if expired_now(&plan.programme_identities) {
+                    break;
+                }
                 done.push(one(subject, lab, checks, &plan.budget, &spend, cancel).await);
                 // Between experiments as well as within them: two experiments against
                 // the same host back to back is the same burst the pause exists to
@@ -566,6 +622,11 @@ async fn run_recording(
 
     let stopped = if cancel.stopped() {
         Some(StoppedBecause::Cancelled)
+    } else if judged.len() < plan.work.len() && expired_now(&plan.programme_identities) {
+        // Asked before the ceiling, because when both are true this is the one that
+        // explains the result: a run held back by its budget had more to do, and a run
+        // whose session died could not have done it.
+        Some(StoppedBecause::CredentialExpired)
     } else if judged.len() < plan.work.len() {
         // The only other way to leave work undone. Reported even though the run
         // "succeeded", because the difference between a finished run and a truncated
@@ -812,9 +873,65 @@ mod tests {
 
     #[test]
     fn stopping_early_never_reads_as_finding_nothing() {
-        for reason in [StoppedBecause::Cancelled, StoppedBecause::CeilingReached] {
+        for reason in [
+            StoppedBecause::Cancelled,
+            StoppedBecause::CeilingReached,
+            StoppedBecause::CredentialExpired,
+        ] {
             let said = reason.as_str();
-            assert!(said.contains("were not performed"), "{said}");
+            assert!(
+                said.contains("were not performed") || said.contains("were not attempted"),
+                "{said}"
+            );
         }
+    }
+
+    #[test]
+    fn each_reason_a_run_stopped_is_stored_as_its_own_value() {
+        // A ceiling means there was more to do; an expired session means nothing after
+        // that point could have answered anything. Collapsing them would make a retest
+        // unable to tell scope from evidence.
+        let columns: Vec<&str> = [
+            StoppedBecause::Cancelled,
+            StoppedBecause::CeilingReached,
+            StoppedBecause::CredentialExpired,
+        ]
+        .iter()
+        .map(StoppedBecause::as_column)
+        .collect();
+
+        let mut unique = columns.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), columns.len(), "{columns:?}");
+    }
+
+    #[test]
+    fn a_credential_that_states_no_lifetime_never_stops_a_run() {
+        use hexora_types::identity::Identity;
+
+        // An opaque token knows nothing about itself. Treating silence as death would
+        // stop runs over a number nobody wrote.
+        assert!(!expired_now(&[Identity::bearer(
+            "Opaque",
+            "a-session-value"
+        )]));
+        assert!(!expired_now(&[Identity::anonymous()]));
+        assert!(!expired_now(&[]));
+    }
+
+    #[test]
+    fn one_live_session_keeps_a_run_going() {
+        use hexora_types::identity::Identity;
+
+        // An engagement with three identities does not stop because one lapsed.
+        let dead = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.c2ln";
+        let alive = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjQwMDAwMDAwMDB9.c2ln";
+
+        assert!(expired_now(&[Identity::bearer("Dead", dead)]));
+        assert!(!expired_now(&[
+            Identity::bearer("Dead", dead),
+            Identity::bearer("Alive", alive),
+        ]));
     }
 }

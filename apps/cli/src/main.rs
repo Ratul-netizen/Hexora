@@ -44,7 +44,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M15.3. The proxy, HTTP/1.x engine with TLS, \
+                  Development status: M15.4. The proxy, HTTP/1.x engine with TLS, \
                   projects, traffic capture, the repeater, authorization testing, the \
                   passive scanner, the active scheduler, the intruder, findings and \
                   reports all work. There is no crawler: Hexora tests the traffic it \
@@ -841,6 +841,18 @@ enum ScanCommand {
         /// Print the results without writing them into the project.
         #[arg(long)]
         no_save: bool,
+
+        /// Adopt the freshest session from proxy traffic before planning.
+        ///
+        /// Sessions are short and runs are not: a token issued for half an hour and
+        /// adopted by hand ten minutes ago leaves twenty, and a long queue does not fit
+        /// in twenty. This costs nothing — it reads traffic the project already holds
+        /// and sends no requests.
+        ///
+        /// It can only adopt what a browser recently sent. If nothing fresher was
+        /// captured the run starts with what it had, and stops when that expires.
+        #[arg(long)]
+        refresh: bool,
     },
 }
 
@@ -1219,6 +1231,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             yes,
             insecure,
             no_save,
+            refresh,
         }) => active::active(active::Args {
             project: path,
             host: host.as_deref(),
@@ -1230,6 +1243,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             yes: *yes,
             insecure: *insecure,
             no_save: *no_save,
+            refresh: *refresh,
             json: cli.json,
         }),
         Command::Fuzz {
@@ -1509,14 +1523,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M15.3",
+            "milestone": "M15.4",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M15.3 (what a credential says about itself)");
+        println!("  milestone:               M15.4 (a run that outlives its session)");
     }
 }
 
@@ -1659,7 +1673,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M15.3"),
+            help.contains("M15.4"),
             "users must not mistake this for a finished tool"
         );
     }

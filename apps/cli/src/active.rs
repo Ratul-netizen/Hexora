@@ -40,6 +40,38 @@ use hexora_types::verify::Verification;
 use hexora_types::{HexoraError, Result};
 use hexora_verify::RepeaterLab;
 
+/// Adopts the freshest credential the proxy has seen, for every identity that has one.
+///
+/// Quiet about what it did not change: an identity whose session is already the newest
+/// one recorded is not news, and a run that printed a paragraph per identity before
+/// every experiment would bury the plan.
+fn refresh_sessions(project: &hexora_storage::Project) -> Result<()> {
+    let identities = project.identities();
+    let traffic = project.traffic();
+    let scope = project.settings().scope()?;
+
+    for identity in identities.list()? {
+        let found =
+            hexora_authz::session::find_renewal(&traffic, &scope, &identity, REFRESH_SAMPLE, None)?;
+        let Some(renewal) = found else {
+            continue;
+        };
+        // The value never appears. A host, a time and a size are what a person needs to
+        // recognise the session they just created.
+        println!(
+            "Adopted a newer {} for {} from {} ({} bytes)",
+            renewal.slot, identity.label, renewal.host, renewal.length
+        );
+        let mut updated = identity.clone();
+        updated.credential = renewal.credential(&identity.credential);
+        identities.put(&updated)?;
+    }
+    Ok(())
+}
+
+/// How many recent exchanges `--refresh` reads looking for a newer session.
+const REFRESH_SAMPLE: usize = 500;
+
 /// Options for `hexora scan active`.
 pub struct Args<'a> {
     pub project: &'a Path,
@@ -61,6 +93,8 @@ pub struct Args<'a> {
     pub insecure: bool,
     /// Do not write the findings into the project.
     pub no_save: bool,
+    /// Adopt the freshest session from proxy traffic before planning.
+    pub refresh: bool,
     pub json: bool,
 }
 
@@ -99,6 +133,16 @@ pub fn active(args: Args<'_>) -> Result<()> {
     // automated traffic, so the scope guard refuses an out-of-scope target rather
     // than flagging it the way it would a request a person typed.
     let lab = RepeaterLab::scanner(&repeater);
+
+    // The freshest session this project has seen, before anything is planned.
+    //
+    // Sessions are short and runs are not: a token issued for half an hour and adopted
+    // by hand ten minutes ago leaves twenty, and a queue of two hundred experiments
+    // does not fit in twenty. Starting from the newest credential the proxy has
+    // recorded is the cheapest minute of the run — it sends nothing.
+    if args.refresh {
+        refresh_sessions(&project)?;
+    }
 
     let checks = hexora_active::active_checks();
     let plan = Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)?;
@@ -283,9 +327,33 @@ fn print_plan(plan: &Plan) {
     if !plan.skipped.is_empty() {
         println!();
         println!("Not tested ({}):", plan.skipped.len());
-        for skipped in &plan.skipped {
-            println!("  {} — {}", skipped.detector, skipped.claim);
-            println!("    {}", skipped.why);
+        print_skipped(&plan.skipped);
+    }
+}
+
+/// How many share a reason before it is worth saying once instead of each time.
+///
+/// Below this, which hypothesis was skipped is the useful part. Above it, the reason
+/// is — a session that expired said so four hundred and forty-four times in one plan,
+/// and a wall of identical paragraphs is how a reader learns to skip the section that
+/// explains what was not tested.
+const GROUP_ABOVE: usize = 3;
+
+fn print_skipped(skipped: &[hexora_active::Skipped]) {
+    let mut by_reason: std::collections::BTreeMap<&str, Vec<&hexora_active::Skipped>> =
+        Default::default();
+    for item in skipped {
+        by_reason.entry(item.why.as_str()).or_default().push(item);
+    }
+
+    for (why, items) in by_reason {
+        if items.len() > GROUP_ABOVE {
+            println!("  {} — {why}", items.len());
+            continue;
+        }
+        for item in items {
+            println!("  {} — {}", item.detector, item.claim);
+            println!("    {why}");
         }
     }
 }
