@@ -64,7 +64,7 @@ top of them rather than beside them.
 M12.7  Identifier suggestions        candidates a human confirms, never assertions  ✔
 M12.8  Engagement snapshots          what changed since the last assessment  ✔
 M13.1  Verification framework        detector ≠ finding, enforced by the type system  ✔
-M13.2  Passive scanner               observations over captured traffic, no new requests
+M13.2  Passive scanner               observations over captured traffic, no new requests  ✔
 M13.3  Active test scheduler         one queue, one ScopeGuard, bounded concurrency
 M13.4  Reflected-input verification  context-aware, not "the string came back"
 M13.5  Redirect verification         a controlled destination, never blindly followed
@@ -411,7 +411,7 @@ Deliberately not built: the object-safe registry and the scheduler. `Detector` a
 dispatches over a heterogeneous set — and the queue belongs to M13.3, where the
 requirements are real.
 
-**M13.2 — Passive scanner** · PLANNED
+**M13.2 — Passive scanner** · DONE
 
 Observations over traffic that has already been captured. No new requests, which makes
 it safe to run on any engagement and easy to benchmark.
@@ -433,6 +433,36 @@ it safe to run on any engagement and easy to benchmark.
 `Server: nginx/1.24.0` is a fact about the response; whether it matters depends on the
 engagement. A scanner that files it as a finding teaches people to ignore the findings
 list, which is the only thing a findings list must never become.
+
+Built with six checks, covering six of the ten rows above:
+
+```text
+headers.security      security headers, applicability decided per header
+cookies.security      Set-Cookie attributes, in the context of the cookie
+cors.configuration    who may read responses, and with whose credentials
+disclosure.headers    technology banners — informational, never filed
+cache.sensitive       cache directives on authenticated responses
+tls.observations      what the recorded handshake showed
+```
+
+Four decisions worth recording:
+
+- **The pass takes no transport.** `scan(&Project, &Selection)` has nowhere to put
+  one, so "passive" is a property of the signature. Security invariant 12.
+- **Three products, one of which is a finding.** Informational observations are listed
+  and never filed; reportable ones become leads; hypotheses stop until an experiment
+  settles them. The result is deliberately boring: many observations, few hypotheses,
+  fewer findings.
+- **A check does not choose its own verification.** The pass applies
+  `Verification::Observed` to every observation, so no passive check can promote
+  itself above a lead.
+- **Response bodies are not loaded.** No check here needs one; it keeps a large
+  engagement out of RAM and keeps the check most likely to quote somebody's data out
+  of the build.
+
+The four rows not covered — mixed content, sensitive data in responses,
+authentication/session observations, technology fingerprinting beyond banners — are
+either body-reading (deliberately deferred with the accessor) or need an experiment.
 
 **M13.3 — Active test scheduler** · PLANNED
 

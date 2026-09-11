@@ -270,6 +270,9 @@ fn write_finding(out: &mut String, index: usize, reported: &ReportedFinding) {
     let mut meta = vec![
         format!("confidence: {}", confidence_word(f.confidence)),
         format!("status: {}", status_word(f.status)),
+        // Which check said so, and which version of it. Escaped with everything
+        // else below: a detector id is ours, but an extension's is not.
+        format!("raised by {}", crate::raised_by(&f.source)),
     ];
     for tag in [f.cwe.as_ref(), f.owasp.as_ref(), f.cvss.as_ref()]
         .into_iter()

@@ -1,0 +1,22 @@
+[package]
+name = "hexora-scan"
+description = "Hexora's passive scanner: observations over traffic that has already been captured, and nothing sent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-storage.workspace = true
+hexora-verify.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hexora-types = { workspace = true, features = ["test-support"] }
+bytes.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

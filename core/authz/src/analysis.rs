@@ -50,7 +50,9 @@ use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, Messa
 use hexora_types::identity::{Identity, PrivilegeLevel};
 use hexora_types::ids::TargetId;
 use hexora_types::object::ObjectLocation;
-use hexora_types::verify::{DetectorId, DetectorInfo, Support, Verification, Verified, Writeup};
+use hexora_types::verify::{
+    DetectorId, DetectorInfo, DetectorMode, Support, Verification, Verified, Writeup,
+};
 use hexora_types::Result;
 use hexora_verify::{Detector, Lab, Verifier};
 
@@ -60,17 +62,23 @@ use crate::{Cell, Fingerprint, Matrix, Outcome, Verdict};
 /// The check that replays one captured request as everybody.
 pub const CROSS_IDENTITY: DetectorInfo = DetectorInfo {
     id: DetectorId("authz.cross_identity"),
-    version: 1,
+    name: "Cross-identity access",
+    version: "1.0.0",
     about: "one identity reaching a resource that belongs to another",
-    sends: true,
+    mode: DetectorMode::Active,
+    observes: false,
+    hypothesizes: true,
 };
 
 /// The check that builds the request nobody captured.
 pub const CONSTRUCTED_OBJECT: DetectorInfo = DetectorInfo {
     id: DetectorId("authz.constructed_object"),
-    version: 1,
+    name: "Constructed object access",
+    version: "1.0.0",
     about: "a request built to ask for somebody else's declared object",
-    sends: true,
+    mode: DetectorMode::Active,
+    observes: false,
+    hypothesizes: true,
 };
 
 /// The longest excerpt quoted as evidence from a response body.

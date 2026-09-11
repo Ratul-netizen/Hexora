@@ -508,6 +508,95 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.2, the passive scanner
+
+The first scanner, built on M13.1 and deliberately boring: many observations, a few
+hypotheses, fewer findings — and every finding a lead.
+
+**It cannot send, and that is the signature.**
+
+```rust
+pub fn scan(project: &Project, selection: &Selection) -> Result<Summary>
+```
+
+No transport, no `Lab`, nothing in a `Project` that reaches a network. "The passive
+scanner makes no requests" is a property of what the function was given rather than a
+rule somebody keeps — which is also why the test for it asserts a full pass runs
+rather than asserting a mock went uncalled. There is no mock, because there is no
+parameter.
+
+**Three products, and only one of them is a finding.**
+
+```text
+Observation (informational)   "Server: nginx/1.24.0"          listed, never filed
+Observation (reportable)      "no HSTS on an HTTPS response"  → a lead
+Hypothesis                    "the origin may be reflected"   → stops here
+```
+
+A check does **not** choose its own verification. The pass applies
+`Verification::Observed` to every observation, whose ceiling is `Reported` — not
+actionable, a lead. So no passive check can state anything more firmly than any other,
+by construction rather than by policy.
+
+Origin reflection is the worked example of the third row: one exchange showing
+`Access-Control-Allow-Origin` equal to the request's `Origin` is equally consistent
+with a server that reflects anything and one that allows exactly that origin. Telling
+them apart needs a second request with a different `Origin`, which this pass does not
+make — so it produces a hypothesis and no finding at all.
+
+**Six checks**, grouped by the question they answer:
+
+```text
+headers.security      HSTS, CSP, framing, nosniff, Referrer-Policy, Permissions-Policy
+cookies.security      Secure, HttpOnly, SameSite — in the context of the cookie
+cors.configuration    who may read responses, and with whose credentials
+disclosure.headers    Server, X-Powered-By, Via — informational, never filed
+cache.sensitive       cache directives on authenticated responses
+tls.observations      what the recorded handshake showed, without making a new one
+```
+
+Applicability is decided per condition rather than by listing header names: HSTS is
+asked of HTTPS responses only, CSP and framing of HTML documents only, cache
+directives of authenticated successful responses with content only. A JSON API
+response therefore produces one observation where a naive check would produce five.
+
+**Deduplication.** Five hundred endpoints missing one header is one finding citing
+three exchanges, with the count. The fingerprint is detector, host and condition —
+never a URL, and never a value.
+
+**`hexora scan passive <project>`**, with `--detector`, `--host`, `--since`,
+`--limit`, `--everything` and `--no-save`. It prints exchanges analysed, detectors
+executed, observations, hypotheses and findings as separate counts, and prints a row
+for every detector including the ones that saw nothing.
+
+**`hexora detectors`** now lists mode (passive/active), version, and what each check
+can produce. A **Scan** tab in the desktop window runs the pass and opens the exchange
+behind any result.
+
+**A scan run is recorded** (migration 7): which detectors ran, at which versions, over
+how much traffic, and what each produced — including zero. That is the row M12.8's
+`WhyGone::SourceSilent` was shrugging about, and `WhyGone::DetectorChanged` now exists
+because of it: a claim that stopped appearing after a check was rewritten reads as
+inconclusive rather than as a fix. Findings from a scanner carry the detector and
+version on the row, and the report prints them.
+
+**Out-of-scope traffic is not analysed by default.** The proxy records everything it
+sees, so a project holds the tester's own browsing; the pass reads in-scope traffic,
+counts what it skipped, and says so.
+
+### Fixed
+
+- **A session cookie could reach scanner output through a retained exchange.** Request
+  credential headers were redacted; `Set-Cookie` response headers were not, and a
+  performance change that began holding one exchange per grouped observation carried
+  the value into everything downstream. `Set-Cookie` values are now replaced at
+  assembly — name and attributes kept — so no check, observation, finding, report or
+  IPC payload can carry one. Caught by the regression test written for exactly this,
+  which is the reason it was written.
+- **A CORS reflection check comparing header values as lossy text** could have matched
+  two different byte strings that decode to the same replacement characters. The one
+  comparison where the bytes are attacker-controlled now compares bytes.
+
 ### Added — M13.1, the verification framework
 
 Everything after this is a scanner, and a scanner is only worth having if a detector's

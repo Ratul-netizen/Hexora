@@ -143,6 +143,11 @@ define_id!(
     "snp"
 );
 define_id!(
+    /// Identifies one pass of the scanner over a project's traffic.
+    ScanRunId,
+    "run"
+);
+define_id!(
     /// Identifies an installed extension instance.
     ExtensionId,
     "ext"

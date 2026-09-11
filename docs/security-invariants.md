@@ -456,6 +456,84 @@ treated the same way: not re-tested.
 
 ---
 
+## 12. Passive scanning never sends, and never claims more than it saw
+
+The passive pass reads exchanges the project already holds. It makes no request, and
+that is a property of the code rather than a rule somebody keeps:
+
+```rust
+pub fn scan(project: &Project, selection: &Selection) -> Result<Summary>
+```
+
+No `HttpTransport`, no `Lab`, and nothing in a `Project` that can reach a network. A
+test that installed a mock transport and asserted it was never called would be a
+weaker statement than this one, because it would imply a transport existed.
+
+**What a passive check may produce, and what happens to each.**
+
+| Product | Means | Becomes |
+| ------- | ----- | ------- |
+| Observation, informational | true, and not an issue | listed; never a finding |
+| Observation, reportable | true, and worth attention | `Verification::Observed` → a **lead** |
+| Hypothesis | suspected, and unsettled | nothing, until an experiment settles it |
+
+`Verification::Observed` caps at `Confidence::Reported`, which is not actionable. **A
+passive check cannot state anything more firmly**, and not because it is asked not to:
+it does not choose its own verification. The scanner applies the same one to every
+observation, so no check can promote itself.
+
+A check that is suspicious rather than certain raises a `Hypothesis` and stops.
+Origin reflection is the worked example: one exchange showing
+`Access-Control-Allow-Origin` equal to the request's `Origin` is equally consistent
+with a server that reflects anything and a server with that one origin allowed. The
+difference is a second request with a different `Origin`, which this pass does not
+make, so it produces no finding at all.
+
+**`Server: nginx/1.24.0` is a fact, not a vulnerability.** Technology disclosure is
+recorded as informational and never reaches the findings list. Deciding a version is a
+vulnerability needs a vulnerability database, a patch level and usually a
+distribution's backporting policy, and a tool that files it anyway teaches people to
+skim past findings.
+
+**Every reportable result resolves to an exchange.** An observation carries the
+`RequestId` it came from, and a grouped one carries up to three. There is no path that
+produces "endpoint X looks vulnerable" without one.
+
+**Credentials never become scanner evidence**, in either direction. An `Exchange` is
+assembled with request credential headers replaced and `Set-Cookie` values replaced —
+name and attributes kept, value gone — so a check cannot leak what it was never given,
+and neither can anything that later holds an exchange. This was not theoretical: the
+regression test below caught a real leak introduced by an unrelated performance change
+that began retaining an exchange per grouped observation.
+
+**Out-of-scope traffic is not analysed by default.** The proxy records everything it
+sees, because it must see a host before anybody can decide it is in bounds, so a
+project holds the tester's own browsing. A pass reads in-scope traffic, counts what it
+skipped, and reports both. `--everything` exists and says what it is doing.
+
+**Detector versions are recorded with execution.** A `scan_runs` row says which checks
+ran, at which versions, over how much traffic, and what each produced — including
+zero, which is the row that matters. It is what lets invariant 11 distinguish *the
+check ran and raised nothing* from *the check never ran*, and it is why
+`WhyGone::DetectorChanged` can now exist.
+
+**Tests.** `core/scan/tests/passive_scan.rs` —
+`the_scanner_has_nowhere_to_put_a_transport`,
+`no_credential_reaches_an_observation_a_finding_or_a_run_record`,
+`every_finding_is_a_lead_and_never_more`,
+`every_finding_cites_an_exchange_the_project_can_resolve`,
+`a_reflected_origin_becomes_a_hypothesis_and_not_a_finding`,
+`a_technology_banner_is_listed_and_never_filed`,
+`out_of_scope_traffic_is_skipped_and_counted_rather_than_analysed`,
+`five_hundred_endpoints_missing_one_header_are_one_finding`,
+`a_run_records_every_detector_including_the_silent_ones`,
+`malformed_and_hostile_traffic_does_not_stop_the_pass`,
+`a_non_utf8_header_value_is_read_without_panicking`;
+`core/scan/src/lib.rs` — `credentials_are_stripped_in_both_directions`;
+`apps/cli/src/detectors.rs` — `every_passive_check_declares_that_it_does_not_send`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

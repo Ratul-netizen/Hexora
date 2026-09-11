@@ -32,6 +32,7 @@ influenced part of the process.
 | `core/proxy` | Intercepting proxy, CA, TLS interception, hooks, capture | **Implemented** |
 | `core/repeater` | Load a stored request, edit it, send it as a chosen principal, diff the results | **Implemented** |
 | `core/verify` | The verification framework: detector and verifier traits, the one way to run an experiment, and the registry of what a build checks for | **Implemented** (M13.1) |
+| `core/scan` | Passive checks over captured traffic, and the pass that runs them. Takes no transport | **Implemented** (M13.2) |
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic | **Implemented** (M12.3) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
@@ -48,7 +49,9 @@ types ← storage ← http ← proxy
            ↑                │
        repeater ← verify ───┤
            ↑        ↑       │
-           └─── authz ──────┤
+           ├─── authz ──────┤
+           │                │
+         scan ──────────────┤
            ↑                │
         report ─────────────┤
            ↑                │
@@ -202,6 +205,29 @@ M12.1 and M12.5 were rewritten onto this in the same change, so the framework ha
 real user rather than a hypothetical one: `MatrixDetector` raises a hypothesis per
 violating cell, `ReplayVerifier` runs the second experiment through a `Lab`, and the
 findings come out the far end identical to what the hand-written path produced.
+
+## Passive and active are a type, not a convention
+
+`DetectorInfo::mode` says whether running a check puts traffic on the wire, and
+`hexora detectors` prints it. That matters more than it sounds: it is the difference
+between a check that is safe against production at 3pm and one that is not, and until
+M13.2 it lived in people's heads.
+
+It is also enforced by shape rather than by promise. `core/scan`'s entry point is:
+
+```rust
+pub fn scan(project: &Project, selection: &Selection) -> Result<Summary>
+```
+
+There is no transport to pass it. A passive check that wanted to send would have to
+change that signature, which is a visible act rather than a quiet one — the same
+technique `suggest::analyze` uses, and the reason both can be run on a client's
+project without asking anybody first.
+
+A passive check produces up to three things, and the scanner decides what becomes of
+each. It does **not** choose its own verification: the pass applies
+`Verification::Observed` to every observation, so the ceiling for anything passive is
+a lead, uniformly and by construction. See invariant 12.
 
 ## Three statements about a string, and why only one is machine-made
 

@@ -63,7 +63,10 @@ pub use redact::{RedactionPolicy, Secret};
 pub use scope::{Scope, ScopeRule};
 pub use snapshot::{Comparison, Contents as SnapshotContents, Snapshot};
 pub use tls::{CertificateSummary, TlsInfo};
-pub use verify::{DetectorId, DetectorInfo, Support, Verification, Verified, Writeup};
+pub use verify::{
+    DetectorId, DetectorInfo, DetectorMode, Observation, Significance, Support, Verification,
+    Verified, Writeup,
+};
 
 /// The version of this crate, exposed for the RPC handshake between UI and engine.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -73,4 +76,4 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped whenever the UI/engine boundary changes shape. The desktop client refuses
 /// to talk to an engine reporting a different major value rather than misinterpreting
 /// messages.
-pub const RPC_CONTRACT_VERSION: u32 = 6;
+pub const RPC_CONTRACT_VERSION: u32 = 7;

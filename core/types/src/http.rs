@@ -99,6 +99,39 @@ impl Headers {
         Self::default()
     }
 
+    /// Reads a stored header block back into headers.
+    ///
+    /// The inverse of how a header block is written to the wire, for the things that
+    /// read one back out of the project — a passive check over captured traffic, say.
+    /// Permissive on purpose, in the same spirit as the parser: a line with no colon
+    /// is skipped rather than failing the whole block, because a project may hold a
+    /// response from a server that emitted one and refusing to read it would lose the
+    /// eight headers that were fine.
+    ///
+    /// Splits on CRLF *and* on bare LF, because both are in real captures and a
+    /// project that stored a bare-LF block is describing exactly the kind of server
+    /// worth looking at. Values keep their original casing; names are matched
+    /// case-insensitively by [`Header::is`] as everywhere else.
+    pub fn from_block(block: &[u8]) -> Self {
+        let text = String::from_utf8_lossy(block);
+        let mut headers = Self::new();
+        for line in text.lines() {
+            let line = line.trim_end();
+            if line.is_empty() {
+                continue;
+            }
+            // Split on the first colon only: a value may contain any number of
+            // them, and `Location: https://example.com/` is the common case.
+            if let Some((name, value)) = line.split_once(':') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    headers.append(Header::new(name.to_string(), value.trim().to_string()));
+                }
+            }
+        }
+        headers
+    }
+
     /// Appends a header, keeping any existing header of the same name.
     ///
     /// This is the default because duplicate headers are a testing primitive, not a
@@ -534,5 +567,77 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let back: HttpRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back, req);
+    }
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_header_block_reads_back_with_duplicates_and_casing_intact() {
+        let block = b"Content-Type: application/json
+Set-Cookie: a=1
+SET-COOKIE: b=2";
+        let headers = Headers::from_block(block);
+
+        assert_eq!(headers.len(), 3);
+        // Duplicates are a testing primitive, so both survive; lookup is
+        // case-insensitive, so the shouted one is found too.
+        assert_eq!(headers.count("set-cookie"), 2);
+        assert_eq!(
+            headers.get("content-type").unwrap().value,
+            "application/json"
+        );
+    }
+
+    #[test]
+    fn a_bare_lf_block_is_read_rather_than_refused() {
+        // A server that emits bare LF is exactly the kind worth looking at, and
+        // refusing the block would lose the headers that were fine.
+        let headers = Headers::from_block(
+            b"A: 1
+B: 2",
+        );
+        assert_eq!(headers.len(), 2);
+    }
+
+    #[test]
+    fn a_value_containing_colons_keeps_all_of_them() {
+        let headers = Headers::from_block(b"Location: https://example.com:8443/a");
+        assert_eq!(
+            headers.get("location").unwrap().value,
+            "https://example.com:8443/a"
+        );
+    }
+
+    #[test]
+    fn a_line_with_no_colon_is_skipped_and_the_rest_survives() {
+        let headers = Headers::from_block(
+            b"Good: 1
+nonsense
+Also-Good: 2",
+        );
+        assert_eq!(headers.len(), 2);
+    }
+
+    #[test]
+    fn a_block_that_is_not_utf8_does_not_panic() {
+        let headers = Headers::from_block(&[0xff, 0xfe, b'A', b':', b' ', b'1']);
+        assert!(headers.len() <= 1);
+    }
+
+    #[test]
+    fn an_empty_block_is_no_headers() {
+        assert_eq!(Headers::from_block(b"").len(), 0);
+        assert_eq!(
+            Headers::from_block(
+                b"
+
+"
+            )
+            .len(),
+            0
+        );
     }
 }

@@ -559,6 +559,32 @@ impl TrafficStore {
         Ok((status as u16, reason, version, headers))
     }
 
+    /// The TLS details recorded for an exchange, if it had any.
+    ///
+    /// Read back rather than carried on every history row: most callers never look at
+    /// it, and a passive check that does should pay for it only for the exchanges it
+    /// examines.
+    pub fn tls_of(&self, request: RequestId) -> Result<Option<TlsInfo>> {
+        let conn = self.db.connection()?;
+        let stored: Option<Option<String>> = conn
+            .query_row(
+                "SELECT tls_json FROM requests WHERE id = ?1",
+                params![request.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(Some(json)) = stored else {
+            return Ok(None);
+        };
+        serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|e| StorageError::Decode {
+                entity: "TlsInfo",
+                reason: format!("{e}"),
+            })
+    }
+
     /// Which target a stored request was sent to.
     ///
     /// A finding has to name the target it is about, and the honest source of that is

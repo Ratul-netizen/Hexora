@@ -230,7 +230,7 @@ impl Registry {
     /// The list a tester wants before pointing this at a production system during
     /// business hours.
     pub fn sending(&self) -> impl Iterator<Item = &DetectorInfo> {
-        self.checks.iter().filter(|check| check.sends)
+        self.checks.iter().filter(|check| check.sends())
     }
 }
 
@@ -260,7 +260,7 @@ impl Judged {
 mod tests {
     use hexora_types::finding::{Evidence, FindingSource, Severity};
     use hexora_types::ids::{RequestId, TargetId};
-    use hexora_types::verify::Support;
+    use hexora_types::verify::{DetectorMode, Support};
 
     use super::*;
 
@@ -289,9 +289,12 @@ mod tests {
         fn about(&self) -> DetectorInfo {
             DetectorInfo {
                 id: DetectorId("test.fake"),
-                version: 1,
+                name: "Fake verifier",
+                version: "1.0.0",
                 about: "a verifier that answers whatever it was built with",
-                sends: false,
+                mode: DetectorMode::Passive,
+                observes: false,
+                hypothesizes: true,
             }
         }
 
@@ -388,22 +391,28 @@ mod tests {
     #[test]
     fn a_registry_is_sorted_by_id_and_says_which_checks_send() {
         let quiet = DetectorInfo {
-            id: DetectorId("passive.missing_hsts"),
-            version: 1,
+            id: DetectorId("headers.security"),
+            name: "Security header analysis",
+            version: "1.0.0",
             about: "a response with no HSTS header",
-            sends: false,
+            mode: DetectorMode::Passive,
+            observes: true,
+            hypothesizes: false,
         };
         let loud = DetectorInfo {
             id: DetectorId("authz.cross_identity"),
-            version: 3,
+            name: "Cross-identity access",
+            version: "3.0.0",
             about: "one identity reaching another identity's object",
-            sends: true,
+            mode: DetectorMode::Active,
+            observes: false,
+            hypothesizes: true,
         };
 
         let registry = Registry::new().with([quiet, loud]);
         assert_eq!(registry.all().len(), 2);
         assert_eq!(registry.all()[0].id.0, "authz.cross_identity");
-        assert_eq!(registry.find("passive.missing_hsts").unwrap().version, 1);
+        assert_eq!(registry.find("headers.security").unwrap().version, "1.0.0");
         assert!(registry.find("nothing.here").is_none());
 
         let sending: Vec<&str> = registry.sending().map(|check| check.id.0).collect();
@@ -414,9 +423,12 @@ mod tests {
     fn registering_the_same_check_twice_keeps_one_of_it() {
         let check = DetectorInfo {
             id: DetectorId("authz.cross_identity"),
-            version: 1,
+            name: "Cross-identity access",
+            version: "1.0.0",
             about: "x",
-            sends: true,
+            mode: DetectorMode::Active,
+            observes: false,
+            hypothesizes: true,
         };
         let registry = Registry::new().with([check]).with([check]);
         assert_eq!(registry.all().len(), 1);
@@ -431,6 +443,6 @@ mod tests {
         };
         // The field exists so "is this safe to run against production right now?" has
         // an answer in the registry rather than in somebody's memory.
-        assert!(!verifier.about().sends);
+        assert!(!verifier.about().sends());
     }
 }

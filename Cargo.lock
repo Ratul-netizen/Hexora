@@ -1532,6 +1532,7 @@ dependencies = [
  "hexora-proxy",
  "hexora-repeater",
  "hexora-report",
+ "hexora-scan",
  "hexora-storage",
  "hexora-types",
  "hexora-verify",
@@ -1554,8 +1555,10 @@ dependencies = [
  "hexora-proxy",
  "hexora-repeater",
  "hexora-report",
+ "hexora-scan",
  "hexora-storage",
  "hexora-types",
+ "hexora-verify",
  "serde",
  "serde_json",
  "tauri",
@@ -1649,6 +1652,20 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "hexora-scan"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "hexora-storage",
+ "hexora-types",
+ "hexora-verify",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

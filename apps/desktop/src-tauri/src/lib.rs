@@ -71,6 +71,8 @@ pub fn run() {
             commands::candidates_list,
             commands::candidates_analyze,
             commands::candidate_decide,
+            commands::scan_passive,
+            commands::detectors_list,
             commands::snapshots_list,
             commands::snapshot_take,
             commands::snapshot_delete,

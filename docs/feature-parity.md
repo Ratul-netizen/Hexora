@@ -83,14 +83,17 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Passive checks | ✅ | ❌ | PLANNED M13.2 | |
+| Passive checks | ✅ | ❌ | **IMPLEMENTED M13.2** | Six checks: security headers, cookie attributes, CORS, technology disclosure, cache directives on authenticated responses, recorded TLS. Each result is a *lead* — a passive check cannot state anything more firmly |
+| Passive check catalogue size | large | — | **six** | Deliberately small. The differentiator is what a result means, not how many there are |
+| Scanner says which checks ran | ⚠️ | — | **IMPLEMENTED M13.2** | A run records every detector and version, including the ones that raised nothing — so "clean" can be told from "never ran" |
 | Active scanner | ✅ | ❌ | PLANNED M13.3–M13.7 | |
-| Crawler | ✅ | ❌ | PLANNED M13.2 | |
+| Crawler | ✅ | ❌ | NOT PLANNED YET | Hexora scans traffic it was given; discovering endpoints on its own is a separate question |
 | **Caido ships no active scanner at all** | — | — | — | Strong evidence the market adopts on manual quality first |
 | Custom scan checks | BChecks | ❌ | PLANNED M15 | |
-| Evidence-verified findings | ⚠️ | ⚠️ | **designed M0** | Hexora's main differentiator |
+| Evidence-verified findings | ⚠️ | ⚠️ | **IMPLEMENTED M13.1** | The store accepts only a `Verified`, which only a verification produces — a detector's suspicion does not compile into a finding |
 | OAST / Collaborator | ✅ | ⚠️ hosted | PLANNED M16 | Self-hostable is a selling point |
-| Findings with Markdown + export | ⚠️ | ✅ | PLANNED M12 | |
+| Findings with Markdown + export | ⚠️ | ✅ | **IMPLEMENTED M12.3** | |
+| Finding says which check and version produced it | ⚠️ | — | **IMPLEMENTED M13.2** | Printed in the report, and what lets a retest tell a fix from a rewritten check |
 
 ## 5. Extensibility
 

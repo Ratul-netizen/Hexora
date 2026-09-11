@@ -57,6 +57,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "snapshots",
         sql: include_str!("../migrations/0006_snapshots.sql"),
     },
+    Migration {
+        version: 7,
+        name: "scan_runs",
+        sql: include_str!("../migrations/0007_scan_runs.sql"),
+    },
 ];
 
 /// The schema version this build expects.

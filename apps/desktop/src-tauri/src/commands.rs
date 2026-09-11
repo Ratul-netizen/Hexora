@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M13.1",
+        milestone: "M13.2",
     }
 }
 
@@ -841,6 +841,181 @@ pub fn object_add(
         store.put(declaration).map_err(fail)?;
     }
     objects_list(state)
+}
+
+// ---------------------------------------------------------------------------
+// Passive scanning
+// ---------------------------------------------------------------------------
+
+/// What one detector did during a pass.
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectorRunView {
+    pub detector: String,
+    pub version: String,
+    pub mode: String,
+    pub observations: u32,
+    pub hypotheses: u32,
+}
+
+/// One grouped observation, as the window shows it.
+///
+/// Carries no credential, because the thing it was built from carries none: the
+/// scanner redacts when it assembles an exchange, not when it renders one.
+#[derive(Debug, Clone, Serialize)]
+pub struct ObservationView {
+    pub detector: String,
+    pub version: String,
+    pub about: String,
+    pub expected: String,
+    pub observed: String,
+    pub rationale: String,
+    pub severity: String,
+    /// Whether this one reached the findings list, or is context.
+    pub reportable: bool,
+    pub host: String,
+    pub occurrences: u32,
+    /// The exchanges behind it, for opening in History.
+    pub exchanges: Vec<String>,
+}
+
+/// One suspicion the pass raised and did not settle.
+#[derive(Debug, Clone, Serialize)]
+pub struct HypothesisView {
+    pub detector: String,
+    pub claim: String,
+    pub source_request: String,
+    pub provisional_severity: String,
+}
+
+/// What a pass produced.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanView {
+    pub exchanges_read: u64,
+    pub exchanges_skipped: u64,
+    pub detectors: Vec<DetectorRunView>,
+    pub observations: Vec<ObservationView>,
+    pub hypotheses: Vec<HypothesisView>,
+    pub findings: usize,
+    pub recorded_new: usize,
+    pub recorded_refreshed: usize,
+}
+
+/// Reads captured traffic and reports what the checks saw.
+///
+/// Sends nothing. `hexora_scan::passive::scan` takes a project and a selection and
+/// has no transport in its signature, so this command cannot put traffic on a wire
+/// even by mistake.
+#[tauri::command]
+pub fn scan_passive(
+    state: State<'_, AppState>,
+    host: Option<String>,
+    detector: Option<String>,
+    everything: bool,
+) -> CommandResult<ScanView> {
+    let project = open(&state)?;
+    let selection = hexora_scan::passive::Selection {
+        host: host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
+        detector: detector
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty()),
+        since: None,
+        limit: None,
+        everything,
+    };
+
+    let summary = hexora_scan::passive::scan(&project, &selection).map_err(fail)?;
+
+    let store = project.findings();
+    let mut recorded_new = 0;
+    let mut recorded_refreshed = 0;
+    for finding in summary.findings() {
+        match store.record(finding).map_err(fail)? {
+            hexora_storage::Recorded::Created(_) => recorded_new += 1,
+            hexora_storage::Recorded::Updated(_) => recorded_refreshed += 1,
+        }
+    }
+
+    Ok(ScanView {
+        exchanges_read: summary.exchanges_read,
+        exchanges_skipped: summary.exchanges_skipped,
+        detectors: summary
+            .detectors
+            .iter()
+            .map(|detector| DetectorRunView {
+                detector: detector.detector.clone(),
+                version: detector.version.clone(),
+                mode: detector.mode.as_str().to_string(),
+                observations: detector.observations,
+                hypotheses: detector.hypotheses,
+            })
+            .collect(),
+        observations: summary
+            .observations
+            .iter()
+            .map(|group| ObservationView {
+                detector: group.observation.detector.clone(),
+                version: group.observation.version.clone(),
+                about: group.observation.about.clone(),
+                expected: group.observation.expected.clone(),
+                observed: group.observation.observed.clone(),
+                rationale: group.observation.rationale.clone(),
+                severity: severity_word(group.observation.severity).to_string(),
+                reportable: group.observation.is_reportable(),
+                host: group.host.clone(),
+                occurrences: group.occurrences,
+                exchanges: group.exchanges.iter().map(|id| id.to_string()).collect(),
+            })
+            .collect(),
+        hypotheses: summary
+            .hypotheses
+            .iter()
+            .map(|hypothesis| HypothesisView {
+                detector: hypothesis.detector.clone(),
+                claim: hypothesis.claim.clone(),
+                source_request: hypothesis.source_request.to_string(),
+                provisional_severity: severity_word(hypothesis.provisional_severity).to_string(),
+            })
+            .collect(),
+        findings: summary.findings().len(),
+        recorded_new,
+        recorded_refreshed,
+    })
+}
+
+/// The checks this build has.
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectorView {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub about: String,
+    pub mode: String,
+    pub sends: bool,
+    pub observes: bool,
+    pub hypothesizes: bool,
+}
+
+/// Lists them, so a tester can see what this build looks for and which of it sends.
+#[tauri::command]
+pub fn detectors_list() -> CommandResult<Vec<DetectorView>> {
+    let registry = hexora_verify::Registry::new()
+        .with(hexora_authz::checks())
+        .with(hexora_scan::checks::all().iter().map(|check| check.about()));
+
+    Ok(registry
+        .all()
+        .iter()
+        .map(|check| DetectorView {
+            id: check.id.to_string(),
+            name: check.name.to_string(),
+            version: check.version.to_string(),
+            about: check.about.to_string(),
+            mode: check.mode.as_str().to_string(),
+            sends: check.sends(),
+            observes: check.observes,
+            hypothesizes: check.hypothesizes,
+        })
+        .collect())
 }
 
 // ---------------------------------------------------------------------------

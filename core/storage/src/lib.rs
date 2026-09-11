@@ -61,6 +61,7 @@ pub mod identities;
 pub mod migrations;
 pub mod objects;
 pub mod repository;
+pub mod scans;
 pub mod settings;
 pub mod snapshots;
 pub mod traffic;
@@ -82,6 +83,7 @@ pub use crate::error::{Result, StorageError};
 pub use crate::findings::{FindingFilter, FindingStore, Recorded};
 pub use crate::identities::IdentityStore;
 pub use crate::objects::{ConstructedAttempt, ObjectStore};
+pub use crate::scans::{DetectorRun, RunStatus, ScanRun, ScanStore};
 pub use crate::settings::Settings;
 pub use crate::snapshots::{capture, SnapshotStore, SnapshotSummary};
 pub use crate::traffic::{CapturedExchange, StoredRequest, StoredTraffic, TrafficStore};
@@ -271,6 +273,11 @@ impl Project {
     /// The findings recorded against this project.
     pub fn findings(&self) -> FindingStore {
         FindingStore::new(self.metadata.clone())
+    }
+
+    /// Records that a check ran, so silence can be told from absence.
+    pub fn scans(&self) -> ScanStore {
+        ScanStore::new(self.metadata.clone())
     }
 
     /// Point-in-time records of this engagement, for answering "what changed?".

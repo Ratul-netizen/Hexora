@@ -10,6 +10,7 @@ members = [
     "core/proxy",
     "core/repeater",
     "core/verify",
+    "core/scan",
     "core/authz",
     "core/report",
     "apps/cli",
@@ -32,6 +33,7 @@ hexora-http = { path = "core/http" }
 hexora-proxy = { path = "core/proxy" }
 hexora-repeater = { path = "core/repeater" }
 hexora-verify = { path = "core/verify" }
+hexora-scan = { path = "core/scan" }
 hexora-authz = { path = "core/authz" }
 hexora-report = { path = "core/report" }
 

@@ -442,6 +442,9 @@ fn explain(why: &WhyGone) -> String {
              Hexora cannot tell \"ran and found nothing\" from \"never ran\"."
                 .into()
         }
+        WhyGone::DetectorChanged { from, to } => format!(
+            "inconclusive — the check that raised it now runs at a different version              ({from} → {to}), so its silence says nothing about the application."
+        ),
         WhyGone::ToolChanged { from, to } => {
             format!("inconclusive — the snapshots were taken by different builds ({from} → {to}).")
         }
@@ -544,6 +547,10 @@ mod tests {
                 from: "0.1.0".into(),
                 to: "0.2.0".into(),
             },
+            WhyGone::DetectorChanged {
+                from: "1.0.0".into(),
+                to: "2.0.0".into(),
+            },
         ] {
             let text = explain(&why).to_lowercase();
             // The word may appear, but only in a sentence denying it. An explanation
@@ -561,6 +568,11 @@ mod tests {
         assert!(explain(&WhyGone::ToolChanged {
             from: "a".into(),
             to: "b".into()
+        })
+        .starts_with("inconclusive"));
+        assert!(explain(&WhyGone::DetectorChanged {
+            from: "1.0.0".into(),
+            to: "2.0.0".into()
         })
         .starts_with("inconclusive"));
     }

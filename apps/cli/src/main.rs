@@ -25,6 +25,7 @@ mod project;
 mod proxy;
 mod repeat;
 mod report;
+mod scan;
 mod scope;
 mod send;
 mod setup;
@@ -38,7 +39,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M13.1. The proxy, HTTP/1.x engine \
+                  Development status: M13.2. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -320,6 +321,14 @@ enum Command {
     #[command(subcommand)]
     Object(ObjectCommand),
 
+    /// Run checks over traffic this project has already captured.
+    ///
+    /// The passive pass sends nothing: it reads stored exchanges and says what it
+    /// sees. Every result it produces is a lead — it says what was observed, not
+    /// that the application is exploitable.
+    #[command(subcommand)]
+    Scan(ScanCommand),
+
     /// List the checks this build has, and which of them send traffic.
     ///
     /// A scanner that will not say what it looks for is one whose silence means
@@ -585,6 +594,46 @@ enum ObjectCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ScanCommand {
+    /// Read captured traffic and report what the checks saw.
+    ///
+    /// Makes no network requests at all, which is why it is safe on any engagement
+    /// at any time — including one whose client has gone home.
+    Passive {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Run only this check, by id. `hexora detectors` lists them.
+        #[arg(long, value_name = "ID")]
+        detector: Option<String>,
+
+        /// Only traffic to this host.
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+
+        /// Only traffic captured at or after this RFC 3339 instant.
+        #[arg(long, value_name = "TIME")]
+        since: Option<String>,
+
+        /// Stop after this many exchanges.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+
+        /// Read out-of-scope traffic too.
+        ///
+        /// Off by default. A project holds whatever the proxy saw, including your own
+        /// browsing, and producing observations about systems nobody declared in
+        /// scope is not a service to anybody.
+        #[arg(long)]
+        everything: bool,
+
+        /// Print the results without writing them into the project.
+        #[arg(long)]
+        no_save: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum SnapshotCommand {
     /// Record the project as it stands.
     ///
@@ -782,6 +831,24 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }),
         Command::Object(ObjectCommand::List { path }) => object::list(path, cli.json),
         Command::Object(ObjectCommand::Remove { path, id }) => object::remove(path, id, cli.json),
+        Command::Scan(ScanCommand::Passive {
+            path,
+            detector,
+            host,
+            since,
+            limit,
+            everything,
+            no_save,
+        }) => scan::passive(scan::Args {
+            project: path,
+            detector: detector.as_deref(),
+            host: host.as_deref(),
+            since: since.as_deref(),
+            limit: *limit,
+            everything: *everything,
+            no_save: *no_save,
+            json: cli.json,
+        }),
         Command::Detectors => detectors::list(cli.json),
         Command::Snapshot(SnapshotCommand::Take { path, label, note }) => {
             snapshot::take(path, label.as_deref(), note.as_deref(), cli.json)
@@ -1019,14 +1086,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M13.1",
+            "milestone": "M13.2",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M13.1 (the verification framework)");
+        println!("  milestone:               M13.2 (the passive scanner)");
     }
 }
 
@@ -1081,23 +1148,43 @@ mod tests {
             .map(|command| command.get_name().to_lowercase())
             .collect();
 
-        for absent in ["scan", "fuzz", "intruder"] {
+        for absent in ["fuzz", "intruder", "workflow", "collaborate"] {
             assert!(
                 !commands.iter().any(|name| name.starts_with(absent)),
                 "help offers a {absent} command that does not exist: {commands:?}"
             );
         }
-        assert!(
-            commands.iter().any(|name| name == "authz"),
-            "and it must still list the ones that do: {commands:?}"
-        );
+        for present in ["authz", "scan", "detectors"] {
+            assert!(
+                commands.iter().any(|name| name == present),
+                "and it must still list the ones that do: {commands:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_scan_command_only_offers_the_pass_that_exists() {
+        // `scan` is a subcommand rather than a flag precisely so that adding the
+        // active pass later is visible. Until then, offering only `passive` is what
+        // keeps the help honest about what this build will do to a target.
+        let scan = Cli::command()
+            .get_subcommands()
+            .find(|command| command.get_name() == "scan")
+            .expect("the scan command")
+            .clone();
+        let passes: Vec<String> = scan
+            .get_subcommands()
+            .map(|command| command.get_name().to_string())
+            .collect();
+
+        assert_eq!(passes, vec!["passive".to_string()], "{passes:?}");
     }
 
     #[test]
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M13.1"),
+            help.contains("M13.2"),
             "users must not mistake this for a finished tool"
         );
     }

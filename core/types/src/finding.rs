@@ -216,13 +216,23 @@ pub struct Finding {
 pub enum FindingSource {
     /// A passive check over observed traffic.
     PassiveScan {
-        /// Detector identifier, e.g. `passive.missing_hsts`.
+        /// Detector identifier, e.g. `headers.security`.
         detector: String,
+        /// That detector's version when the claim was made.
+        ///
+        /// Recorded on the row so a retest can tell "the application was fixed" from
+        /// "the check was changed" — see invariant 11. Defaulted rather than
+        /// required, so a finding written before this field existed still reads back.
+        #[serde(default)]
+        version: String,
     },
     /// An active check that sent its own traffic.
     ActiveScan {
         /// Detector identifier, e.g. `active.sqli.error_based`.
         detector: String,
+        /// That detector's version when the claim was made.
+        #[serde(default)]
+        version: String,
     },
     /// The authorization-testing subsystem.
     AuthorizationTest,
@@ -348,6 +358,7 @@ mod tests {
     #[test]
     fn passive_checks_cannot_self_certify_above_reported() {
         let source = FindingSource::PassiveScan {
+            version: String::new(),
             detector: "missing_hsts".into(),
         };
         assert_eq!(source.max_unverified_confidence(), Confidence::Reported);
@@ -397,6 +408,7 @@ mod tests {
         let mut f = finding(
             Confidence::Firm,
             FindingSource::ActiveScan {
+                version: String::new(),
                 detector: "sqli.error_based".into(),
             },
             some_evidence(),

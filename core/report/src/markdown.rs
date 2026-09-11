@@ -187,10 +187,11 @@ fn write_finding(out: &mut String, index: usize, reported: &ReportedFinding) {
     let _ = writeln!(out, "### {index}. {}\n", f.title);
     let _ = writeln!(
         out,
-        "**{}** · confidence: {} · status: {}",
+        "**{}** · confidence: {} · status: {} · raised by {}",
         severity_word(f.severity),
         confidence_word(f.confidence),
         status_word(f.status),
+        crate::raised_by(&f.source),
     );
     let mut tags = Vec::new();
     if let Some(cwe) = &f.cwe {

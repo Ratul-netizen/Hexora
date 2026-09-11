@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 6;
+export const EXPECTED_RPC_CONTRACT_VERSION = 7;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -416,6 +416,83 @@ export const addObject = (declaration: {
 
 export const removeObject = (id: string): Promise<ObjectView[]> =>
   invoke<ObjectView[]>("object_remove", { id });
+
+/* ------------------------------------------------------------------ *
+ * Passive scanning
+ * ------------------------------------------------------------------ */
+
+/** A check this build has. */
+export interface DetectorView {
+  id: string;
+  name: string;
+  version: string;
+  about: string;
+  /** `passive` or `active`. */
+  mode: string;
+  /** Whether running it puts traffic on the wire. */
+  sends: boolean;
+  observes: boolean;
+  hypothesizes: boolean;
+}
+
+/** What one detector did during a pass. */
+export interface DetectorRunView {
+  detector: string;
+  version: string;
+  mode: string;
+  observations: number;
+  hypotheses: number;
+}
+
+/**
+ * A fact about captured traffic.
+ *
+ * Carries no credential: the scanner redacts when it assembles an exchange, so there
+ * is nothing here to leak.
+ */
+export interface ObservationView {
+  detector: string;
+  version: string;
+  about: string;
+  expected: string;
+  observed: string;
+  rationale: string;
+  severity: string;
+  /** Whether it became a finding, or is context that never will. */
+  reportable: boolean;
+  host: string;
+  occurrences: number;
+  exchanges: string[];
+}
+
+/** A suspicion the pass raised and did not settle. */
+export interface HypothesisView {
+  detector: string;
+  claim: string;
+  source_request: string;
+  provisional_severity: string;
+}
+
+export interface ScanView {
+  exchanges_read: number;
+  exchanges_skipped: number;
+  detectors: DetectorRunView[];
+  observations: ObservationView[];
+  hypotheses: HypothesisView[];
+  findings: number;
+  recorded_new: number;
+  recorded_refreshed: number;
+}
+
+export const listDetectors = (): Promise<DetectorView[]> =>
+  invoke<DetectorView[]>("detectors_list");
+
+/** Reads captured traffic. Sends nothing — the engine has no transport to do it with. */
+export const scanPassive = (
+  detector: string | null,
+  everything: boolean,
+): Promise<ScanView> =>
+  invoke<ScanView>("scan_passive", { host: null, detector, everything });
 
 /* ------------------------------------------------------------------ *
  * Engagement snapshots

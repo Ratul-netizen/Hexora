@@ -6,6 +6,7 @@ import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
 import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
+import { ScanView } from "./views/ScanView";
 import { SetupView } from "./views/SetupView";
 import { SnapshotsView } from "./views/SnapshotsView";
 import {
@@ -31,6 +32,7 @@ type Tab =
   | "history"
   | "repeater"
   | "identifiers"
+  | "scan"
   | "authz"
   | "findings"
   | "report"
@@ -42,6 +44,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "history", label: "History" },
   { id: "repeater", label: "Repeater" },
   { id: "identifiers", label: "Identifiers" },
+  { id: "scan", label: "Scan" },
   { id: "authz", label: "Authorization" },
   { id: "findings", label: "Findings" },
   { id: "report", label: "Report" },
@@ -173,6 +176,12 @@ export default function App() {
         )}
         {tab === "identifiers" && (
           <IdentifiersView hasProject={project !== null} />
+        )}
+        {tab === "scan" && (
+          <ScanView
+            hasProject={project !== null}
+            onOpenExchange={showExchange}
+          />
         )}
         {tab === "authz" && (
           <AuthzView

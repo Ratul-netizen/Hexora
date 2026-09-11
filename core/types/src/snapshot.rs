@@ -234,6 +234,22 @@ pub struct FindingState {
     pub evidence: u32,
 }
 
+/// The version of the check that produced a claim, when the row records one.
+///
+/// Separate from [`source_key`] on purpose: the key answers "which check?" and this
+/// answers "which build of it?". Comparing them together would make every version bump
+/// look like a different check, which is the opposite of what a retest needs.
+pub fn source_version(source: &FindingSource) -> Option<&str> {
+    match source {
+        FindingSource::PassiveScan { version, .. } | FindingSource::ActiveScan { version, .. } => {
+            Some(version)
+                .filter(|version| !version.is_empty())
+                .map(String::as_str)
+        }
+        _ => None,
+    }
+}
+
 /// The identity of what produced a claim, at the granularity a comparison needs.
 ///
 /// Not a display name: two passive checks are different sources even though both
@@ -241,8 +257,8 @@ pub struct FindingState {
 /// [`WhyGone::SourceSilent`] asks is about the specific check.
 pub fn source_key(source: &FindingSource) -> String {
     match source {
-        FindingSource::PassiveScan { detector } => format!("passive:{detector}"),
-        FindingSource::ActiveScan { detector } => format!("active:{detector}"),
+        FindingSource::PassiveScan { detector, .. } => format!("passive:{detector}"),
+        FindingSource::ActiveScan { detector, .. } => format!("active:{detector}"),
         FindingSource::AuthorizationTest => "authorization".into(),
         FindingSource::Extension { extension } => format!("extension:{extension}"),
         FindingSource::Ai { model } => format!("ai:{model}"),
@@ -415,6 +431,19 @@ pub enum WhyGone {
     /// "the check ran and found nothing" and "the check never ran" are the same
     /// picture from here. This says so instead of guessing.
     SourceSilent,
+    /// The check that raised it is present in the later snapshot at a different
+    /// version.
+    ///
+    /// The distinction detector versions were recorded for. A claim that stopped
+    /// appearing after the check was rewritten says nothing about the application,
+    /// and a retest report that presented it as a fix would be presenting a refactor
+    /// as progress.
+    DetectorChanged {
+        /// The version that raised it.
+        from: String,
+        /// The version that did not.
+        to: String,
+    },
     /// The two snapshots were taken by different builds.
     ///
     /// A disappearance could be the application or the tool, and nothing in the
@@ -441,6 +470,7 @@ impl WhyGone {
         match self {
             Self::NotReproduced => "not reproduced",
             Self::SourceSilent => "source silent",
+            Self::DetectorChanged { .. } => "check changed",
             Self::ToolChanged { .. } => "tool changed",
         }
     }
@@ -569,6 +599,17 @@ pub fn compare(from: &Snapshot, to: &Snapshot) -> Comparison {
         .map(|record| source_key(&record.source))
         .collect();
 
+    // Which version of each check produced anything on the later side. A check at a
+    // different version is a different question being asked, not an answer.
+    let versions_after: BTreeMap<String, &str> = to
+        .contents
+        .findings
+        .iter()
+        .filter_map(|record| {
+            source_version(&record.source).map(|version| (source_key(&record.source), version))
+        })
+        .collect();
+
     let mut findings = Vec::new();
 
     for (key, old) in &before {
@@ -605,6 +646,8 @@ pub fn compare(from: &Snapshot, to: &Snapshot) -> Comparison {
                     }
                 } else if !sources_after.contains(&source_key(&old.source)) {
                     WhyGone::SourceSilent
+                } else if let Some(changed) = detector_changed(old, &versions_after) {
+                    changed
                 } else {
                     WhyGone::NotReproduced
                 };
@@ -668,6 +711,19 @@ pub fn compare(from: &Snapshot, to: &Snapshot) -> Comparison {
             },
         },
     }
+}
+
+/// Whether the check that raised a claim is now running at a different version.
+fn detector_changed(
+    record: &FindingRecord,
+    versions_after: &BTreeMap<String, &str>,
+) -> Option<WhyGone> {
+    let before = source_version(&record.source)?;
+    let after = versions_after.get(&source_key(&record.source))?;
+    (before != *after).then(|| WhyGone::DetectorChanged {
+        from: before.to_string(),
+        to: (*after).to_string(),
+    })
 }
 
 fn rank(change: &Change) -> u8 {
@@ -856,6 +912,7 @@ mod tests {
                 state(Severity::Low, Confidence::Reported),
                 FindingSource::PassiveScan {
                     detector: "passive.missing_hsts".into(),
+                    version: "1.0.0".into(),
                 },
             )],
         );
@@ -886,6 +943,7 @@ mod tests {
                 state(Severity::Low, Confidence::Reported),
                 FindingSource::PassiveScan {
                     detector: "passive.missing_hsts".into(),
+                    version: "1.0.0".into(),
                 },
             )],
         );
@@ -897,6 +955,7 @@ mod tests {
                 state(Severity::Low, Confidence::Reported),
                 FindingSource::PassiveScan {
                     detector: "passive.insecure_cookie".into(),
+                    version: "1.0.0".into(),
                 },
             )],
         );
@@ -911,6 +970,103 @@ mod tests {
             gone.change,
             Change::Gone {
                 because: WhyGone::SourceSilent,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_claim_whose_check_was_rewritten_says_so_rather_than_reading_as_a_fix() {
+        // The distinction detector versions were recorded for in M12.8 and wired up
+        // in M13.2. Same build, same check still raising other claims — so without
+        // the version this would read as "not reproduced", which is as close to "it
+        // was fixed" as this comparison ever gets, on the strength of a refactor.
+        let source = |version: &str| FindingSource::PassiveScan {
+            detector: "headers.security".into(),
+            version: version.into(),
+        };
+        let from = snapshot(
+            "before",
+            "0.1.0",
+            vec![record(
+                "Missing HSTS on api.example.com",
+                state(Severity::Low, Confidence::Reported),
+                source("1.0.0"),
+            )],
+        );
+        let to = snapshot(
+            "after",
+            "0.1.0",
+            vec![record(
+                "Missing CSP on api.example.com",
+                state(Severity::Low, Confidence::Reported),
+                source("2.0.0"),
+            )],
+        );
+
+        let comparison = compare(&from, &to);
+        // Found by claim rather than by index: movement sorts before anything else,
+        // so the new claim is first in the list.
+        let gone = comparison
+            .findings
+            .iter()
+            .find(|change| change.claim.title.contains("HSTS"))
+            .unwrap();
+        match &gone.change {
+            Change::Gone {
+                because: WhyGone::DetectorChanged { from, to },
+                ..
+            } => {
+                assert_eq!(from, "1.0.0");
+                assert_eq!(to, "2.0.0");
+            }
+            other => panic!("expected DetectorChanged, got {other:?}"),
+        }
+        assert!(!WhyGone::DetectorChanged {
+            from: "1.0.0".into(),
+            to: "2.0.0".into()
+        }
+        .is_about_the_application());
+    }
+
+    #[test]
+    fn a_check_at_the_same_version_that_stopped_raising_it_is_not_reproduced() {
+        let source = || FindingSource::PassiveScan {
+            detector: "headers.security".into(),
+            version: "1.0.0".into(),
+        };
+        let from = snapshot(
+            "before",
+            "0.1.0",
+            vec![
+                record("Gone", state(Severity::Low, Confidence::Reported), source()),
+                record(
+                    "Stays",
+                    state(Severity::Low, Confidence::Reported),
+                    source(),
+                ),
+            ],
+        );
+        let to = snapshot(
+            "after",
+            "0.1.0",
+            vec![record(
+                "Stays",
+                state(Severity::Low, Confidence::Reported),
+                source(),
+            )],
+        );
+
+        let comparison = compare(&from, &to);
+        let gone = comparison
+            .findings
+            .iter()
+            .find(|c| c.claim.title == "Gone")
+            .unwrap();
+        assert!(matches!(
+            gone.change,
+            Change::Gone {
+                because: WhyGone::NotReproduced,
                 ..
             }
         ));

@@ -983,3 +983,56 @@ tr.violation td {
 .delta li.removed {
   color: var(--text-muted);
 }
+
+/* ---------------------------------------------------------------- *
+ * Passive scan
+ * ---------------------------------------------------------------- */
+
+.scan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.scan h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The description column is the one worth reading in full; everything else in the
+ * registry table is a short token. */
+.scan td.wrap {
+  white-space: normal;
+  max-width: 520px;
+}
+
+.scan .facts {
+  margin-bottom: 12px;
+}
+
+.scan .claims li {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(42, 47, 58, 0.5);
+}
+
+.scan .claims li:last-child {
+  border-bottom: 0;
+}
+
+/* Severity tags, reusing the palette the findings list already uses. */
+.tag.critical,
+.tag.high {
+  color: var(--danger, #d05c5c);
+}
+
+.tag.medium {
+  color: var(--warn, #d98b3a);
+}
+
+.tag.low,
+.tag.info {
+  color: var(--text-muted);
+}

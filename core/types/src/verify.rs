@@ -53,7 +53,7 @@ use serde::{Deserialize, Serialize};
 use crate::finding::{
     Confidence, Evidence, Finding, FindingSource, FindingStatus, Hypothesis, Location, Severity,
 };
-use crate::ids::{FindingId, TargetId};
+use crate::ids::{FindingId, RequestId, TargetId};
 
 /// What a check is called, e.g. `authz.bola`.
 ///
@@ -69,24 +69,154 @@ impl std::fmt::Display for DetectorId {
     }
 }
 
-/// What a check is, for a human and for a comparison between two engagements.
+/// Whether running a check puts traffic on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetectorMode {
+    /// Reads traffic that has already been captured. Sends nothing, ever.
+    ///
+    /// The difference between a check that is safe to run on a production system
+    /// during business hours and one that is not, so it is a field rather than
+    /// folklore — and, for passive checks, an invariant with a test that fails if a
+    /// transport is so much as touched.
+    Passive,
+    /// Performs its own experiments.
+    Active,
+}
+
+impl DetectorMode {
+    /// The word shown in the registry.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Passive => "passive",
+            Self::Active => "active",
+        }
+    }
+
+    /// Whether running this check sends anything.
+    pub fn sends(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
+/// What a check is, for a human and for a comparison between two engagements.
+///
+/// Serialize only: this is a static description compiled into the binary, so it goes
+/// out to a listing or an interface and never comes back in. What comes back in is an
+/// [`Observation`], which carries the id and version as owned strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct DetectorInfo {
-    /// Stable identifier.
+    /// Stable identifier, e.g. `headers.security`.
     pub id: DetectorId,
+    /// A human name, e.g. "Security header analysis".
+    pub name: &'static str,
     /// Bumped whenever what the check looks for changes.
     ///
     /// A finding that stopped appearing because the application was fixed and one
     /// that stopped appearing because the check was changed are different events, and
     /// a retest that cannot tell them apart is worse than none — see invariant 11.
-    pub version: u32,
+    /// Compared for equality, never ordered: "different" is the only question a
+    /// comparison asks of it.
+    pub version: &'static str,
     /// One line: what it looks for.
     pub about: &'static str,
-    /// Whether running it puts traffic on the wire.
+    /// Whether it sends.
+    pub mode: DetectorMode,
+    /// Whether it can state facts about traffic that need no experiment.
+    pub observes: bool,
+    /// Whether it can raise suspicions that *do* need one.
     ///
-    /// The difference between a check that is safe on a production system during
-    /// business hours and one that is not, so it is a field rather than folklore.
-    pub sends: bool,
+    /// Recorded separately from [`Self::observes`] because the two are genuinely
+    /// different products, and a check that only ever hypothesises produces no
+    /// findings at all until something verifies it.
+    pub hypothesizes: bool,
+}
+
+impl DetectorInfo {
+    /// Whether running this check puts traffic on the wire.
+    pub fn sends(&self) -> bool {
+        self.mode.sends()
+    }
+}
+
+/// Whether an observation is worth putting in front of somebody as a result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Significance {
+    /// True, and useful context, and not an issue.
+    ///
+    /// `Server: nginx/1.24.0` is a fact about the response; whether it matters
+    /// depends on the engagement. It is listed, counted, and never filed as a
+    /// finding, because a findings list that fills with facts is one people stop
+    /// reading.
+    Informational,
+    /// True, and worth a tester's attention.
+    ///
+    /// Reaches a report as a **lead** — [`Verification::Observed`] caps it at
+    /// [`Confidence::Reported`], which is not actionable. A passive check cannot
+    /// produce anything stronger, by construction rather than by policy.
+    Reportable,
+}
+
+/// A fact about one captured exchange.
+///
+/// The other thing a detector may produce, and the one that needs no experiment: a
+/// response either carried a `Strict-Transport-Security` header or it did not. Kept
+/// apart from [`Hypothesis`] because they have different futures — a hypothesis waits
+/// for a verifier, an observation is already as established as it is going to get.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Observation {
+    /// The check that made it.
+    ///
+    /// Owned rather than a [`DetectorId`]: an observation is runtime data that gets
+    /// written down and read back, and a static string cannot come out of a database.
+    pub detector: String,
+    /// That check's version at the time.
+    pub version: String,
+    /// What was seen, in one line.
+    pub about: String,
+    /// What was expected, and what was there instead.
+    ///
+    /// The pair rather than a verdict: a reader who disagrees with the expectation
+    /// can see it and say so.
+    pub expected: String,
+    /// What the exchange actually showed.
+    pub observed: String,
+    /// Why it is worth saying at all.
+    pub rationale: String,
+    /// The exchange it came from. Never empty — an observation with no exchange is
+    /// not evidence of anything.
+    pub exchange: RequestId,
+    /// Where in the message.
+    pub location: Option<Location>,
+    /// What it would be worth, if it is worth anything.
+    pub severity: Severity,
+    /// Whether it should reach a report.
+    pub significance: Significance,
+}
+
+impl Observation {
+    /// Whether this one becomes a finding.
+    pub fn is_reportable(&self) -> bool {
+        matches!(self.significance, Significance::Reportable)
+    }
+
+    /// What makes two observations the same observation.
+    ///
+    /// Deliberately *not* the URL: five hundred endpoints on one host missing the
+    /// same header is one thing to fix, and five hundred findings is a list nobody
+    /// reads. The exchange stays attached as evidence; only the grouping is coarse.
+    ///
+    /// Contains no credential material, because it is built from a detector id, a
+    /// host, and the name of a condition — never from a value.
+    pub fn fingerprint(&self, host: &str) -> String {
+        let place = self
+            .location
+            .as_ref()
+            .map(|location| format!("{:?}:{}", location.part, location.name))
+            .unwrap_or_default();
+        format!("{}|{}|{}|{}", self.detector, host, self.about, place)
+    }
 }
 
 /// How strongly an observation points at the hypothesis.
@@ -500,11 +630,22 @@ mod tests {
     fn a_detector_id_reads_as_itself() {
         let info = DetectorInfo {
             id: DetectorId("authz.bola"),
-            version: 1,
+            name: "Cross-identity access",
+            version: "1.0.0",
             about: "one identity reaching another identity's object",
-            sends: true,
+            mode: DetectorMode::Active,
+            observes: false,
+            hypothesizes: true,
         };
         assert_eq!(info.id.to_string(), "authz.bola");
-        assert!(info.sends);
+        assert!(info.sends(), "an active check sends, by definition");
+        assert_eq!(info.mode.as_str(), "active");
+
+        let passive = DetectorInfo {
+            mode: DetectorMode::Passive,
+            observes: true,
+            ..info
+        };
+        assert!(!passive.sends(), "a passive check never sends");
     }
 }

@@ -930,6 +930,30 @@ pub fn redacts(name: &str) -> bool {
     is_sensitive_header(name)
 }
 
+/// What raised a finding, for a reader who wants to know where it came from.
+///
+/// Names the check and, where the row records one, its version — which is what lets a
+/// later comparison tell "the application was fixed" from "the check was rewritten".
+/// A human's own finding says so rather than naming a detector.
+pub fn raised_by(source: &hexora_types::finding::FindingSource) -> String {
+    use hexora_types::finding::FindingSource as S;
+    let versioned = |kind: &str, detector: &String, version: &String| {
+        if version.is_empty() {
+            format!("{kind} check {detector}")
+        } else {
+            format!("{kind} check {detector} {version}")
+        }
+    };
+    match source {
+        S::PassiveScan { detector, version } => versioned("passive", detector, version),
+        S::ActiveScan { detector, version } => versioned("active", detector, version),
+        S::AuthorizationTest => "the authorization tests".into(),
+        S::Extension { extension } => format!("the {extension} extension"),
+        S::Ai { model } => format!("the AI layer ({model})"),
+        S::Manual => "a tester".into(),
+    }
+}
+
 /// A short label for a confidence level, as the documents print it.
 pub fn confidence_word(confidence: Confidence) -> &'static str {
     match confidence {
