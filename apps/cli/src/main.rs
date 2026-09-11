@@ -44,7 +44,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M15.1. The proxy, HTTP/1.x engine with TLS, \
+                  Development status: M15.2. The proxy, HTTP/1.x engine with TLS, \
                   projects, traffic capture, the repeater, authorization testing, the \
                   passive scanner, the active scheduler, the intruder, findings and \
                   reports all work. There is no crawler: Hexora tests the traffic it \
@@ -666,6 +666,19 @@ enum IdentityCommand {
         #[arg(long, default_value = "bearer")]
         kind: String,
 
+        /// Cookie name that identifies the caller. Repeatable.
+        ///
+        /// Only for a cookie credential, and the difference between cross-identity
+        /// testing working and not. A browser's `Cookie` header is a dozen values —
+        /// session, language, consent, analytics — and several change on every request,
+        /// so comparing the jar whole never matches anything.
+        ///
+        /// Name the one that says who you are and it is compared exactly. Nothing is
+        /// guessed: matching loosely would attribute a request to the wrong identity,
+        /// because two identities from one browser share every cookie except this one.
+        #[arg(long, value_name = "NAME")]
+        session_cookie: Vec<String>,
+
         /// Environment variable holding the credential.
         #[arg(long, value_name = "VAR", conflicts_with = "from_file")]
         from_env: Option<String>,
@@ -1049,6 +1062,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             from_file,
             owns,
             headers,
+            session_cookie,
         }) => identity::add(identity::AddArgs {
             project: path,
             label,
@@ -1058,6 +1072,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             from_file: from_file.as_deref(),
             owns,
             headers,
+            session_cookies: session_cookie,
             json: cli.json,
         }),
         Command::Identity(IdentityCommand::Refresh {
@@ -1460,14 +1475,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M15.1",
+            "milestone": "M15.2",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M15.1 (keeping a session alive)");
+        println!("  milestone:               M15.2 (which cookie says who you are)");
     }
 }
 
@@ -1610,7 +1625,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M15.1"),
+            help.contains("M15.2"),
             "users must not mistake this for a finished tool"
         );
     }

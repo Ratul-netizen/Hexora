@@ -1,0 +1,22 @@
+-- M15.2: which cookie says who you are.
+--
+-- Cross-identity testing rests entirely on knowing whose session a captured request
+-- carried, and proxy traffic does not say: a browser announces no identity id. So the
+-- credential is the evidence, compared byte for byte.
+--
+-- That works for a bearer token, which is one value that changes only at login. It
+-- fails for cookies, and cookies are most of the web. A real engagement's `Cookie`
+-- header was 1,535 bytes holding a session, a language, a country, consent flags, two
+-- analytics ids and a telemetry session id -- and the last three change between
+-- requests. Compared whole, no captured request ever matched a declared identity, and
+-- the best check in this tool reported "there is nobody to say whose session it was"
+-- on every endpoint.
+--
+-- Matching loosely is not the answer, and is worse than failing: two identities driven
+-- from the same browser share every cookie EXCEPT the session, so "most of them match"
+-- attributes a request to the wrong person and manufactures an IDOR that is not there.
+--
+-- So the discriminating cookie is named, by a person, once. Exact on that pair, or no
+-- answer -- the same bargain as before, applied to the part of the header that means
+-- anything.
+ALTER TABLE identities ADD COLUMN session_cookies_json TEXT NOT NULL DEFAULT '[]';

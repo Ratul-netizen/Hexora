@@ -721,7 +721,8 @@ not an object and an object is not an ownership claim.
 
 ```text
 M15.1  Session adoption      a person logs in, Hexora notices  ✔
-M15.2  Renewal sequence      a stored sequence with holes where secrets go
+M15.2  Which cookie is you   attribution through a jar that changes  ✔
+M15.4  Renewal sequence      a stored sequence with holes where secrets go
 M15.3  In-session detection  replay a known-good request, compare structurally
 ```
 

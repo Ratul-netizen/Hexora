@@ -172,6 +172,25 @@ impl Subject {
     pub fn whose(&self) -> Option<&Identity> {
         let sent = &self.draft.request.headers;
         self.identities.iter().find(|identity| {
+            // A cookie jar is not one credential, it is a dozen, and most of them say
+            // nothing about who is calling. Compared whole against a real engagement's
+            // 1,535-byte header — session, language, consent, two analytics ids, a
+            // telemetry session id, the last three different on every request — nothing
+            // ever matched, and the best check here reported "there is nobody to say
+            // whose session it was" on every endpoint it tried.
+            //
+            // When a person has named the cookies that identify the caller, compare
+            // exactly those. Same bargain as before, applied to the part that means
+            // something.
+            if !identity.session_cookies.is_empty() {
+                return sent
+                    .get("cookie")
+                    .zip(cookie_value(&identity.credential))
+                    .is_some_and(|(header, declared)| {
+                        session_matches(&header.value_lossy(), &declared, &identity.session_cookies)
+                    });
+            }
+
             let mut theirs = sent.clone();
             identity.credential.apply(&mut theirs);
             identity.credential.header_names().iter().all(|name| {
@@ -189,6 +208,44 @@ impl Subject {
     pub fn host(&self) -> &str {
         &self.exchange.host
     }
+}
+
+/// The declared cookie header of an identity, if it authenticates with one.
+fn cookie_value(credential: &hexora_types::identity::Credential) -> Option<String> {
+    match credential {
+        hexora_types::identity::Credential::Cookie { value } => Some(value.expose().clone()),
+        _ => None,
+    }
+}
+
+/// Whether a request's cookie header carries the same session as a declared one.
+///
+/// Every named cookie must be present in **both** and hold the same value. All of them,
+/// not any: an identity whose session is split across two cookies is not identified by
+/// one of them, and half a match is not a match.
+///
+/// Deliberately not "most of the jar agrees". Two identities driven from the same
+/// browser share every cookie *except* the session, so a loose comparison would
+/// attribute a request to the wrong person — and the finding that comes out the other
+/// end is an IDOR that does not exist. Failing to attribute is recoverable; attributing
+/// wrongly is a false report with somebody's name on it.
+fn session_matches(sent: &str, declared: &str, names: &[String]) -> bool {
+    names.iter().all(
+        |name| match (cookie_in(sent, name), cookie_in(declared, name)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        },
+    )
+}
+
+/// One cookie's value out of a `Cookie` header.
+fn cookie_in<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    header.split(';').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        // Names are case-sensitive per RFC 6265; the surrounding whitespace is not
+        // part of either.
+        (key.trim() == name).then(|| value.trim())
+    })
 }
 
 /// A stop signal a run checks before every send.

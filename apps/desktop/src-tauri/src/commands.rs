@@ -739,6 +739,9 @@ pub fn identity_add(
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty())
             .collect(),
+        // The window has no field for these yet, so a cookie credential declared here
+        // is compared whole — which is the CLI's behaviour before `--session-cookie`.
+        session_cookies: Vec::new(),
     };
 
     let project = open(&state)?;

@@ -342,6 +342,121 @@ async fn preparing_a_plan_sends_nothing_at_all() {
     assert!(plan.describe().contains("api.example.com"));
 }
 
+/// An identity authenticating with a cookie jar, naming which cookie is the session.
+fn cookie_identity(label: &str, jar: &str, session: &[&str]) -> hexora_types::identity::Identity {
+    hexora_types::identity::Identity {
+        id: hexora_types::ids::IdentityId::new(),
+        label: label.into(),
+        privilege: hexora_types::identity::PrivilegeLevel::User,
+        credential: hexora_types::identity::Credential::Cookie {
+            value: jar.to_string().into(),
+        },
+        extra_headers: Vec::new(),
+        owned_object_ids: Vec::new(),
+        session_cookies: session.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// A subject whose captured request carried `jar`.
+fn subject_sent_with(jar: &str, identities: Vec<hexora_types::identity::Identity>) -> Subject {
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+    let mut request = HttpRequest::get(HttpService::new("api.example.com", 443, true), "/me");
+    request.headers.set("Cookie", jar.to_string());
+
+    Subject {
+        hypothesis: suspicion(source, "api.example.com"),
+        exchange: hexora_scan::passive::exchange_at(&project, source)
+            .unwrap()
+            .unwrap(),
+        draft: hexora_repeater::Draft::new(request),
+        target: hexora_types::ids::TargetId::new(),
+        identities: Arc::new(identities),
+    }
+}
+
+#[tokio::test]
+async fn a_session_cookie_identifies_the_caller_through_a_changing_jar() {
+    // The defect this fixes. A real engagement's `Cookie` header was 1,535 bytes:
+    // session, language, consent flags, two analytics ids and a telemetry session id —
+    // and the last three differ on every request. Compared whole, nothing ever matched
+    // a declared identity, and cross-identity testing reported "there is nobody to say
+    // whose session it was" on every single endpoint.
+    let declared = "lang=en; wsid=SESSION-ALICE; analytics=aaa111; telemetry=zzz999";
+    let sent = "lang=en; wsid=SESSION-ALICE; analytics=bbb222; telemetry=yyy888";
+
+    let subject = subject_sent_with(sent, vec![cookie_identity("Alice", declared, &["wsid"])]);
+    assert_eq!(
+        subject.whose().map(|identity| identity.label.as_str()),
+        Some("Alice"),
+        "the session cookie matched exactly and the noise was ignored"
+    );
+}
+
+#[tokio::test]
+async fn a_request_is_never_attributed_to_the_wrong_identity() {
+    // The reason this is exact rather than fuzzy, and why "most of the jar agrees" was
+    // never an option. Two identities driven from one browser share every cookie
+    // *except* the session — so a loose comparison picks whichever it sees first, and
+    // the cross-identity finding that comes out the other end is an IDOR that does not
+    // exist, reported against a real company with a researcher's name on it.
+    let alice = cookie_identity(
+        "Alice",
+        "lang=en; wsid=SESSION-ALICE; theme=dark",
+        &["wsid"],
+    );
+    let bob = cookie_identity("Bob", "lang=en; wsid=SESSION-BOB; theme=dark", &["wsid"]);
+
+    let subject = subject_sent_with("lang=en; wsid=SESSION-BOB; theme=dark", vec![alice, bob]);
+    assert_eq!(
+        subject.whose().map(|identity| identity.label.as_str()),
+        Some("Bob"),
+        "everything but the session cookie was identical between the two"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_session_is_nobody_rather_than_the_closest_match() {
+    // A third browser's session, sharing every cookie but the one that counts. No
+    // answer is the right answer: failing to attribute is recoverable, attributing
+    // wrongly is a false report.
+    let alice = cookie_identity(
+        "Alice",
+        "lang=en; wsid=SESSION-ALICE; theme=dark",
+        &["wsid"],
+    );
+    let subject = subject_sent_with("lang=en; wsid=SESSION-CAROL; theme=dark", vec![alice]);
+
+    assert!(subject.whose().is_none(), "it guessed");
+}
+
+#[tokio::test]
+async fn every_named_cookie_has_to_match_not_merely_one() {
+    // An identity whose session is split across two cookies is not identified by one of
+    // them. Half a match is not a match.
+    let split = cookie_identity("Alice", "a=ONE; b=TWO; lang=en", &["a", "b"]);
+    let subject = subject_sent_with("a=ONE; b=DIFFERENT; lang=en", vec![split.clone()]);
+    assert!(subject.whose().is_none());
+
+    let both = subject_sent_with("a=ONE; b=TWO; lang=fr", vec![split]);
+    assert!(both.whose().is_some(), "and when both match, it is a match");
+}
+
+#[tokio::test]
+async fn an_identity_that_names_no_session_cookie_still_compares_the_whole_jar() {
+    // The behaviour before this existed, kept for a bearer token and for anyone who
+    // has not named a cookie: exact on the whole header.
+    let jar = "lang=en; wsid=SESSION-ALICE";
+    let whole = cookie_identity("Alice", jar, &[]);
+
+    assert!(subject_sent_with(jar, vec![whole.clone()])
+        .whose()
+        .is_some());
+    assert!(subject_sent_with("lang=en; wsid=OTHER", vec![whole])
+        .whose()
+        .is_none());
+}
+
 #[tokio::test]
 async fn hexora_never_probes_a_header_it_attached_itself() {
     // Found against a real bug bounty programme. The proxy attaches

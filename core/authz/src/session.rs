@@ -390,3 +390,189 @@ mod tests {
         }
     }
 }
+
+/// How much of a project's traffic can be tied to a declared identity.
+///
+/// The question nobody asked, and it cost an evening: an entire engagement was set up,
+/// an identity declared, a session adopted and cross-identity checks run against a real
+/// target — and **not one captured request carried a credential**. Every check reported
+/// its own local reason, one endpoint at a time, and none of them said the thing that
+/// mattered: there is no authenticated traffic here at all.
+///
+/// A tool that lets somebody believe they tested authorization when they tested a
+/// public website is failing in the same direction as a false positive, and more
+/// quietly. So the fact is countable, and callers print it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Coverage {
+    /// Requests examined.
+    pub examined: usize,
+    /// Requests carrying an `Authorization` header.
+    ///
+    /// The only header that is a credential by definition. Counted apart from cookies
+    /// on purpose: the first version of this counted any `Cookie` header as a
+    /// credential and reported 192 of 300 against a project holding no authenticated
+    /// traffic whatsoever — the same category error the authentication check had just
+    /// been fixed for, made again one function later.
+    pub with_authorization: usize,
+    /// Requests carrying a `Cookie` header of any kind.
+    ///
+    /// **Not evidence of a session.** A browser sends analytics, consent and language
+    /// cookies to a site nobody has ever logged into. Reported so a reader can see the
+    /// difference between "there are cookies" and "there is a session", because that
+    /// difference is where an evening went.
+    pub with_cookies: usize,
+    /// Requests whose credential matches a declared identity exactly.
+    pub attributable: usize,
+    /// Whether any attribution rested on comparing a whole cookie jar.
+    ///
+    /// Weak evidence, and sometimes none at all: a project whose identity was declared
+    /// from an analytics-only cookie header matched 18 requests exactly and held no
+    /// session whatsoever. Saying which kind of match this was is the difference
+    /// between a number a reader can trust and one that flatters.
+    pub by_whole_jar: bool,
+}
+
+impl Coverage {
+    /// Whether cross-identity testing has anything at all to work with.
+    ///
+    /// A cookie jar does not count. Either something carried an `Authorization` header,
+    /// or something matched a declared identity — anything else is a guess.
+    pub fn has_authenticated_traffic(&self) -> bool {
+        self.with_authorization > 0 || self.attributable > 0
+    }
+
+    /// How it reads for somebody deciding whether their run meant anything.
+    pub fn describe(&self) -> String {
+        if self.examined == 0 {
+            return "No traffic captured yet.".into();
+        }
+        if !self.has_authenticated_traffic() {
+            let cookies = match self.with_cookies {
+                0 => String::new(),
+                n => format!(
+                    " {n} carried cookies, but a browser sends analytics and consent \
+                     cookies to a site nobody has logged into, so that is not a session."
+                ),
+            };
+            return format!(
+                "No authenticated traffic. None of the last {} captured request(s) \
+                 carries an `Authorization` header, and none matches a declared \
+                 identity.{cookies} Nothing here can test authorization: browse the \
+                 application **logged in**, through the proxy, and open the pages that \
+                 need a session — a profile, an order history, saved addresses.",
+                self.examined
+            );
+        }
+        if self.attributable == 0 {
+            return format!(
+                "{} of the last {} captured request(s) carry an `Authorization` header, \
+                 but none matches a declared identity, so no cross-identity test can say \
+                 whose session it was. Declare it with `hexora identity add`.",
+                self.with_authorization, self.examined
+            );
+        }
+        let caution = match (self.by_whole_jar, self.with_authorization) {
+            (true, 0) => {
+                " Those matched on the whole cookie header, which is weak: a jar of \
+                 analytics and consent cookies matches exactly and carries no session \
+                 at all. Name the cookie that identifies you with `hexora identity add \
+                 --session-cookie <name>`."
+            }
+            _ => "",
+        };
+        format!(
+            "{} of the last {} captured request(s) can be attributed to a declared \
+             identity ({} carried an `Authorization` header, {} carried \
+             cookies).{caution}",
+            self.attributable, self.examined, self.with_authorization, self.with_cookies
+        )
+    }
+}
+
+/// Counts how much captured traffic carries a credential, and how much is attributable.
+///
+/// Human-driven traffic only, for the same reason [`find_renewal`] uses it: Hexora's
+/// own replays carry credentials Hexora chose, and counting those would answer a
+/// question about itself.
+pub fn coverage(traffic: &TrafficStore, identities: &[Identity], limit: usize) -> Result<Coverage> {
+    let mut found = Coverage::default();
+    let mut cursor = None;
+
+    loop {
+        let page = traffic.history(
+            cursor.as_ref(),
+            hexora_storage::repository::Limit::new(hexora_storage::repository::Limit::MAX),
+        )?;
+        let next = page.next.clone();
+
+        for row in page.items {
+            if found.examined >= limit {
+                return Ok(found);
+            }
+            let Ok(stored) = traffic.request(row.id) else {
+                continue;
+            };
+            if stored.origin != "proxy" {
+                continue;
+            }
+            found.examined += 1;
+
+            let bearer = header_value(&stored.headers_raw, "authorization");
+            let jar = header_value(&stored.headers_raw, "cookie");
+            if bearer.is_some() {
+                found.with_authorization += 1;
+            }
+            if jar.is_some() {
+                found.with_cookies += 1;
+            }
+            if bearer.is_none() && jar.is_none() {
+                continue;
+            }
+
+            if let Some(identity) = identities
+                .iter()
+                .find(|identity| attributable(identity, bearer.as_deref(), jar.as_deref()))
+            {
+                found.attributable += 1;
+                if matches!(identity.credential, Credential::Cookie { .. })
+                    && identity.session_cookies.is_empty()
+                {
+                    found.by_whole_jar = true;
+                }
+            }
+        }
+
+        match next {
+            Some(next) => cursor = Some(next),
+            None => return Ok(found),
+        }
+    }
+}
+
+/// Whether this request's credential is exactly this identity's.
+fn attributable(identity: &Identity, bearer: Option<&str>, jar: Option<&str>) -> bool {
+    match &identity.credential {
+        Credential::Bearer { token } => {
+            bearer.is_some_and(|sent| strip_bearer(sent) == token.expose().as_str())
+        }
+        Credential::Cookie { value } => match (jar, identity.session_cookies.as_slice()) {
+            (Some(sent), []) => sent == value.expose().as_str(),
+            (Some(sent), names) => names.iter().all(|name| {
+                match (cookie_in(sent, name), cookie_in(value.expose(), name)) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => false,
+                }
+            }),
+            (None, _) => false,
+        },
+        _ => false,
+    }
+}
+
+/// One cookie's value out of a `Cookie` header.
+fn cookie_in<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    header.split(';').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key.trim() == name).then(|| value.trim())
+    })
+}

@@ -508,6 +508,61 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M15.2, which cookie says who you are
+
+Cross-identity testing rests on knowing whose session a captured request carried, and
+proxy traffic does not say. The credential is the evidence, compared byte for byte —
+which works for a bearer token, one value that changes only at login, and fails for
+cookies. Cookies are most of the web.
+
+A real engagement's `Cookie` header was **1,535 bytes**: a session, a language, consent
+flags, two analytics ids and a telemetry session id — and three of those change on every
+request. Compared whole, no captured request ever matched a declared identity, and the
+best check in this tool reported *"there is nobody to say whose session it was"* on every
+endpoint it tried.
+
+`hexora identity add --session-cookie <name>` names the cookie that identifies the
+caller. It is compared exactly; the rest of the jar is ignored.
+
+**Not matched loosely, and that is the point.** Two identities driven from one browser
+share every cookie *except* the session, so "most of the jar agrees" picks whichever it
+sees first — and the cross-identity finding that comes out the other end is an IDOR that
+does not exist, filed against a real company with a researcher's name on it. Failing to
+attribute is recoverable. Attributing wrongly is a false report. A test is named for it.
+
+When attribution fails, the message now lists **the cookie names that were actually
+sent**, so the answer is on screen rather than in a browser's developer tools. Names
+only: a `Cookie` header's values *are* the session.
+
+Migration 11.
+
+### Added — a project can now say it has no authenticated traffic
+
+The quiet one, and it cost an evening. An engagement was set up against a real target: a
+scope, a programme profile, an identity declared, a session adopted, cross-identity
+checks run twice. **Not one captured request carried a credential.** Every check
+reported its own local reason, one endpoint at a time, and none of them said the thing
+that mattered.
+
+`hexora identity list` now ends with what the traffic actually supports:
+
+```text
+No authenticated traffic. None of the last 300 captured request(s) carries an
+`Authorization` header, and none matches a declared identity. 192 carried cookies,
+but a browser sends analytics and consent cookies to a site nobody has logged into,
+so that is not a session.
+```
+
+A tool that lets somebody believe they tested authorization when they tested a public
+website fails in the same direction as a false positive, and more quietly.
+
+**The first version of this counted every `Cookie` header as a credential** and reported
+`192 of 300 carry a credential` against a project holding none — the same category error
+`auth.enforcement` had been fixed for an hour earlier, made again one function later. It
+counts `Authorization` headers and exact identity matches now, reports cookies
+separately as the non-evidence they are, and says out loud when an attribution rested on
+a whole-jar comparison rather than a named session cookie.
+
 ### Fixed — three ways of calling a working application broken
 
 One run of `authz.scheduled` against a live bug bounty target filed **six findings, all

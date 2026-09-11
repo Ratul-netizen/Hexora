@@ -140,6 +140,20 @@ pub struct Identity {
     /// response.
     #[serde(default)]
     pub owned_object_ids: Vec<String>,
+    /// Which cookies in [`Credential::Cookie`] actually say who the caller is.
+    ///
+    /// Empty means "the whole header", which is correct for a credential that is one
+    /// value and wrong for a cookie jar. A real engagement's was 1,535 bytes holding a
+    /// session, a language, consent flags and three values that change between
+    /// requests — so no captured request ever matched, and cross-identity testing
+    /// reported "there is nobody to say whose session it was" everywhere.
+    ///
+    /// Named by a person rather than guessed. Matching loosely would be worse than
+    /// failing: two identities driven from one browser share every cookie except the
+    /// session, so "most of them match" attributes a request to the wrong person and
+    /// manufactures an IDOR that is not there.
+    #[serde(default)]
+    pub session_cookies: Vec<String>,
 }
 
 impl Identity {
@@ -152,6 +166,7 @@ impl Identity {
             credential: Credential::None,
             extra_headers: Vec::new(),
             owned_object_ids: Vec::new(),
+            session_cookies: Vec::new(),
         }
     }
 
@@ -166,6 +181,7 @@ impl Identity {
             },
             extra_headers: Vec::new(),
             owned_object_ids: Vec::new(),
+            session_cookies: Vec::new(),
         }
     }
 

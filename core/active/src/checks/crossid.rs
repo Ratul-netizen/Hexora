@@ -85,9 +85,10 @@ impl ActiveCheck for CrossIdentity {
                 why: format!(
                     "the credential {} {} was captured with does not match any identity \
                      this project declares, so there is nobody to say whose session it \
-                     was. Add it with `hexora identity add` and run again",
+                     was.{}",
                     subject.exchange.method,
                     path_of(&subject.exchange.url),
+                    how_to_fix(subject),
                 ),
             });
         };
@@ -356,6 +357,43 @@ fn refutation(matrix: &Matrix, owner: &Identity) -> String {
         if matrix.cells.len() == 1 { "y" } else { "ies" },
         owner.label,
         tried.join(", "),
+    )
+}
+
+/// What to do about an unattributable request, in the terms of this request.
+///
+/// A cookie jar is the common case and the one where the old message helped least: the
+/// tester is told nothing matched, while the header holds a dozen names of which
+/// exactly one means anything. So the names are listed.
+///
+/// Names only. A `Cookie` header's values *are* the session.
+fn how_to_fix(subject: &Subject) -> String {
+    let header = subject
+        .draft
+        .request
+        .headers
+        .get("cookie")
+        .map(|header| header.value_lossy().into_owned());
+
+    let Some(header) = header else {
+        return " Add it with `hexora identity add` and run again".to_string();
+    };
+    let names: Vec<&str> = header
+        .split(';')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(name, _)| name.trim())
+        .filter(|name| !name.is_empty())
+        .collect();
+
+    if names.is_empty() {
+        return " Add it with `hexora identity add` and run again".to_string();
+    }
+    format!(
+        " It was sent with cookies, and a jar is compared whole unless you say which of \
+         them identifies you — several change on every request, so comparing them all \
+         matches nothing. These were sent: {}. Declare the one that is your session with \
+         `hexora identity add --session-cookie <name>`",
+        names.join(", ")
     )
 }
 

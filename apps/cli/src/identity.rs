@@ -24,6 +24,11 @@ pub struct AddArgs<'a> {
     pub from_file: Option<&'a Path>,
     /// `bearer`, `cookie`, `basic` or a header name.
     pub kind: &'a str,
+    /// Cookie names that identify the caller, for a cookie credential.
+    ///
+    /// Without these a cookie jar is compared whole, and a real one holds a dozen
+    /// values of which three change between requests — so nothing ever matches.
+    pub session_cookies: &'a [String],
     /// Object identifiers known to belong to this identity.
     pub owns: &'a [String],
     /// Extra headers, in `Name: Value` form.
@@ -52,6 +57,7 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
         credential,
         extra_headers: parse_headers(args.headers)?,
         owned_object_ids: args.owns.to_vec(),
+        session_cookies: args.session_cookies.to_vec(),
     };
     store.put(&identity)?;
 
@@ -84,7 +90,18 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
 /// Never prints credential material, in any output mode. An identity list is
 /// something a tester pastes into a ticket or a screenshot without thinking about it.
 pub fn list(project: &Path, json: bool) -> Result<()> {
-    let identities = crate::open_project(project)?.identities().list()?;
+    let opened = crate::open_project(project)?;
+    let identities = opened.identities().list()?;
+
+    // How much of the captured traffic these identities actually account for.
+    //
+    // Asked here because this is where somebody looks to see whether their engagement
+    // is set up, and because not asking it cost an evening: a whole run against a real
+    // target, an identity declared and a session adopted, and not one captured request
+    // carried a credential. Every check said so in its own words, one endpoint at a
+    // time, and none of them said the thing that mattered.
+    let coverage = hexora_authz::session::coverage(&opened.traffic(), &identities, COVERAGE_SAMPLE)
+        .unwrap_or_default();
 
     if json {
         let rows: Vec<_> = identities
@@ -99,12 +116,25 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
                 })
             })
             .collect();
-        println!("{}", serde_json::json!({ "identities": rows }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "identities": rows,
+                "coverage": {
+                    "examined": coverage.examined,
+                    "with_authorization": coverage.with_authorization,
+                    "with_cookies": coverage.with_cookies,
+                    "attributable": coverage.attributable,
+                },
+            })
+        );
         return Ok(());
     }
 
     if identities.is_empty() {
         println!("No identities. Add one with `hexora identity add`.");
+        println!();
+        println!("{}", coverage.describe());
         return Ok(());
     }
 
@@ -125,8 +155,17 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
             }
         );
     }
+
+    println!();
+    println!("{}", coverage.describe());
     Ok(())
 }
+
+/// How many recent exchanges the coverage line reads.
+///
+/// A ceiling rather than a target: the answer to "does this project hold authenticated
+/// traffic" does not need every row, and `identity list` should not take a second.
+const COVERAGE_SAMPLE: usize = 300;
 
 /// Removes an identity by label or id.
 pub fn remove(project: &Path, who: &str, json: bool) -> Result<()> {
@@ -405,6 +444,7 @@ mod tests {
             from_file: None,
             kind: "bearer",
             owns: &[],
+            session_cookies: &[],
             headers: &[],
             json: false,
         };
@@ -431,6 +471,7 @@ mod tests {
             from_file: Some(&path),
             kind: "bearer",
             owns: &[],
+            session_cookies: &[],
             headers: &[],
             json: false,
         };

@@ -77,6 +77,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "programme",
         sql: include_str!("../migrations/0010_programme.sql"),
     },
+    Migration {
+        version: 11,
+        name: "session_cookies",
+        sql: include_str!("../migrations/0011_session_cookies.sql"),
+    },
 ];
 
 /// The schema version this build expects.

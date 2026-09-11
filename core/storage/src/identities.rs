@@ -136,19 +136,25 @@ impl IdentityStore {
                 reason: e.to_string(),
             }
         })?;
+        let session_cookies =
+            serde_json::to_string(&identity.session_cookies).map_err(|e| StorageError::Decode {
+                entity: "session cookies",
+                reason: e.to_string(),
+            })?;
 
         let conn = self.db.connection()?;
         conn.execute(
             "INSERT INTO identities
                 (id, label, privilege, credential_json, extra_headers, owned_object_ids,
-                 created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 session_cookies_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET
                 label = excluded.label,
                 privilege = excluded.privilege,
                 credential_json = excluded.credential_json,
                 extra_headers = excluded.extra_headers,
-                owned_object_ids = excluded.owned_object_ids",
+                owned_object_ids = excluded.owned_object_ids,
+                session_cookies_json = excluded.session_cookies_json",
             params![
                 identity.id.to_string(),
                 identity.label,
@@ -156,6 +162,7 @@ impl IdentityStore {
                 credential,
                 extra_headers,
                 owned,
+                session_cookies,
                 crate::traffic::now(),
             ],
         )?;
@@ -166,7 +173,8 @@ impl IdentityStore {
     pub fn list(&self) -> Result<Vec<Identity>> {
         let conn = self.db.connection()?;
         let mut statement = conn.prepare(
-            "SELECT id, label, privilege, credential_json, extra_headers, owned_object_ids
+            "SELECT id, label, privilege, credential_json, extra_headers, owned_object_ids,
+                    session_cookies_json
              FROM identities ORDER BY id",
         )?;
         let rows = statement.query_map([], |row| {
@@ -177,6 +185,7 @@ impl IdentityStore {
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
             ))
         })?;
 
@@ -238,8 +247,8 @@ impl IdentityStore {
     }
 }
 
-fn decode(row: (String, String, String, String, String, String)) -> Result<Identity> {
-    let (id, label, privilege, credential, extra_headers, owned) = row;
+fn decode(row: (String, String, String, String, String, String, String)) -> Result<Identity> {
+    let (id, label, privilege, credential, extra_headers, owned, session_cookies) = row;
 
     let stored: StoredCredential =
         serde_json::from_str(&credential).map_err(|e| StorageError::Decode {
@@ -257,6 +266,12 @@ fn decode(row: (String, String, String, String, String, String)) -> Result<Ident
             reason: e.to_string(),
         })?;
 
+    let session_cookies: Vec<String> =
+        serde_json::from_str(&session_cookies).map_err(|e| StorageError::Decode {
+            entity: "session cookies",
+            reason: e.to_string(),
+        })?;
+
     Ok(Identity {
         id: id.parse().map_err(|e| StorageError::Decode {
             entity: "IdentityId",
@@ -267,6 +282,7 @@ fn decode(row: (String, String, String, String, String, String)) -> Result<Ident
         credential: stored.into(),
         extra_headers,
         owned_object_ids,
+        session_cookies,
     })
 }
 
