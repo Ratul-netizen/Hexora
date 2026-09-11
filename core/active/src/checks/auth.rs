@@ -345,21 +345,50 @@ fn open(
                 ),
             },
         },
-        // The middle case, and the one a check must not overstate. A sign-in page
-        // answered 200 looks exactly like this, and so does a partially-populated
-        // view of a real resource.
-        Answered::DifferentContent => Verification::Supported {
-            support: Support::Consistent,
-            note: format!(
-                "{where_} answered {} with no credential, the same status as the real \
-                 session, but with different content — differing at {}. That is what a \
-                 sign-in page answered 200 looks like, and also what a partially \
-                 populated view of the real resource looks like; the two responses are \
-                 cited so a reader can tell which",
-                none.status,
-                diff.summary("with a session", "without"),
-            ),
-            evidence,
+        // Different content to a caller with no session.
+        //
+        // This used to be a lead, and against a real application every one of them was
+        // wrong. Read what it actually says: the server produced a *different* response
+        // for an unauthenticated caller, which means it noticed. That is the control
+        // working, not evidence it is missing. Measured on two of the endpoints filed:
+        //
+        //   /loyalty-program/v1/wallet -> {"wallet_enabled":false,"loyalty_programs":[]}
+        //   /v1/pages/ftuPromoCounter  -> {"sections":[], ...}
+        //
+        // An empty wallet and a promo page with nothing in it. The application declined
+        // to hand a stranger anything of the user's, and got filed for it.
+        //
+        // The residual worry is real but narrow: a *partially* populated view, where an
+        // anonymous caller receives some of the owner's data and not all of it. That is
+        // a disclosure question, and this project answers those with declared object
+        // identifiers rather than with a hunch — found in the credential-less response,
+        // one of those is the finding. Absent, the experiment ran and does not support
+        // the suspicion, which is a result and is reported as one.
+        Answered::DifferentContent => match owned_id_in(subject, none) {
+            Some(id) => Verification::Supported {
+                support: Support::Distinctive,
+                note: format!(
+                    "{where_} answered {} with no credential, serving content that \
+                     differs from the real session's at {} — and that response contains \
+                     {id}, which this project declares as belonging to an identity. A \
+                     partial view is still a view, and part of this one belongs to \
+                     somebody",
+                    none.status,
+                    diff.summary("with a session", "without"),
+                ),
+                evidence,
+            },
+            None => Verification::Refuted {
+                note: format!(
+                    "{where_} answered {} with no credential but served different \
+                     content from the real session's, so the application distinguished \
+                     the caller — which is what an enforced check looks like. Nothing in \
+                     the unauthenticated response belongs to a declared identity. If you \
+                     suspect it still leaks part of one, declare what an identity owns \
+                     with `hexora identity add --owns` and run again",
+                    none.status,
+                ),
+            },
         },
         Answered::Refused => Verification::Refuted {
             note: format!("{where_} refused a request with no credential"),
@@ -855,6 +884,56 @@ mod tests {
                 assert!(note.contains("acct-1000-belongs-to-alice"), "{note}");
             }
             other => panic!("the real thing was not established: {other:?}"),
+        }
+        assert_eq!(severity_for(&verification), Severity::High);
+    }
+
+    #[test]
+    fn different_content_without_a_session_is_the_control_working() {
+        // Every one of these was wrong against a real application. The server produced
+        // a different response for an unauthenticated caller, which means it noticed —
+        // an empty wallet, a promo page with no sections. It declined to hand a stranger
+        // anything of the user's, and got filed for it.
+        let baseline = answer(200, r#"{"wallet_enabled":true,"programs":["gold"]}"#);
+        let none = answer(200, r#"{"wallet_enabled":false,"programs":[]}"#);
+        let verification = open(
+            &subject_owning(vec![owner("acct-1000-belongs-to-alice")]),
+            &baseline,
+            &none,
+            compare(&baseline, &none),
+            Answered::DifferentContent,
+        );
+
+        assert!(
+            matches!(verification, Verification::Refuted { .. }),
+            "an enforced check was reported as a lead: {verification:?}"
+        );
+        assert!(verification.confidence().is_none());
+    }
+
+    #[test]
+    fn a_partial_view_containing_a_declared_owners_data_is_still_the_real_thing() {
+        // The narrow case the refutation must not swallow: the anonymous caller gets
+        // less than the owner does, but some of what it gets is the owner's.
+        let baseline = answer(
+            200,
+            r#"{"account":"acct-1000-belongs-to-alice","balance":4210,"tier":"gold"}"#,
+        );
+        let none = answer(200, r#"{"account":"acct-1000-belongs-to-alice"}"#);
+        let verification = open(
+            &subject_owning(vec![owner("acct-1000-belongs-to-alice")]),
+            &baseline,
+            &none,
+            compare(&baseline, &none),
+            Answered::DifferentContent,
+        );
+
+        match &verification {
+            Verification::Supported { support, note, .. } => {
+                assert_eq!(*support, Support::Distinctive);
+                assert!(note.contains("acct-1000-belongs-to-alice"), "{note}");
+            }
+            other => panic!("a partial disclosure was ruled out: {other:?}"),
         }
         assert_eq!(severity_for(&verification), Severity::High);
     }

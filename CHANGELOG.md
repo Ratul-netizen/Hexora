@@ -508,6 +508,37 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Fixed — the last of the authentication leads, which were the control working
+
+Eight `medium · tentative` leads survived the earlier fixes: *"answered without a
+session, with different content"*. Read what that sentence actually says. The server
+produced a **different** response for an unauthenticated caller — which means it
+noticed. That is the control working, and it was being filed as a suspicion that the
+control was missing.
+
+The two that were checked by hand:
+
+```text
+/loyalty-program/v1/wallet  ->  {"wallet_enabled":false,"loyalty_programs":[]}
+/v1/pages/ftuPromoCounter   ->  {"sections":[], ...}
+```
+
+An empty wallet and a promo page with nothing in it. The application declined to hand a
+stranger anything of the user's, and got reported for it.
+
+The residual worry is real but narrow — a *partially* populated view, where the
+anonymous caller receives some of the owner's data and not all of it. That is a
+disclosure question, and this project answers those with declared object identifiers
+rather than with a hunch. A declared identifier found in the credential-less response is
+now `Distinctive` and High; absent, the experiment ran and does not support the
+suspicion, and it is reported as the refutation it is.
+
+Both paths are covered: the refutation, and the partial disclosure it must not swallow.
+
+**On the same 60 requests against the live target: `auth.enforcement` went from 16
+findings to 0, with 21 refutations recorded.** Across the evening that check went 23
+findings → 0, every one of them false, without losing a true-positive path.
+
 ### Fixed — the JWT tamper that did not tamper anything
 
 The worst defect found in this codebase so far, and it only appeared once real
