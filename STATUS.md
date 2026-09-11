@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M13.4 (reflected-input verification)
+- **Last updated:** M13.5 (redirect verification)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -41,6 +41,7 @@ milestone.
 | **M12.10** — Structural difference | The comparison engine could say two responses were 97% alike; it can now say *which field*. Responses are flattened to JSON paths that keep their array indices — `$.items[3].price`, not `$.items[].price` — and each path is classified as appeared, disappeared, changed or type-changed. The normalisation that makes that survive a real application is an **explicit policy**, not a silent behaviour: a field set aside is still listed with both its values and the reason, the policy prints itself into the report, and `Policy::strict()` sets nothing aside at all. Credential-named fields report *that* they differed and never *what* they were. Duplicate JSON keys are flagged rather than collapsed by the parser in silence. Two identities served byte-for-byte the same document — behind an unauthenticated request that was refused — now state firmly, without needing a declared object id |
 | **M13.3** — The active scheduler | The first thing in Hexora that sends traffic nobody typed, and the first that asks before doing it. `Plan::prepare` is synchronous and answers "what would this do?" — which hypotheses can be settled, which lost their traffic, which point outside scope, how many requests per host — so `--dry-run` is the sending function not being called rather than a flag it honours. One host is never sent two requests at once: each gets a sequential queue with a pause, and only different hosts run concurrently. The ceiling is enforced by the lab a check is handed, so a check that loops is stopped by what it was given. A run that stopped early says so before its results, in the CLI, the window and the run record. First active check: `cors.reflection`, which settles M13.2's CORS suspicion with an origin that cannot be on anybody's allowlist |
 | **M13.4** — Reflected input | The check a scanner is most often wrong about, built to be right about it. A probe carries its own markers and the characters worth testing in one value, so one request answers both *did it come back* and *what survived*. Seven contexts are told apart — HTML text, quoted and unquoted attributes, comments, script strings, script source, style, JSON — under the response's **declared** content type rather than a guess, because `{"q":"<script>"}` is inert as JSON and is markup as HTML and the bytes are identical. Confirmed means a *second, different* marker landed the same way, not the same request twice. It never says "cross-site scripting": it says which character came back unencoded and where, then says what it would take to know more |
+| **M13.5** — Redirect destination | The `Location` header is resolved the way a browser resolves it and **never followed** — following a destination the target chose is the one way an automated tool gets talked into traffic nobody authorized, and the scope guard is a backstop rather than a reason to try. The answer is a *host*, not a substring: `//elsewhere`, `/\elsewhere` and `https://trusted@elsewhere` are all taken and all invisible to a filter matching `http`, while `/redirect?to=https://elsewhere` is carried and is refuted **with the reason**. An application that refuses the absolute form and accepts the protocol-relative one is reported as what it is — a filter that does not cover a form browsers treat identically. Probe destinations are `.invalid`, so they never resolve and nobody can ever register them. New invariant 16 |
 
 ## Next
 
@@ -113,11 +114,12 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
-- **M13.5 — redirect verification.** A controlled destination, and the `Location`
-  header inspected rather than followed. The discipline is the same one M13.4 used for
-  reflection: a URL that echoes an input is not an open redirect until somebody shows
-  the scheme and host can be replaced, and following a redirect blindly is how a
-  scanner ends up making requests to somewhere nobody authorized.
+- **M13.6 — authentication and session verification.** Where Hexora's identity model
+  pays off: the same request as User A, User B and Anonymous, compared differentially.
+  M12.1 already does exactly this for one captured request on demand; M13.6 is that as
+  something the scheduler runs across an engagement's traffic, which means it inherits
+  the budget, the plan and the refutations — and it is built on machinery that already
+  produces evidence rather than scores.
 
 Still open in M12: **attack chains** that retain evidence at every step.
 
@@ -132,6 +134,14 @@ over plain HTTP on loopback. The pacing and ceiling are unit-tested against a
 recording lab with real timing, and the whole thing has never been pointed at a large
 application, a rate-limited one, or one behind a CDN that answers differently to an
 unfamiliar `Origin`.
+
+**What redirect verification does not cover.** Header-driven redirects —
+`X-Forwarded-Host` poisoning is the usual one — are **not** tested. They have a
+different shape: the interesting response is often a 200 whose absolute links have
+moved rather than a `Location` at all, and claiming to cover them by putting a
+destination in `Accept` would be worse than saying they are not covered. Only query
+parameters of endpoints that actually redirected in captured traffic are probed, so a
+redirect that happens only for certain values is missed too.
 
 **What reflected-input verification does not cover.** Request bodies. An input in a
 JSON or form body is not enumerated, because [`ObjectLocation::Body`] addresses a byte

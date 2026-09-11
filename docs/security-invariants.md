@@ -710,6 +710,60 @@ was a real defect, found by reading the `requests.origin` column after a live ru
 
 ---
 
+## 16. A destination a target chose is never a destination Hexora visits
+
+The one way an automated tool can be talked into generating traffic to a machine
+nobody authorized is by being told where to go by the thing it is testing. A redirect
+is exactly that instruction:
+
+```text
+GET /login?next=https://hexora-probe.invalid/   →  302
+                                                   Location: https://somewhere-else/
+```
+
+Following that would send a request to `somewhere-else` **because the target said
+so**. The scope guard would refuse it — invariant 1 holds — but relying on a backstop
+instead of not doing the thing is how a backstop eventually gets a hole in it. So the
+redirect check reads the header and resolves it arithmetically against the request's
+own host. There is no fetch on that path at all.
+
+The same rule covers the destinations Hexora *sends*. They are `.invalid` hosts (RFC
+2606), which never resolve, so a mistake anywhere — a browser opened by hand, a
+library configured to follow — reaches nothing. Nobody can register one either, so a
+redirect reported last year cannot be turned into a live one by somebody buying the
+domain named in the report.
+
+**The destination is a host, not a substring.** `location.contains(probe)` is true of
+all of these, and only the first three send a browser anywhere:
+
+```text
+https://elsewhere/                       taken
+//elsewhere/                             taken — invisible to a filter matching `http`
+https://app.example.com@elsewhere/       taken — the host is after the `@`
+/redirect?to=https://elsewhere           carried, not obeyed
+https://app.example.com/?next=elsewhere  carried, not obeyed
+https://app.example.com.elsewhere/       a fourth host, and not a subdomain of either
+```
+
+A carried value is refuted **with the reason**, because a tester told three times that
+a search parameter is an open redirect stops reading the output. Host comparison is
+exact rather than a suffix test: `evil.example.com` ends with `example.com` and is
+somebody else's machine.
+
+**Tests.** `core/types/src/redirect.rs` —
+`a_value_merely_carried_in_a_query_string_is_not_a_destination`,
+`a_protocol_relative_url_leaves_and_carries_no_scheme_to_filter_on`,
+`a_backslash_is_a_slash_to_a_browser`,
+`the_host_is_what_follows_the_last_at_sign`,
+`a_host_that_merely_ends_with_the_expected_one_is_a_different_machine`,
+`an_absolute_url_naming_the_same_host_has_not_gone_anywhere`;
+`core/active/src/checks/redirect.rs` —
+`the_probe_destinations_can_never_exist`,
+`only_a_destination_this_check_named_counts_as_taken`,
+`a_destination_merely_carried_in_the_header_is_not_taken`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

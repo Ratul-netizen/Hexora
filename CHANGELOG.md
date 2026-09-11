@@ -508,6 +508,64 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.5, redirect verification
+
+Can a caller choose where a redirect sends somebody? Two things make that question
+harder than it looks, and both are where scanners get it wrong.
+
+**The header is read, never followed.** Following it would mean sending a request to a
+host *the target chose* — the one way an automated tool gets talked into generating
+traffic to a machine nobody authorized. The scope guard would refuse it, and relying
+on a backstop instead of not doing the thing is how a backstop eventually gets a hole
+in it. New security invariant 16.
+
+**The destination is a host, not a substring.** All of these contain the probe, and
+only the first three send a browser anywhere:
+
+```text
+https://elsewhere/                    taken
+//elsewhere/                          taken — invisible to a filter matching `http`
+https://app.example.com@elsewhere/    taken — the host is after the `@`
+/redirect?to=https://elsewhere        carried, not obeyed
+https://app.example.com.elsewhere/    a fourth host, not a subdomain of either
+```
+
+So `Location` is resolved the way a browser resolves it. Backslashes normalise to
+slashes for http(s), so `/\elsewhere` is protocol-relative rather than a path — one of
+the most-used filter bypasses there is. Userinfo is skipped to the last `@`. Host
+comparison is exact rather than a suffix test, because `evil.example.com` ends with
+`example.com` and is somebody else's machine. A carried value is **refuted with the
+reason**, because a tester told three times that a search parameter is an open
+redirect stops reading.
+
+**Two forms, and the second is the point.** The absolute form first; if it is refused,
+the protocol-relative one. An application that refuses `https://elsewhere` and accepts
+`//elsewhere` is reported as a filter that does not cover a form browsers treat
+identically — a better finding than one that accepts both, because it says somebody
+tried and the attempt does not work.
+
+**Probe destinations are `.invalid`** (RFC 2606). They never resolve, so a mistake
+anywhere reaches nothing, and nobody can register one — a redirect reported last year
+cannot be turned into a live one by somebody buying the domain named in the report.
+
+Confirmed means two *different* hosts were each obeyed, not the same request twice. A
+page that redirects off-site for its own reasons — to an identity provider, say — is
+not caller-controlled, and only a destination this check named counts.
+
+- Probes query parameters of endpoints that **actually redirected** in captured
+  traffic. Header-driven redirects (`X-Forwarded-Host` poisoning) are not covered and
+  are named as not covered: they have a different shape, and putting a destination in
+  `Accept` to claim coverage would be worse than the gap. This also cut the check's own
+  queue by two thirds against the demo — 45 requests to 25.
+- Severity never exceeds Medium. What an open redirect is worth depends on what the
+  endpoint does before it redirects and what travels with the user, which is a
+  tester's judgement.
+
+Verified live against a demo with five behaviours: `/open` confirmed, `/filtered`
+firm with the broken-filter explanation, and `/safe`, `/carry` and `/fixed` each ruled
+out for a different and correct reason — two of which a substring check would have
+reported as findings.
+
 ### Added — M13.4, reflected-input verification
 
 The check a scanner is most often wrong about. "My string appeared in the response" is

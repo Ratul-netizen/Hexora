@@ -601,8 +601,41 @@ offset; path segments, because `hexora identifiers` tells a route from a value w
 evidence and guessing here would undo it; and any attempt to render the page to see
 what a browser would do, which is a different tool.
 
-**M13.5 — Redirect verification** · PLANNED — a controlled destination, and the
-`Location` header inspected rather than followed.
+**M13.5 — Redirect verification** · DONE
+
+A controlled destination, and the `Location` header inspected rather than followed.
+
+Following it would mean sending a request to a host **the target chose**, which is the
+one way an automated tool gets talked into traffic nobody authorized. The scope guard
+would refuse it; relying on a backstop instead of not doing the thing is how a
+backstop eventually gets a hole in it. Invariant 16.
+
+The destination is a host, not a substring. All of these contain the probe and only
+the first three send a browser anywhere:
+
+```text
+https://elsewhere/                    taken
+//elsewhere/                          taken — invisible to a filter matching `http`
+https://app.example.com@elsewhere/    taken — the host is after the `@`
+/redirect?to=https://elsewhere        carried, not obeyed
+https://app.example.com.elsewhere/    a fourth host, not a subdomain of either
+```
+
+A carried value is refuted with the reason, because a tester told three times that a
+search parameter is an open redirect stops reading. Backslashes are normalised the way
+a browser normalises them, so `/\elsewhere` is protocol-relative rather than a path.
+
+Two forms are tried, and the second is the point: an application that refuses
+`https://elsewhere` and accepts `//elsewhere` is reported as a filter that does not
+cover a form browsers treat identically — a better finding than one that accepts both,
+because it says somebody tried.
+
+Probe destinations are `.invalid` (RFC 2606). They never resolve, and nobody can
+register one, so a redirect reported last year cannot be turned into a live one by
+somebody buying the domain named in the report.
+
+Deliberately not built: header-driven redirects, which have a different shape and want
+their own check; and any attempt to follow a destination to see what is there.
 
 **M13.6 — Authentication and session verification** · PLANNED — where Hexora's identity
 model pays off: the same request as User A, User B and Anonymous, compared

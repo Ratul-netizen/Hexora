@@ -39,6 +39,7 @@ influenced part of the process.
 | `core/active` | The queue: settles the hypotheses a passive pass could not, one host at a time, under a request ceiling, from a plan produced without sending | **Implemented** (M13.3, M13.4) |
 | `core/types::inject` | Where a value sits in a request and how to put a different one there — shared by constructed authorization tests and by input probing | **Implemented** (M13.4) |
 | `core/types::echo` | Where a value came back and which of its characters survived, under the response's declared content type | **Implemented** (M13.4) |
+| `core/types::redirect` | Where a `Location` header would send a browser, resolved rather than matched — and never followed | **Implemented** (M13.5) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |

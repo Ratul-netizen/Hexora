@@ -92,13 +92,22 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
         let target = &exchange.path;
         let endpoint = target.split('?').next().unwrap_or(target).to_string();
 
-        for hypothesis in crate::checks::echo::suspect(exchange) {
+        // Every check that can raise a work item from a captured exchange. Listed
+        // rather than discovered, for the reason the registry gives.
+        let raised_here = crate::checks::echo::suspect(exchange)
+            .into_iter()
+            .chain(crate::checks::redirect::suspect(exchange));
+
+        for hypothesis in raised_here {
             let name = hypothesis
                 .location
                 .as_ref()
                 .map(|location| format!("{:?}/{}", location.part, location.name))
                 .unwrap_or_default();
-            if seen.insert((exchange.method.clone(), endpoint.clone(), name)) {
+            // Keyed by the check as well as the input: two checks asking different
+            // questions about one parameter are two experiments, not a duplicate.
+            let key = format!("{} {name}", hypothesis.detector);
+            if seen.insert((exchange.method.clone(), endpoint.clone(), key)) {
                 raised.push(hypothesis);
             }
         }

@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M13.4",
+        milestone: "M13.5",
     }
 }
 

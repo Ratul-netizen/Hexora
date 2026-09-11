@@ -48,6 +48,7 @@ pub mod limits;
 pub mod object;
 pub mod raw;
 pub mod redact;
+pub mod redirect;
 pub mod scope;
 pub mod snapshot;
 pub mod structure;

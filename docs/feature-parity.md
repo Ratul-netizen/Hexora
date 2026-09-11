@@ -100,6 +100,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Scanner says which of its own suspicions it cannot settle | ❌ | ❌ | **IMPLEMENTED M13.3** | `hexora detectors` names the dead ends. A suspicion nothing can answer is a gap in the tool, not coverage |
 | Reflected input reported with its context | ⚠️ | ⚠️ | **IMPLEMENTED M13.4** | Which characters survived and what they landed inside, under the response's declared content type. A JSON echo is ruled out rather than filed |
 | Scanner declines to name a vulnerability class it did not establish | ❌ | ❌ | **IMPLEMENTED M13.4** | The finding says what the bytes did and what it would take to know more. It does not name a vulnerability class |
+| Open redirect resolved rather than substring-matched | ⚠️ | ⚠️ | **IMPLEMENTED M13.5** | Protocol-relative, backslash and userinfo forms are resolved the way a browser resolves them; a value merely carried in the header is refuted with the reason |
+| Redirect destinations are never followed | ❓ | ❓ | **IMPLEMENTED M13.5** | Invariant 16. The header is read; no request is made to a host the target named |
 
 ## 5. Extensibility
 
