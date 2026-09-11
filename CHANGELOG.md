@@ -508,6 +508,53 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — the entities a programme permits, and nothing else
+
+Fixing the identifier analyzer created this. Once it stopped offering `boolean` and
+started offering real identifiers, the list it produced was full of **working
+restaurants** — `681c630060810b6dd12fa130` is a shop in Almaty that takes orders. It
+looks exactly like a test venue's id, because it is the same kind of thing.
+
+The programme is explicit:
+
+```text
+⛔ Don't use or interact with accounts or data you don't own, including but not
+   limited to restaurants/venues and merchant data.
+
+If you need to test any sort of access to restaurant or venue data, please do it
+only against this specific venue test account, whose venue_id is 670e7897e3c56dcc5b5a0989.
+```
+
+A tester reading forty identifiers cannot hold that line on their own, and nothing in
+Hexora was helping. `hexora programme permit <project> <id> --what "venue test account"`
+records the entities a programme allows; `programme forbid` removes one.
+
+**A closed list, and it refuses rather than warns.** Empty means the programme has not
+restricted anything and nothing is refused — the reading silence gets everywhere else.
+Non-empty means only these, because the failure is not recoverable: a request sent at a
+real customer's id cannot be unsent, and *"I did not realise which venue that was"* is
+not an explanation anybody wants to write to a programme.
+
+**Enforced where it matters and only there.** A constructed attempt is the one place
+Hexora *chooses* an identifier and puts it in somebody's request; everything else
+replays what a person already sent. So that is where the check lives, applied once per
+identifier rather than once per sender, with the refusal and the permitted list printed.
+
+Exercised against the live engagement, on the real restaurant id the analyzer surfaced:
+
+```text
+Constructed 0 cross-identity attempt(s):
+  not constructed — 681c630060810b6dd12fa130 is not one of the entities this
+  programme permits testing against, and interacting with data that is not yours
+  is the line it draws. It permits: 670e7897e3c56dcc5b5a0989 (venue test account),
+  670fa3e9ead6e49d65cc3614 (consumer test account)
+```
+
+Both report formats name the permitted entities, so a reader knows the engagement was
+held to a closed list rather than wondering why the coverage looks narrow. No migration:
+the programme is stored as JSON and the field defaults to empty, so existing projects
+read back unrestricted, which is what they were.
+
 ### Fixed — the identifier analyzer could not tell a venue id from the word `boolean`
 
 Against a demo application it looked fine. Against a real one it offered **1,091

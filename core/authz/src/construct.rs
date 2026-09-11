@@ -48,6 +48,7 @@ use hexora_types::http::HttpRequest;
 use hexora_types::identity::Identity;
 use hexora_types::ids::{IdentityId, ObjectId, RequestId};
 use hexora_types::object::{ObjectDeclaration, ObjectLocation};
+use hexora_types::programme::Programme;
 use hexora_types::Result;
 
 use crate::compare::{contains_any, Fingerprint, SAME_RESOURCE};
@@ -178,6 +179,14 @@ pub struct ConstructionPlan {
     pub verify: bool,
     /// The most requests this run may send.
     pub limit: usize,
+    /// The terms the engagement is conducted under.
+    ///
+    /// Consulted for one thing here, and it is the thing that matters: whether an
+    /// identifier may be targeted at all. A constructed attempt is the only place
+    /// Hexora *chooses* an object and puts it in somebody's request — everything else
+    /// replays what a person already sent — so it is the only place that can reach
+    /// data nobody authorised by accident.
+    pub programme: Programme,
 }
 
 impl ConstructionPlan {
@@ -193,7 +202,14 @@ impl ConstructionPlan {
             declarations,
             verify: false,
             limit: DEFAULT_MAX_ATTEMPTS,
+            programme: Programme::none(),
         }
+    }
+
+    /// Holds the run to the entities this programme permits.
+    pub fn under(mut self, programme: Programme) -> Self {
+        self.programme = programme;
+        self
     }
 
     /// Caps how many requests the run may send, within [`HARD_MAX_ATTEMPTS`].
@@ -260,7 +276,32 @@ impl<T: HttpTransport> AuthzTester<T> {
         // Owner identifiers, per identity: what the identity itself declares plus
         // every object declared as theirs. Both are the tester's assertions, and a
         // response is searched for all of them.
-        let owned = owned_identifiers(&plan.declarations, &plan.senders);
+        // Refused before anything is built, and once per identifier rather than once
+        // per sender: a tester who declared a real restaurant's id should be told that
+        // plainly, not have it repeated at them four times.
+        //
+        // The identifier analyzer surfaces the ids of **real venues** out of ordinary
+        // browsing — it cannot do otherwise, because a working restaurant's id looks
+        // exactly like a test one. A programme that hands out test accounts and says
+        // "only these" has drawn a line that a person reading forty identifiers cannot
+        // hold on their own.
+        let mut refused = Vec::new();
+        let declarations: Vec<ObjectDeclaration> = plan
+            .declarations
+            .iter()
+            .filter(
+                |declaration| match plan.programme.refuses(&declaration.value) {
+                    Some(why) => {
+                        refused.push(why);
+                        false
+                    }
+                    None => true,
+                },
+            )
+            .cloned()
+            .collect();
+
+        let owned = owned_identifiers(&declarations, &plan.senders);
         let labels: HashMap<IdentityId, String> = plan
             .senders
             .iter()
@@ -272,7 +313,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             method,
             url,
             attempts: Vec::new(),
-            skipped: Vec::new(),
+            skipped: refused,
             limit: plan.limit,
         };
 
@@ -286,7 +327,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             if stop {
                 break;
             }
-            for declaration in &plan.declarations {
+            for declaration in &declarations {
                 if declaration.owner == sender.id {
                     continue;
                 }
@@ -304,7 +345,7 @@ impl<T: HttpTransport> AuthzTester<T> {
                     plan.base,
                     declaration,
                     sender,
-                    &plan.declarations,
+                    &declarations,
                     &plan.senders,
                     &owned,
                 ) else {

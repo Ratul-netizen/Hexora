@@ -944,6 +944,34 @@ enum ProgrammeCommand {
         /// The detector id.
         detector: String,
     },
+
+    /// Record an entity this programme permits being targeted.
+    ///
+    /// Programmes hand out test accounts and mean it: "do it only against this
+    /// specific consumer test account". Once one of these exists the list is
+    /// **closed** — a constructed attempt at any other identifier is refused, not
+    /// warned about, because a request sent at a real customer's id cannot be unsent.
+    ///
+    /// This is not paranoia about a tester's care. The identifier analyzer surfaces the
+    /// ids of real venues and real accounts out of ordinary browsing, and it cannot do
+    /// otherwise: a working restaurant's id looks exactly like a test one's.
+    Permit {
+        /// Project directory.
+        path: PathBuf,
+        /// The identifier, as the programme wrote it.
+        id: String,
+        /// What it is, in the programme's words.
+        #[arg(long)]
+        what: String,
+    },
+
+    /// Stop permitting an entity.
+    Forbid {
+        /// Project directory.
+        path: PathBuf,
+        /// The identifier.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1148,6 +1176,12 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }) => programme::exclude(path, detector, reason, cli.json),
         Command::Programme(ProgrammeCommand::Allow { path, detector }) => {
             programme::allow(path, detector, cli.json)
+        }
+        Command::Programme(ProgrammeCommand::Permit { path, id, what }) => {
+            programme::permit(path, id, what, cli.json)
+        }
+        Command::Programme(ProgrammeCommand::Forbid { path, id }) => {
+            programme::forbid(path, id, cli.json)
         }
         Command::Header(HeaderCommand::List { path }) => header::list(path, cli.json),
         Command::Header(HeaderCommand::Add { path, header }) => header::add(path, header, cli.json),

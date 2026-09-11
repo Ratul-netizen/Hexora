@@ -215,6 +215,23 @@ fn programme(out: &mut String, report: &Report) {
         // document should be offering them.
         let _ = writeln!(out, "<p>Terms: <code>{}</code></p>", escape(url));
     }
+    if !programme.test_entities.is_empty() {
+        let _ = writeln!(
+            out,
+            "<p>Testing was held to the entities this programme names, and no others:</p>"
+        );
+        let _ = writeln!(out, "<ul>");
+        for entity in &programme.test_entities {
+            let _ = writeln!(
+                out,
+                "<li><code>{}</code> — {}</li>",
+                escape(&entity.id),
+                escape(&entity.what)
+            );
+        }
+        let _ = writeln!(out, "</ul>");
+    }
+
     if programme.exclusions.is_empty() {
         return;
     }

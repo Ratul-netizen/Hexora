@@ -124,6 +124,18 @@ fn programme(out: &mut String, report: &Report) {
     if let Some(url) = &programme.policy_url {
         let _ = writeln!(out, "Terms: {url}\n");
     }
+    if !programme.test_entities.is_empty() {
+        let _ = writeln!(
+            out,
+            "Testing was held to the entities this programme names, and no others:
+"
+        );
+        for entity in &programme.test_entities {
+            let _ = writeln!(out, "- `{}` — {}", entity.id, entity.what);
+        }
+        let _ = writeln!(out);
+    }
+
     if programme.exclusions.is_empty() {
         return;
     }

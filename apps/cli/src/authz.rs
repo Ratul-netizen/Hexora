@@ -129,7 +129,11 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
             tester.construct(
                 &ConstructionPlan::new(base, senders, declarations)
                     .with_limit(args.max_attempts)
-                    .verifying(args.verify),
+                    .verifying(args.verify)
+                    // The one place Hexora chooses an identifier rather than replaying
+                    // one somebody sent. If the programme named the entities it permits,
+                    // that is the list.
+                    .under(project.settings().programme()?),
             ),
         )?;
         findings.extend(analysis::construction_findings(&construction, target));

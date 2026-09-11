@@ -295,6 +295,7 @@ mod tests {
             name: Some("Wolt".into()),
             policy_url: Some("https://hackerone.com/wolt".into()),
             exclusions: Vec::new(),
+            test_entities: Vec::new(),
         };
         programme.exclude(hexora_types::programme::Exclusion::new(
             "headers.security",

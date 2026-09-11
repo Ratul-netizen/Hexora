@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use hexora_types::programme::Exclusion;
+use hexora_types::programme::{Exclusion, TestEntity};
 use hexora_types::{HexoraError, Result};
 
 /// Prints the engagement's terms.
@@ -52,8 +52,25 @@ pub fn show(path: &Path, json: bool) -> Result<()> {
     }
 
     println!();
-    if programme.exclusions.is_empty() {
+    if programme.exclusions.is_empty() && programme.test_entities.is_empty() {
         println!("No finding classes are excluded: everything found will be reported.");
+        println!("No test entities are recorded, so no identifier is refused.");
+        return Ok(());
+    }
+
+    if !programme.test_entities.is_empty() {
+        println!("May be tested against — and nothing else:");
+        for entity in &programme.test_entities {
+            println!("  {}  ({})", entity.id, entity.what);
+        }
+        println!();
+        println!("A constructed attempt at any other identifier is refused. The");
+        println!("identifier analyzer surfaces real venues and real accounts out of");
+        println!("ordinary browsing, because their ids look exactly like a test one's.");
+        println!();
+    }
+
+    if programme.exclusions.is_empty() {
         return Ok(());
     }
 
@@ -149,6 +166,88 @@ pub fn allow(path: &Path, detector: &str, json: bool) -> Result<()> {
         println!("{detector} will be reported again.");
     } else {
         println!("{detector} was not excluded.");
+    }
+    Ok(())
+}
+
+/// Records an entity the programme permits being targeted.
+pub fn permit(path: &Path, id: &str, what: &str, json: bool) -> Result<()> {
+    let project = crate::open_project(path)?;
+    crate::require_initialised(&project, path)?;
+
+    let id = id.trim();
+    let what = what.trim();
+    if id.is_empty() {
+        return Err(HexoraError::invalid_input(
+            "id",
+            "an entity needs an identifier",
+        ));
+    }
+    if what.is_empty() {
+        return Err(HexoraError::invalid_input(
+            "--what",
+            "say what this entity is, in the programme's words — \"consumer test \
+             account\". A bare identifier in a list six weeks old is indistinguishable \
+             from a real customer's",
+        ));
+    }
+
+    let mut programme = project.settings().programme()?;
+    let first = !programme.restricts_entities();
+    let replaced = programme.entity(id).is_some();
+    programme.permit(TestEntity::new(id, what));
+    project.settings().set_programme(&programme)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "id": id,
+                "what": what,
+                "replaced": replaced,
+                "permitted": programme.test_entities.len(),
+            })
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{} {id} ({what})",
+        if replaced { "Updated" } else { "Permitted" }
+    );
+    if first {
+        println!();
+        println!("This project now has a closed list. A constructed attempt at any");
+        println!("other identifier is refused, not warned about — a request sent at a");
+        println!("real customer's id cannot be unsent.");
+    }
+    Ok(())
+}
+
+/// Stops permitting an entity.
+pub fn forbid(path: &Path, id: &str, json: bool) -> Result<()> {
+    let project = crate::open_project(path)?;
+    crate::require_initialised(&project, path)?;
+
+    let mut programme = project.settings().programme()?;
+    let removed = programme.forbid(id.trim());
+    let empty = !programme.restricts_entities();
+    project.settings().set_programme(&programme)?;
+
+    if json {
+        println!("{}", serde_json::json!({ "removed": removed }));
+        return Ok(());
+    }
+    if removed {
+        println!("{id} is no longer a permitted test entity.");
+        if empty {
+            println!();
+            println!("That was the last one, so nothing is refused any more. If the");
+            println!("programme still limits what you may touch, this project no");
+            println!("longer knows it.");
+        }
+    } else {
+        println!("{id} was not a permitted test entity.");
     }
     Ok(())
 }

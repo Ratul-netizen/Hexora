@@ -6,7 +6,8 @@ milestone.
 
 - **Last updated:** M15.2, plus every false positive the first real engagement
   produced: `auth.enforcement` went 23 findings → 0, and the identifier analyzer
-  stopped offering `boolean` as an object identifier
+  stopped offering `boolean` as an object identifier — and then had to be stopped
+  from targeting the real restaurants it correctly found
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
