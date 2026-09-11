@@ -35,6 +35,13 @@ pub struct DetectorRun {
     pub hypotheses: u32,
     /// Of the observations, how many were worth reporting.
     pub reportable: u32,
+    /// Why this programme does not accept what it found, if it does not.
+    ///
+    /// The detector still ran, and its observations are still listed. What it did not
+    /// do is produce a finding. A run record that omitted this would leave a reader
+    /// unable to tell "nobody looked" from "it was looked at and this programme does
+    /// not take them" — see `hexora_types::programme`.
+    pub excluded: Option<String>,
 }
 
 /// One pass of the scanner over a project's traffic.
@@ -148,8 +155,8 @@ impl ScanStore {
             tx.execute(
                 "INSERT INTO scan_run_detectors (
                      run_id, detector_id, detector_version, mode,
-                     observations, hypotheses, reportable)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     observations, hypotheses, reportable, excluded_reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     run.id.to_string(),
                     detector.detector,
@@ -158,6 +165,7 @@ impl ScanStore {
                     detector.observations as i64,
                     detector.hypotheses as i64,
                     detector.reportable as i64,
+                    detector.excluded,
                 ],
             )?;
         }
@@ -251,7 +259,8 @@ impl ScanStore {
 fn detectors_on(conn: &rusqlite::Connection, run: ScanRunId) -> Result<Vec<DetectorRun>> {
     {
         let mut statement = conn.prepare(
-            "SELECT detector_id, detector_version, mode, observations, hypotheses, reportable
+            "SELECT detector_id, detector_version, mode, observations, hypotheses,
+                    reportable, excluded_reason
              FROM scan_run_detectors WHERE run_id = ?1 ORDER BY detector_id",
         )?;
         let rows = statement.query_map(params![run.to_string()], |row| {
@@ -267,6 +276,7 @@ fn detectors_on(conn: &rusqlite::Connection, run: ScanRunId) -> Result<Vec<Detec
                 observations: row.get::<_, i64>(3)? as u32,
                 hypotheses: row.get::<_, i64>(4)? as u32,
                 reportable: row.get::<_, i64>(5)? as u32,
+                excluded: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -347,6 +357,7 @@ mod tests {
             observations,
             hypotheses,
             reportable: observations,
+            excluded: None,
         }
     }
 

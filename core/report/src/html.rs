@@ -90,6 +90,7 @@ pub fn render(report: &Report) -> String {
 
     summary(&mut out, report);
     scope(&mut out, report);
+    programme(&mut out, report);
     identities(&mut out, report);
     coverage(&mut out, report);
 
@@ -187,6 +188,56 @@ fn scope(out: &mut String, report: &Report) {
         );
     }
     let _ = writeln!(out, "</ul>");
+}
+
+/// The terms the engagement was conducted under.
+///
+/// Escaped like everything else here: a programme name and an exclusion reason are
+/// typed by a person and could as easily be typed by somebody who wants this document
+/// to do something when it is opened.
+fn programme(out: &mut String, report: &Report) {
+    let programme = &report.programme;
+    if programme.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(out, "<h2>Programme</h2>");
+    if let Some(name) = &programme.name {
+        let _ = writeln!(
+            out,
+            "<p>Tested under the terms of <strong>{}</strong>.</p>",
+            escape(name)
+        );
+    }
+    if let Some(url) = &programme.policy_url {
+        // As text, not as a link. A report is handed to somebody who did not choose
+        // this URL, and a clickable destination a third party supplied is not one this
+        // document should be offering them.
+        let _ = writeln!(out, "<p>Terms: <code>{}</code></p>", escape(url));
+    }
+    if programme.exclusions.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(
+        out,
+        "<p>These finding classes were <strong>not reported</strong>, because this \
+         programme does not accept them. They were still looked for; their absence \
+         below says nothing about the application.</p>"
+    );
+    let _ = writeln!(
+        out,
+        "<table><thead><tr><th>Check</th><th>Why it was not reported</th></tr></thead><tbody>"
+    );
+    for exclusion in &programme.exclusions {
+        let _ = writeln!(
+            out,
+            "<tr><td><code>{}</code></td><td>{}</td></tr>",
+            escape(&exclusion.detector),
+            escape(&exclusion.reason)
+        );
+    }
+    let _ = writeln!(out, "</tbody></table>");
 }
 
 fn identities(out: &mut String, report: &Report) {

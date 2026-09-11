@@ -47,6 +47,7 @@ pub mod ids;
 pub mod inject;
 pub mod limits;
 pub mod object;
+pub mod programme;
 pub mod raw;
 pub mod redact;
 pub mod redirect;

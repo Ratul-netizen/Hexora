@@ -8,6 +8,7 @@ use bytes::Bytes;
 use hexora_scan::passive::{scan, Selection};
 use hexora_storage::{CapturedExchange, MemoryBlobStore, Project, TrafficStore};
 use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use hexora_types::programme::{Exclusion, Programme};
 use hexora_types::scope::{Scope, ScopeRule};
 use std::sync::Arc;
 
@@ -289,6 +290,123 @@ fn a_technology_banner_is_listed_and_never_filed() {
         summary.findings().is_empty(),
         "a banner must not reach the findings list"
     );
+}
+
+#[test]
+fn a_finding_class_this_programme_excludes_is_listed_but_never_filed() {
+    // The reason the profile exists. Wolt puts missing security headers out of scope as
+    // a class; filing five hundred endpoints' worth of them is how a real finding gets
+    // lost in a list nobody reads to the end.
+    let fixture = fixture();
+    let mut programme = Programme::none();
+    programme.exclude(Exclusion::new(
+        "headers.security",
+        "out of scope for this programme: missing security headers",
+    ));
+    fixture
+        .project
+        .settings()
+        .set_programme(&programme)
+        .unwrap();
+
+    for index in 0..10 {
+        fixture.capture(
+            "api.example.com",
+            true,
+            &format!("/endpoint/{index}"),
+            &[],
+            200,
+            &[("Content-Type", "application/json")],
+        );
+    }
+
+    let summary = fixture.scan(Selection::default());
+
+    // Still seen, still listed, still carrying its evidence.
+    let observed: Vec<_> = summary
+        .observations
+        .iter()
+        .filter(|group| group.observation.detector == "headers.security")
+        .collect();
+    assert!(!observed.is_empty(), "the check still ran and still saw it");
+    assert!(
+        observed.iter().all(|group| group.finding.is_none()),
+        "but none of it became a claim in somebody's project"
+    );
+    assert!(summary.findings().is_empty());
+
+    // And the run record says why, rather than reading as a check that found nothing.
+    let row = summary
+        .detectors
+        .iter()
+        .find(|run| run.detector == "headers.security")
+        .expect("the detector still appears in the run record");
+    assert!(row.observations > 0, "it observed");
+    assert_eq!(
+        row.excluded.as_deref(),
+        Some("out of scope for this programme: missing security headers")
+    );
+}
+
+#[test]
+fn a_programme_that_excludes_nothing_files_everything() {
+    // The default. A project with no programme is not a project that reports less.
+    let fixture = fixture();
+    fixture.capture(
+        "api.example.com",
+        true,
+        "/a",
+        &[],
+        200,
+        &[("Content-Type", "application/json")],
+    );
+
+    let summary = fixture.scan(Selection::default());
+    assert!(!summary.findings().is_empty());
+    assert!(summary.detectors.iter().all(|run| run.excluded.is_none()));
+}
+
+#[test]
+fn excluding_a_lead_does_not_silence_the_suspicion_behind_it() {
+    // The distinction the design rests on. "CORS misconfiguration *without proven
+    // impact*" is out of scope; proven impact is in scope, and the hypothesis is the
+    // only route to proving it. An exclusion that took the lead and the experiment
+    // would suppress the finding the programme actually wants.
+    let fixture = fixture();
+    let mut programme = Programme::none();
+    programme.exclude(Exclusion::new(
+        "cors.configuration",
+        "out of scope without proven impact",
+    ));
+    fixture
+        .project
+        .settings()
+        .set_programme(&programme)
+        .unwrap();
+
+    fixture.capture(
+        "api.example.com",
+        true,
+        "/a",
+        &[("Origin", "https://evil.example")],
+        200,
+        &[
+            ("Content-Type", "application/json"),
+            ("Strict-Transport-Security", "max-age=1"),
+            ("Access-Control-Allow-Origin", "https://evil.example"),
+            ("Access-Control-Allow-Credentials", "true"),
+            ("Vary", "Origin"),
+        ],
+    );
+
+    let summary = fixture.scan(Selection::default());
+    assert_eq!(
+        summary.hypotheses.len(),
+        1,
+        "the experiment must still be scheduled: {:#?}",
+        summary.hypotheses
+    );
+    assert_eq!(summary.hypotheses[0].detector, "cors.configuration");
 }
 
 #[test]

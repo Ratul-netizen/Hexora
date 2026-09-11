@@ -72,6 +72,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "attached_headers",
         sql: include_str!("../migrations/0009_attached_headers.sql"),
     },
+    Migration {
+        version: 10,
+        name: "programme",
+        sql: include_str!("../migrations/0010_programme.sql"),
+    },
 ];
 
 /// The schema version this build expects.

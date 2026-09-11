@@ -40,6 +40,7 @@ use hexora_storage::{DetectorRun, Project, RunStatus, ScanRun};
 use hexora_types::finding::{Evidence, Hypothesis};
 use hexora_types::http::Headers;
 use hexora_types::ids::{RequestId, ScanRunId, TargetId};
+use hexora_types::programme::Programme;
 use hexora_types::verify::{Observation, Verification, Verified};
 use hexora_types::Result;
 
@@ -165,6 +166,12 @@ pub struct Summary {
     pub endpoints: Vec<Exchange>,
     /// What each detector did, including the ones that found nothing.
     pub detectors: Vec<DetectorRun>,
+    /// The programme's terms, as they stood when the pass ran.
+    ///
+    /// Carried on the summary rather than looked up again by whoever prints it: the
+    /// reasons a reader is shown must be the reasons that were actually applied, and a
+    /// second read could return a profile somebody edited in between.
+    pub programme: Programme,
 }
 
 impl Summary {
@@ -192,6 +199,9 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
     let started_at = chrono::Utc::now();
     let traffic = project.traffic();
     let scope = project.settings().scope()?;
+    // Read once, at the start. Every exclusion a reader is shown is one that was
+    // actually applied to this pass.
+    let programme = project.settings().programme()?;
 
     let checks: Vec<Box<dyn PassiveCheck>> = checks::all()
         .into_iter()
@@ -214,6 +224,9 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
                     observations: 0,
                     hypotheses: 0,
                     reportable: 0,
+                    excluded: programme
+                        .excluded(&info.id.to_string())
+                        .map(|exclusion| exclusion.reason.clone()),
                 },
             )
         })
@@ -346,6 +359,15 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
         let Some(check) = by_id.get(&group.observation.detector) else {
             continue;
         };
+        // The one place a passive observation becomes a claim, and so the one place a
+        // programme's terms can take effect without hiding anything. The observation
+        // stays in the list with its evidence and its severity; what it does not become
+        // is a finding in somebody's project. Hypotheses are untouched on purpose — an
+        // exclusion for "CORS without proven impact" is a reason to run the experiment
+        // that proves impact, not a reason to skip it.
+        if programme.excluded(&group.observation.detector).is_some() {
+            continue;
+        }
         let exchange = group.first.clone();
         let target = exchange.target;
         group.finding = conclude(check.as_ref(), group, &exchange, target);
@@ -379,6 +401,7 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
     project.scans().record(&run)?;
 
     Ok(Summary {
+        programme,
         endpoints: endpoints.into_values().collect(),
         exchanges_read: read,
         exchanges_skipped: skipped,

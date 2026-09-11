@@ -63,6 +63,7 @@ use hexora_types::error::Result;
 use hexora_types::finding::{Confidence, Evidence, Finding, FindingStatus, Severity};
 use hexora_types::identity::{Credential, PrivilegeLevel};
 use hexora_types::ids::{IdentityId, RequestId, ResponseId};
+use hexora_types::programme::Programme;
 use hexora_types::redact::{is_sensitive_header, RedactionPolicy, REDACTED};
 use hexora_types::scope::{PathMatch, SchemeMatch, Scope};
 use serde::Serialize;
@@ -138,6 +139,13 @@ pub struct Report {
     pub engagement: Engagement,
     /// What the engagement was authorized to touch.
     pub scope: ScopeSummary,
+    /// The terms the engagement was conducted under.
+    ///
+    /// Printed even when it excludes things, and *especially* then. A reader weighing
+    /// this document has to be able to tell "nobody looked for that" from "it was
+    /// looked for and this programme does not accept it" — the two produce the same
+    /// empty space in a findings list and mean opposite things about coverage.
+    pub programme: Programme,
     /// The principals traffic was replayed as. Never their credentials.
     pub identities: Vec<IdentitySummary>,
     /// How much traffic the conclusions were drawn from.
@@ -225,6 +233,13 @@ pub struct Excluded {
     pub below_severity: u64,
     /// Leads dropped because the render asked for established issues only.
     pub leads_omitted: u64,
+    /// Findings of a class this programme does not accept.
+    ///
+    /// Recorded before the exclusion existed, in almost every case: the scanner stops
+    /// filing them once a class is excluded, but a project carries what earlier runs
+    /// already wrote. Leaving them in would have the document list a finding two
+    /// sections under a heading saying this programme will not take it.
+    pub programme_excluded: u64,
 }
 
 impl Excluded {
@@ -234,6 +249,7 @@ impl Excluded {
             && self.duplicates == 0
             && self.below_severity == 0
             && self.leads_omitted == 0
+            && self.programme_excluded == 0
     }
 }
 
@@ -412,6 +428,7 @@ impl Report {
     pub fn build(project: &Project, options: &ReportOptions) -> Result<Self> {
         let findings = all_findings(project)?;
         let recorded = findings.len() as u64;
+        let programme = project.settings().programme()?;
 
         let mut excluded = Excluded::default();
         let mut kept = Vec::new();
@@ -419,6 +436,15 @@ impl Report {
             match finding.status {
                 FindingStatus::FalsePositive => excluded.false_positives += 1,
                 FindingStatus::Duplicate => excluded.duplicates += 1,
+                // A finding recorded before the class was excluded. The store keeps it
+                // — it is a record of what was seen, and an exclusion is not a reason
+                // to forget — but the document must not list it under a heading that
+                // says this programme will not accept it.
+                _ if detector_of(&finding)
+                    .is_some_and(|detector| programme.excluded(detector).is_some()) =>
+                {
+                    excluded.programme_excluded += 1;
+                }
                 _ if below(&finding, options.min_severity) => excluded.below_severity += 1,
                 _ if options.actionable_only && !finding.confidence.is_actionable() => {
                     excluded.leads_omitted += 1;
@@ -500,6 +526,7 @@ impl Report {
         Ok(Self {
             engagement,
             scope: scope_summary(&project.settings().scope()?),
+            programme,
             identities: identities(project)?,
             coverage: coverage(project, recorded)?,
             findings: established,
@@ -591,6 +618,21 @@ impl Report {
 /// different things, and phrased per count because "1 unverified leads" reads like a
 /// bug in the tool — which is not the impression a report should give about its own
 /// omissions.
+/// The detector behind a finding, when a detector produced it.
+///
+/// A programme exclusion names a check, so a finding a person wrote by hand or an
+/// authorization matrix produced is never covered by one — which is correct: a
+/// programme excludes classes of automated output, not a tester's own conclusions.
+fn detector_of(finding: &Finding) -> Option<&str> {
+    match &finding.source {
+        hexora_types::finding::FindingSource::PassiveScan { detector, .. }
+        | hexora_types::finding::FindingSource::ActiveScan { detector, .. } => {
+            Some(detector.as_str())
+        }
+        _ => None,
+    }
+}
+
 fn omission_lines(excluded: &Excluded) -> Vec<(u64, &'static str)> {
     [
         (
@@ -607,6 +649,11 @@ fn omission_lines(excluded: &Excluded) -> Vec<(u64, &'static str)> {
             excluded.below_severity,
             "below the severity filter this render used",
             "below the severity filter this render used",
+        ),
+        (
+            excluded.programme_excluded,
+            "of a class this programme does not accept (see Programme above)",
+            "of classes this programme does not accept (see Programme above)",
         ),
         (
             excluded.leads_omitted,
@@ -1161,6 +1208,189 @@ mod tests {
         let markdown = report.render(Format::Markdown);
         assert!(markdown.contains("## Coverage"), "{markdown}");
         assert!(markdown.contains("## Scope"), "{markdown}");
+    }
+
+    #[test]
+    fn an_excluded_finding_class_is_named_in_the_report_rather_than_left_as_a_gap() {
+        // A findings list with nothing under "missing security headers" reads as a
+        // well-configured application. If the truth is that the programme refuses the
+        // class, a report that does not say so is overstating its own coverage.
+        let project = Project::in_memory().unwrap();
+        project
+            .metadata()
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO project (id, name, created_at, updated_at)
+                 VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let mut programme = hexora_types::programme::Programme {
+            name: Some("Wolt".into()),
+            policy_url: Some("https://hackerone.com/wolt".into()),
+            exclusions: Vec::new(),
+        };
+        programme.exclude(hexora_types::programme::Exclusion::new(
+            "headers.security",
+            "out of scope: missing security headers",
+        ));
+        project.settings().set_programme(&programme).unwrap();
+
+        let report = Report::build(&project, &options()).unwrap();
+        let markdown = report.render(Format::Markdown);
+        assert!(markdown.contains("## Programme"), "{markdown}");
+        assert!(markdown.contains("Wolt"), "{markdown}");
+        assert!(markdown.contains("headers.security"), "{markdown}");
+        assert!(
+            markdown.contains("out of scope: missing security headers"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("says nothing about the application"),
+            "a reader must not read the gap as a clean result: {markdown}"
+        );
+
+        let html = report.render(Format::Html);
+        assert!(html.contains("<h2>Programme</h2>"), "{html}");
+        assert!(html.contains("headers.security"), "{html}");
+    }
+
+    #[test]
+    fn a_finding_recorded_before_the_exclusion_is_counted_rather_than_listed() {
+        // The store keeps it — a finding is a record of what was seen, and an exclusion
+        // is not a reason to forget. The document must not list it under a heading
+        // saying this programme will not accept the class.
+        let (project, request, target) = project_with_traffic();
+        project
+            .metadata()
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO project (id, name, created_at, updated_at)
+                 VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let mut passive = raw_finding(target, Confidence::Reported, one_exchange(request));
+        passive.source = FindingSource::PassiveScan {
+            detector: "headers.security".into(),
+            version: "1.0.0".into(),
+        };
+        project
+            .findings()
+            .record(&hexora_types::verify::Verified::from_trusted_finding(
+                passive,
+            ))
+            .unwrap();
+
+        // Without an exclusion it is in the document.
+        let before = Report::build(&project, &options()).unwrap();
+        assert_eq!(before.leads.len(), 1);
+        assert_eq!(before.excluded.programme_excluded, 0);
+
+        let mut programme = hexora_types::programme::Programme::none();
+        programme.exclude(hexora_types::programme::Exclusion::new(
+            "headers.security",
+            "out of scope: missing security headers",
+        ));
+        project.settings().set_programme(&programme).unwrap();
+
+        let after = Report::build(&project, &options()).unwrap();
+        assert!(after.findings.is_empty());
+        assert!(after.leads.is_empty(), "it must not be listed");
+        assert_eq!(
+            after.excluded.programme_excluded, 1,
+            "but it must be counted"
+        );
+
+        let markdown = after.render(Format::Markdown);
+        assert!(
+            markdown.contains("this programme does not accept"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn an_exclusion_never_silences_a_finding_a_person_made() {
+        // A programme excludes classes of automated output. A tester's own conclusion,
+        // or an authorization matrix's, is not one of those — and a detector id that
+        // happened to match must not reach across into it.
+        let (project, request, target) = project_with_traffic();
+        project
+            .metadata()
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO project (id, name, created_at, updated_at)
+                 VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        project
+            .findings()
+            .record(&finding(
+                target,
+                Confidence::Confirmed,
+                one_exchange(request),
+            ))
+            .unwrap();
+
+        let mut programme = hexora_types::programme::Programme::none();
+        for id in [
+            "headers.security",
+            "authz.cross_identity",
+            "authz.scheduled",
+        ] {
+            programme.exclude(hexora_types::programme::Exclusion::new(id, "out of scope"));
+        }
+        project.settings().set_programme(&programme).unwrap();
+
+        let report = Report::build(&project, &options()).unwrap();
+        assert_eq!(
+            report.findings.len(),
+            1,
+            "an authorization test's conclusion is not a detector's output"
+        );
+        assert_eq!(report.excluded.programme_excluded, 0);
+    }
+
+    #[test]
+    fn a_programme_cannot_put_markup_into_the_html_report() {
+        // Same rule as everything else in the document: a reason is typed by a person,
+        // and could be typed by somebody who wants the report to do something when it
+        // is opened.
+        let project = Project::in_memory().unwrap();
+        project
+            .metadata()
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO project (id, name, created_at, updated_at)
+                 VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let mut programme = hexora_types::programme::Programme {
+            name: Some("<script>alert(1)</script>".into()),
+            policy_url: None,
+            exclusions: Vec::new(),
+        };
+        programme.exclude(hexora_types::programme::Exclusion::new(
+            "headers.security",
+            "<img src=x onerror=alert(1)>",
+        ));
+        project.settings().set_programme(&programme).unwrap();
+
+        let html = Report::build(&project, &options())
+            .unwrap()
+            .render(Format::Html);
+        assert!(!html.contains("<script>alert(1)</script>"), "{html}");
+        assert!(!html.contains("<img src=x"), "{html}");
+        assert!(html.contains("&lt;script&gt;"), "{html}");
     }
 
     #[test]

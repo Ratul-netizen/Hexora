@@ -25,6 +25,7 @@ mod identifiers;
 mod identity;
 mod object;
 mod poc;
+mod programme;
 mod project;
 mod proxy;
 mod repeat;
@@ -43,9 +44,11 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M14.2. The proxy, HTTP/1.x engine \
-                  with TLS, projects, traffic capture, the repeater, authorization \
-                  testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
+                  Development status: M14.3. The proxy, HTTP/1.x engine with TLS, \
+                  projects, traffic capture, the repeater, authorization testing, the \
+                  passive scanner, the active scheduler, the intruder, findings and \
+                  reports all work. There is no crawler: Hexora tests the traffic it \
+                  was shown, so what it was never shown it never tested."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -351,6 +354,10 @@ enum Command {
     /// Headers put on every request, for a programme that requires identification.
     #[command(subcommand)]
     Header(HeaderCommand),
+
+    /// The terms this engagement is conducted under, and what they will not accept.
+    #[command(subcommand)]
+    Programme(ProgrammeCommand),
 
     /// Show and change what this engagement is authorized to touch.
     ///
@@ -830,6 +837,53 @@ enum SnapshotCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ProgrammeCommand {
+    /// Show the terms this engagement is conducted under.
+    Show {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Record what the programme is called and where its terms are published.
+    Set {
+        /// Project directory.
+        path: PathBuf,
+        /// What it is called, for the report header.
+        #[arg(long)]
+        name: Option<String>,
+        /// Where the terms are published.
+        #[arg(long)]
+        policy_url: Option<String>,
+    },
+    /// Stop reporting a finding class this programme will not accept.
+    ///
+    /// The check still runs and its observations are still listed — a passive pass
+    /// costs the target nothing, and the run record and the report both say what was
+    /// excluded and why. What it no longer does is file a finding. An excluded *active*
+    /// check is not run at all: sending somebody traffic to produce a finding they have
+    /// said they will not take is a cost with no possible return.
+    ///
+    /// Excluding a lead does not exclude the experiment that would prove it. "CORS
+    /// misconfiguration without proven impact" excludes `cors.configuration` and keeps
+    /// `cors.reflection`, which is the check that proves impact.
+    Exclude {
+        /// Project directory.
+        path: PathBuf,
+        /// The detector id, as `hexora detectors` lists it.
+        detector: String,
+        /// Why, in the programme's own words where possible.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Report a finding class again.
+    Allow {
+        /// Project directory.
+        path: PathBuf,
+        /// The detector id.
+        detector: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum HeaderCommand {
     /// Show the headers put on every request.
     List {
@@ -1002,6 +1056,20 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             in_request: in_request.as_deref(),
             json: cli.json,
         }),
+        Command::Programme(ProgrammeCommand::Show { path }) => programme::show(path, cli.json),
+        Command::Programme(ProgrammeCommand::Set {
+            path,
+            name,
+            policy_url,
+        }) => programme::set(path, name.as_deref(), policy_url.as_deref(), cli.json),
+        Command::Programme(ProgrammeCommand::Exclude {
+            path,
+            detector,
+            reason,
+        }) => programme::exclude(path, detector, reason, cli.json),
+        Command::Programme(ProgrammeCommand::Allow { path, detector }) => {
+            programme::allow(path, detector, cli.json)
+        }
         Command::Header(HeaderCommand::List { path }) => header::list(path, cli.json),
         Command::Header(HeaderCommand::Add { path, header }) => header::add(path, header, cli.json),
         Command::Header(HeaderCommand::Remove { path, name }) => {
@@ -1326,14 +1394,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M14.2",
+            "milestone": "M14.3",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M14.2 (headers a programme requires)");
+        println!("  milestone:               M14.3 (the programme profile)");
     }
 }
 
@@ -1353,6 +1421,38 @@ fn init_tracing(verbosity: u8) {
         .with_env_filter(filter)
         .with_target(false)
         .init();
+}
+
+/// Refuses a project that was never created, before a setting is written into it.
+///
+/// `open_project` opens or creates the database; the `project` row is written by
+/// `hexora project init`. A setting is stored on that row, so writing one into a
+/// directory nobody initialised used to succeed and store nothing — `hexora header add`
+/// printed "Attached" over a header that would never be sent. Storage refuses that now,
+/// and this turns the refusal into an instruction.
+fn require_initialised(project: &Project, path: &std::path::Path) -> hexora_types::Result<()> {
+    let exists: bool = project
+        .metadata()
+        .connection()
+        .map_err(hexora_types::HexoraError::from)?
+        .query_row("SELECT count(*) FROM project", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|count| count > 0)
+        .unwrap_or(false);
+
+    if exists {
+        return Ok(());
+    }
+    Err(hexora_types::HexoraError::invalid_input(
+        "path",
+        format!(
+            "{} is not a Hexora project yet, so there is nowhere to keep this. \
+             Create it with `hexora project init {}`",
+            path.display(),
+            path.display()
+        ),
+    ))
 }
 
 /// Confirms that a project directory really is one before acting on it.
@@ -1394,7 +1494,7 @@ mod tests {
                 "help offers a {absent} command that does not exist: {commands:?}"
             );
         }
-        for present in ["authz", "scan", "detectors", "fuzz", "header"] {
+        for present in ["authz", "scan", "detectors", "fuzz", "header", "programme"] {
             assert!(
                 commands.iter().any(|name| name == present),
                 "and it must still list the ones that do: {commands:?}"
@@ -1444,7 +1544,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M14.2"),
+            help.contains("M14.3"),
             "users must not mistake this for a finished tool"
         );
     }

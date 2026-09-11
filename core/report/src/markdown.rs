@@ -36,6 +36,7 @@ pub fn render(report: &Report) -> String {
 
     summary(&mut out, report);
     scope(&mut out, report);
+    programme(&mut out, report);
     identities(&mut out, report);
     caveats(&mut out, report);
 
@@ -101,6 +102,47 @@ fn scope(out: &mut String, report: &Report) {
     }
     for rule in &report.scope.excluded {
         let _ = writeln!(out, "- **excluded:** {rule}");
+    }
+    let _ = writeln!(out);
+}
+
+/// The terms the engagement was conducted under, and what they would never accept.
+///
+/// A findings list with nothing in it under "missing security headers" reads as a
+/// well-configured application. If the truth is that the programme refuses that class,
+/// the reader has to be told, or the document is quietly overstating its coverage.
+fn programme(out: &mut String, report: &Report) {
+    let programme = &report.programme;
+    if programme.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(out, "## Programme\n");
+    if let Some(name) = &programme.name {
+        let _ = writeln!(out, "Tested under the terms of **{name}**.\n");
+    }
+    if let Some(url) = &programme.policy_url {
+        let _ = writeln!(out, "Terms: {url}\n");
+    }
+    if programme.exclusions.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(
+        out,
+        "These finding classes were **not reported**, because this programme does not \
+         accept them. They were still looked for; their absence below says nothing \
+         about the application.\n"
+    );
+    let _ = writeln!(out, "| Check | Why it was not reported |");
+    let _ = writeln!(out, "| --- | --- |");
+    for exclusion in &programme.exclusions {
+        let _ = writeln!(
+            out,
+            "| `{}` | {} |",
+            exclusion.detector,
+            exclusion.reason.replace('|', "\\|")
+        );
     }
     let _ = writeln!(out);
 }

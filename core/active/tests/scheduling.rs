@@ -16,6 +16,7 @@ use hexora_types::finding::{FindingSource, Hypothesis, Severity};
 use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
 use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
+use hexora_types::programme::{Exclusion, Programme};
 use hexora_types::verify::{DetectorId, DetectorInfo, DetectorMode, Verification, Writeup};
 use hexora_types::Result;
 use hexora_verify::Lab;
@@ -182,6 +183,25 @@ impl Lab for Recorder {
 // ---------------------------------------------------------------------------
 
 /// Captures one exchange that looks like the CORS hypothesis's source.
+/// Records the terms this engagement is conducted under.
+///
+/// `Project::in_memory` holds no project row — settings live on it — so the row is
+/// created here first. Storage refuses to write a setting into a project that does not
+/// exist, which is what stops `hexora header add` reporting a header it never stored.
+fn with_programme(project: &Project, programme: &Programme) {
+    project
+        .metadata()
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO project (id, name, created_at, updated_at)
+             VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    project.settings().set_programme(programme).unwrap();
+}
+
 fn capture(project: &Project, host: &str) -> RequestId {
     captured_with(project, host, "GET")
 }
@@ -320,6 +340,78 @@ async fn preparing_a_plan_sends_nothing_at_all() {
     assert_eq!(plan.work.len(), 1);
     assert_eq!(lab.count(), 0, "preparing a plan put traffic on the wire");
     assert!(plan.describe().contains("api.example.com"));
+}
+
+#[tokio::test]
+async fn a_check_this_programme_does_not_accept_sends_nothing() {
+    // Sending somebody traffic to produce a finding they have said they will not take
+    // is a cost with no possible return, and it is their bandwidth. So an excluded
+    // active check is not scheduled at all — and the plan says why, because a silent
+    // queue of zero reads exactly like a clean result.
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+    let lab = Recorder::new(project.clone());
+
+    let mut programme = Programme::none();
+    programme.exclude(Exclusion::new(
+        "test.chatty",
+        "out of scope for this programme",
+    ));
+    with_programme(&project, &programme);
+
+    let plan = Plan::prepare(
+        &project,
+        &lab,
+        &chatty(1),
+        &[suspicion(source, "api.example.com")],
+        &Budget::default(),
+    )
+    .unwrap();
+
+    assert!(plan.work.is_empty(), "nothing may be queued");
+    assert_eq!(plan.skipped.len(), 1);
+    assert!(
+        plan.skipped[0]
+            .why
+            .contains("out of scope for this programme"),
+        "the programme's own words reach the reader: {:?}",
+        plan.skipped[0]
+    );
+
+    // And running it changes nothing, because there was nothing to run.
+    let outcome = run(&plan, &lab, &chatty(1), &Cancel::new()).await.unwrap();
+    assert_eq!(lab.count(), 0, "an excluded check put traffic on the wire");
+    assert!(outcome.findings().is_empty());
+}
+
+#[tokio::test]
+async fn excluding_the_passive_lead_does_not_exclude_the_active_check() {
+    // `cors.configuration` raises the suspicion; the active check settles it. A
+    // programme that will not take the lead without proven impact still wants the
+    // experiment that proves it, so the exclusion is matched against the *check's* id
+    // and not the hypothesis's.
+    let project = Arc::new(Project::in_memory().unwrap());
+    let source = capture(&project, "api.example.com");
+    let lab = Recorder::new(project.clone());
+
+    let mut programme = Programme::none();
+    programme.exclude(Exclusion::new(
+        "cors.configuration",
+        "out of scope without proven impact",
+    ));
+    with_programme(&project, &programme);
+
+    let plan = Plan::prepare(
+        &project,
+        &lab,
+        &chatty(1),
+        &[suspicion(source, "api.example.com")],
+        &Budget::default(),
+    )
+    .unwrap();
+
+    assert_eq!(plan.work.len(), 1, "the experiment must still be queued");
+    assert!(plan.skipped.is_empty());
 }
 
 #[tokio::test]

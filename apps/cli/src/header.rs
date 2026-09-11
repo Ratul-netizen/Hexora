@@ -64,6 +64,7 @@ pub fn list(path: &Path, json: bool) -> Result<()> {
 /// Adds a header, replacing any with the same name.
 pub fn add(path: &Path, header: &str, json: bool) -> Result<()> {
     let project = crate::open_project(path)?;
+    crate::require_initialised(&project, path)?;
     let parsed = parse(header)?;
 
     let mut headers = project.settings().attached_headers()?;
@@ -103,6 +104,7 @@ pub fn add(path: &Path, header: &str, json: bool) -> Result<()> {
 /// Stops sending a header.
 pub fn remove(path: &Path, name: &str, json: bool) -> Result<()> {
     let project = crate::open_project(path)?;
+    crate::require_initialised(&project, path)?;
     let mut headers = project.settings().attached_headers()?;
     let before = headers.len();
     headers.retain(|existing| !existing.name.eq_ignore_ascii_case(name));

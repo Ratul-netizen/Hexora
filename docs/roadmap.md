@@ -65,10 +65,14 @@ M12.7  Identifier suggestions        candidates a human confirms, never assertio
 M12.8  Engagement snapshots          what changed since the last assessment  ✔
 M13.1  Verification framework        detector ≠ finding, enforced by the type system  ✔
 M13.2  Passive scanner               observations over captured traffic, no new requests  ✔
-M13.4  Reflected-input verification  context-aware, not "the string came back"
-M13.5  Redirect verification         a controlled destination, never blindly followed
-M13.6  Auth/session verification     the identity model, applied differentially
-M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
+M13.3  Active scheduler              asks before it sends, and one host at a time  ✔
+M13.4  Reflected-input verification  context-aware, not "the string came back"  ✔
+M13.5  Redirect verification         a controlled destination, never blindly followed  ✔
+M13.6  Auth/session verification     the identity model, applied differentially  ✔
+M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive  ✔
+M14.1  The intruder                  one request, many values, grouped by behaviour  ✔
+M14.2  Attached headers              what a programme requires on every request  ✔
+M14.3  Programme profile             which finding classes the programme accepts  ✔
 ```
 
 Then, in this order and keeping their existing numbers: the extension platform (M17,
@@ -718,9 +722,22 @@ not an object and an object is not an ownership claim.
 **M16 — OAST** · PLANNED — self-hostable, DNS/HTTP/HTTPS/SMTP, correlated to the
 originating request. Self-hosting is a selling point over Burp Collaborator.
 
-> **M14 is retired.** It read "Active scanner and verification engine", which is now
-> M13.1 and M13.4–M13.7. The number is not reused: `CHANGELOG.md` and the code name
-> milestones by number, and quietly reassigning one would make the history ambiguous.
+**M14 — The workbench** · IN PROGRESS — what a tester reaches for between the
+repeater and the scanner, and what an engagement is conducted under.
+
+```text
+M14.1  The intruder            one request, a payload list, responses grouped by behaviour  ✔
+M14.2  Attached headers        what a programme requires on every request  ✔
+M14.3  Programme profile       which finding classes the programme will accept  ✔
+M14.4  Programmes in the window  the desktop UI knows a class was excluded
+```
+
+> **The number was reused, and the original M14 is gone.** M14 first read "Active
+> scanner and verification engine", which was built as M13.1 and M13.4–M13.7; this
+> file used to say the number would not be reused, and then it was. Recorded here
+> rather than quietly corrected: `CHANGELOG.md` and the code name milestones by
+> number, so "M14" means the workbench work and nothing else, and a reader of an old
+> note deserves to know which of the two they are looking at.
 
 ---
 

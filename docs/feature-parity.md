@@ -112,6 +112,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | A header on every request the tool sends | ✅ | ✅ | **IMPLEMENTED M14.2** | `hexora header add`, stored on the project. Bug bounty programmes require it so research traffic is attributable; applied before the identity's credential, and never spliced into a raw send |
 | Match-and-replace on proxied traffic | ✅ | ✅ | ❌ | M14.2 covers requests Hexora sends. Traffic through the proxy is the browser's and is not rewritten, so manual browsing still needs the header set in the browser |
 
+| Programme terms filter what gets reported | ❌ | ❌ | **IMPLEMENTED M14.3** | `hexora programme exclude`. Bug bounty programmes reject whole finding classes; a run that files forty of them is a run whose output gets skipped. Excluded classes are still looked for and still named in the report |
+
 ## 5. Extensibility
 
 | Capability | Burp Pro | Caido | Hexora | Notes |

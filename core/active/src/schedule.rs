@@ -33,6 +33,7 @@ use std::time::Duration;
 use futures::stream::StreamExt;
 use hexora_storage::{DetectorRun, Project};
 use hexora_types::finding::Hypothesis;
+use hexora_types::programme::Programme;
 use hexora_types::verify::{Verification, Verified};
 use hexora_types::Result;
 use hexora_verify::{Judged, Lab};
@@ -113,6 +114,12 @@ pub struct Plan {
     pub skipped: Vec<Skipped>,
     /// What the run may do to the systems it tests.
     pub budget: Budget,
+    /// The terms the engagement is conducted under, as they stood when this was built.
+    ///
+    /// Read once in `prepare` and carried, rather than looked up again while the queue
+    /// drains: a plan a tester approved after reading a dry run must be the plan that
+    /// runs, and re-reading could pick up an edit made in between.
+    pub programme: Programme,
 }
 
 impl Plan {
@@ -142,6 +149,17 @@ impl Plan {
         // constraint. `hexora authz` has always done this for the same reason.
         //
         // It writes a row and sends nothing, which is the promise `prepare` makes.
+        // The terms the engagement is conducted under. An active check whose finding
+        // class this programme will not accept is not run at all: sending somebody
+        // traffic to produce a finding they have said they will not take is a cost with
+        // no possible return, and it is their bandwidth being spent.
+        //
+        // Note which id is asked about — the *check's*, not the hypothesis's. Excluding
+        // `cors.configuration` (the lead) while keeping `cors.reflection` (the
+        // experiment that proves impact) is a coherent profile, and it is precisely
+        // what "CORS misconfiguration without proven impact is out of scope" describes.
+        let programme = project.settings().programme().unwrap_or_default();
+
         let mut identities = project.identities().list().unwrap_or_default();
         if !identities
             .iter()
@@ -168,7 +186,19 @@ impl Plan {
                 });
                 continue;
             };
-            let _ = check;
+            if let Some(exclusion) = programme.excluded(&check.about().id.to_string()) {
+                skipped.push(Skipped {
+                    claim: hypothesis.claim.clone(),
+                    detector: hypothesis.detector.clone(),
+                    why: format!(
+                        "this programme does not accept what {} reports, so nothing is \
+                         sent for it: {}",
+                        check.about().id,
+                        exclusion.reason
+                    ),
+                });
+                continue;
+            }
 
             let exchange =
                 match hexora_scan::passive::exchange_at(project, hypothesis.source_request) {
@@ -262,6 +292,7 @@ impl Plan {
             work,
             skipped,
             budget: budget.clone(),
+            programme,
         })
     }
 
@@ -426,6 +457,10 @@ async fn run_recording(
                     observations: 0,
                     hypotheses: 0,
                     reportable: 0,
+                    excluded: plan
+                        .programme
+                        .excluded(&info.id.to_string())
+                        .map(|exclusion| exclusion.reason.clone()),
                 },
             )
         })

@@ -23,6 +23,23 @@ pub fn registry() -> Registry {
         .with(hexora_active::checks_info())
 }
 
+/// Every detector id this build has, sorted.
+///
+/// What a programme exclusion is checked against. A typo there fails in the worst
+/// direction — the class goes on being reported, the tester believes it does not, and
+/// the programme is the one who tells them.
+pub fn every_id() -> Vec<String> {
+    let registry = registry();
+    let mut ids: Vec<String> = registry
+        .all()
+        .iter()
+        .map(|check| check.id.to_string())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// Lists them.
 pub fn list(json: bool) -> Result<()> {
     let registry = registry();

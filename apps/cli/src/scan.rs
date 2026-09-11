@@ -116,12 +116,40 @@ fn print_human(summary: &Summary, saved: &[Recorded], no_save: bool) {
             detector.version,
             detector.observations,
             detector.hypotheses,
-            if detector.observations == 0 && detector.hypotheses == 0 {
-                "nothing"
-            } else {
-                ""
+            match (
+                &detector.excluded,
+                detector.observations,
+                detector.hypotheses
+            ) {
+                // The programme's silence, not the application's. A reader who cannot
+                // tell these apart is being misled about coverage in the direction that
+                // flatters the target.
+                (Some(_), _, _) => "not reported (programme)",
+                (None, 0, 0) => "nothing",
+                _ => "",
             }
         );
+    }
+
+    let excluded: Vec<_> = summary
+        .detectors
+        .iter()
+        .filter_map(|detector| {
+            detector
+                .excluded
+                .as_ref()
+                .map(|reason| (&detector.detector, reason))
+        })
+        .collect();
+    if !excluded.is_empty() {
+        println!();
+        println!("Not reported for this programme ({}):", excluded.len());
+        for (detector, reason) in excluded {
+            println!("  {detector} — {reason}");
+        }
+        println!();
+        println!("  These ran and their observations are listed above. What they did not");
+        println!("  do is file a finding. Change it with `hexora programme allow`.");
     }
 
     if !summary.observations.is_empty() {
@@ -162,7 +190,31 @@ fn print_human(summary: &Summary, saved: &[Recorded], no_save: bool) {
 
     println!();
     if summary.findings().is_empty() {
-        println!("No findings. Every observation above was context rather than an issue.");
+        // "Every observation above was context" is only true when nothing reportable
+        // was suppressed. With a programme profile it can be flatly false — four
+        // reportable observations and no findings — and a line that reads as a clean
+        // result over the top of a filtered one is the failure this whole feature
+        // exists to avoid.
+        let held_back = summary
+            .observations
+            .iter()
+            .filter(|group| {
+                group.observation.is_reportable()
+                    && summary
+                        .programme
+                        .excluded(&group.observation.detector)
+                        .is_some()
+            })
+            .count();
+        if held_back > 0 {
+            println!(
+                "No findings recorded. {held_back} reportable observation(s) were not \
+                 filed because this programme does not accept them — see above. That \
+                 is a decision about the programme, not a result about the application."
+            );
+        } else {
+            println!("No findings. Every observation above was context rather than an issue.");
+        }
     } else if no_save {
         println!(
             "{} finding(s), not written to the project (--no-save).",
@@ -201,6 +253,7 @@ fn print_json(summary: &Summary, saved: &[Recorded]) {
             "observations": detector.observations,
             "hypotheses": detector.hypotheses,
             "reportable": detector.reportable,
+            "excluded": detector.excluded,
         })).collect::<Vec<_>>(),
         "observations": summary.observations.iter().map(|group| serde_json::json!({
             "detector": group.observation.detector,

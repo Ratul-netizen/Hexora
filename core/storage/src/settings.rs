@@ -1,4 +1,5 @@
-//! Project-level settings: the scope, and the headers every request must carry.
+//! Project-level settings: the scope, the headers every request must carry, and the
+//! terms the engagement is conducted under.
 //!
 //! Scope is the control that decides whether an automated subsystem may send anything
 //! at all (`core/engine/src/guard.rs`), so it has to outlive the command that set it.
@@ -12,6 +13,7 @@
 //! the authorization it was all collected under.
 
 use hexora_types::http::Header;
+use hexora_types::programme::Programme;
 use hexora_types::scope::Scope;
 use rusqlite::params;
 
@@ -101,10 +103,69 @@ impl Settings {
             reason: e.to_string(),
         })?;
         let conn = self.db.connection()?;
-        conn.execute(
-            "UPDATE project SET attached_headers_json = ?1 WHERE id = ?2",
-            params![json, PROJECT_ID],
+        let updated = conn.execute(
+            "UPDATE project SET attached_headers_json = ?1",
+            params![json],
         )?;
+        // A project database with no project row silently matched nothing, and the
+        // caller went on to print "Attached". A tool that reports a programme header as
+        // set when it is not is the exact failure that forfeits a report, so this says
+        // so instead.
+        if updated == 0 {
+            return Err(StorageError::NotFound {
+                entity: "project row",
+                id: PROJECT_ID.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The terms this engagement is conducted under.
+    ///
+    /// Scope says which systems may be touched; this says which kinds of finding the
+    /// programme will accept. A bug bounty programme routinely puts most of what a
+    /// passive scanner produces out of scope as a *class* — missing headers, cookie
+    /// flags, CORS without proven impact — and a run that files forty of those is a run
+    /// whose output gets skipped.
+    ///
+    /// Empty for a project that has none, which excludes nothing: the correct reading
+    /// of "nobody has said otherwise" is that everything found is worth reporting.
+    pub fn programme(&self) -> Result<Programme> {
+        let conn = self.db.connection()?;
+        let json: Option<String> = conn
+            .query_row("SELECT programme_json FROM project LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .ok();
+
+        match json {
+            None => Ok(Programme::none()),
+            Some(json) => serde_json::from_str(&json).map_err(|e| StorageError::Decode {
+                entity: "programme",
+                reason: e.to_string(),
+            }),
+        }
+    }
+
+    /// Replaces the engagement's terms.
+    ///
+    /// Unlike scope, this is not a safety control: an exclusion can only ever reduce
+    /// what is reported or sent, so a wrong one cannot make Hexora touch something it
+    /// otherwise would not. It is still printed back to the user, because a silence
+    /// nobody remembers asking for is worse than a noisy report.
+    pub fn set_programme(&self, programme: &Programme) -> Result<()> {
+        let json = serde_json::to_string(programme).map_err(|e| StorageError::Decode {
+            entity: "programme",
+            reason: e.to_string(),
+        })?;
+        let conn = self.db.connection()?;
+        let updated = conn.execute("UPDATE project SET programme_json = ?1", params![json])?;
+        if updated == 0 {
+            return Err(StorageError::NotFound {
+                entity: "project row",
+                id: PROJECT_ID.to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -223,6 +284,52 @@ mod tests {
         // test run that had nothing wrong with it.
         let settings = Settings::new(MetadataDb::in_memory().unwrap());
         assert!(settings.attached_headers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_programme_survives_a_round_trip() {
+        let settings = project();
+        assert!(settings.programme().unwrap().is_empty());
+
+        let mut programme = Programme {
+            name: Some("Wolt".into()),
+            policy_url: Some("https://hackerone.com/wolt".into()),
+            exclusions: Vec::new(),
+        };
+        programme.exclude(hexora_types::programme::Exclusion::new(
+            "headers.security",
+            "out of scope: missing security headers",
+        ));
+        settings.set_programme(&programme).unwrap();
+
+        assert_eq!(settings.programme().unwrap(), programme);
+    }
+
+    #[test]
+    fn a_project_without_a_programme_excludes_nothing_rather_than_failing() {
+        // Every scan asks this question. A failure here would stop a run that had
+        // nothing wrong with it, and an error that read as "excluded" would silently
+        // suppress findings.
+        let settings = Settings::new(MetadataDb::in_memory().unwrap());
+        let programme = settings.programme().unwrap();
+        assert!(programme.is_empty());
+        assert!(programme.excluded("headers.security").is_none());
+    }
+
+    #[test]
+    fn setting_them_on_a_project_that_does_not_exist_is_an_error() {
+        // It used to succeed and store nothing, and `hexora header add` printed
+        // "Attached" over the top of it. A header a programme requires, reported as set
+        // and never sent, is how a report gets rejected.
+        let settings = Settings::new(MetadataDb::in_memory().unwrap());
+
+        let error = settings
+            .set_attached_headers(&[Header::new("X-HackerOne-Research", "r")])
+            .unwrap_err();
+        assert!(matches!(error, StorageError::NotFound { .. }), "{error}");
+
+        let error = settings.set_programme(&Programme::none()).unwrap_err();
+        assert!(matches!(error, StorageError::NotFound { .. }), "{error}");
     }
 
     #[test]

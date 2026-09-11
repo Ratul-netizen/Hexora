@@ -4,8 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M14.2 (the headers a programme requires), after two runs against
-  real targets
+- **Last updated:** M14.3 (the programme profile), after two runs against real targets
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -47,6 +46,7 @@ milestone.
 | **M13.7** — Cross-identity access, scheduled | M12.1's matrix across an engagement's traffic rather than one request a tester names. Whose session was captured is answered by **applying each declared credential and comparing byte for byte** — an exact answer or none at all, because proxy traffic announces no identity id and everything a cross-identity test concludes rests on getting it right. One implementation, two front doors: the check calls the same `replay_once` and `judge` that `hexora authz` does, so a scheduled verdict and an on-demand one cannot disagree. A budget too small for every identity sends **nothing** rather than testing a subset and reporting it as the whole. Against the IDOR demo it reached **Firm with no declared object ids**, through M12.10's same-document path behind a refused anonymous control |
 | **M14.1** — The intruder | One request, a payload list, and responses grouped by `(status, length)` so the crowd is one line and the outlier is a short row below it. Outliers are measured against the **majority** rather than the baseline — in two hundred usernames the unchanged request is one more wrong answer. It **concludes nothing**: no findings, no hypotheses, nothing in the findings store, because what a difference means is the judgement of whoever chose the payloads. It will replay a `POST` where the scheduler refuses to, and says the method and the count first. Found a real local file inclusion on `testasp.vulnweb.com` in twelve requests on its first use |
 | **M14.2** — The headers a programme requires | A bug bounty programme routinely makes identifying your traffic a condition of testing — Wolt's says testing without `X-HackerOne-Research` "can result in the forfeiture of the eligible bounty". This is the opposite of hiding: a programme that cannot tell a researcher's requests from an attacker's is entitled to treat them the same way. An identity's headers could not express it, because they cover authenticated replays and not the scanner's probes, the intruder's payloads or the anonymous control — the request most likely to be read as an attack. So it lives on the **project**, and is applied in the one function every structured send passes through, **before** the identity's credential so a project setting can never decide who a request is from. Not spliced into a raw send, which is byte-exact by definition — but `--dry-run` prints what is *not* being sent, so the omission is visible before the request goes out rather than after the report is rejected. `hexora header list|add|remove` |
+| **M14.3** — The programme profile | Scope says which systems; this says which kinds of finding the programme will **accept**. Wolt puts missing headers, cookie flags, CORS without proven impact, banner grabbing, username enumeration and absent rate limits out of scope as *classes* — most of what a passive scanner produces. An exclusion is about reporting, not looking: the passive check still runs and its observations are still listed, **the hypothesis it raises still reaches the active scheduler** (proven impact is in scope, and the experiment is what proves it), and an excluded *active* check is not scheduled at all because that traffic could never produce anything the programme would take. Nothing is silenced — the scan output, the run record and both report formats name every excluded class and its reason, so "nobody looked" and "it was looked at and they do not take them" cannot be confused. Against `testasp.vulnweb.com` the same four exchanges give **5 findings with no profile and 0 with a Wolt-shaped one** — exactly the five that would have been rejected |
 
 ## Next
 
@@ -300,28 +300,30 @@ display, and the HTML report is still shown as text rather than rendered.
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
 
-### Where to pick up: a programme profile
+### Where to pick up: the first Wolt run
 
-M14.2 attached the header a bug bounty programme requires. The next thing missing is
-the rest of the programme's terms, and it is the thing that decides whether a run
-against a real target is usable at all.
+The profile exists, so a run against a real programme is now filtered at the source.
+What is still missing before pointing Hexora at Wolt:
 
-Wolt's programme — the intended first real target — declares most of what Hexora's
-passive scanner currently produces to be **out of scope as a finding class**: CORS
-misconfiguration without proven impact, missing security headers, missing cookie flags,
-banner grabbing and version disclosure, username and email enumeration, and the absence
-of rate limits. A run that files forty of those is a run whose output gets skipped, and
-skipped output is how a real finding gets missed.
+1. **A Wolt account of your own**, and its session captured through the proxy as a
+   declared identity. The programme forbids touching accounts or data you do not own, so
+   every identity in the project has to be yours. Test entities the programme names:
+   consumer `670fa3e9ead6e49d65cc3614`, venue `670e7897e3c56dcc5b5a0989`.
+2. **Scope set to in-scope hosts only** — `wolt.com`, `authentication.`, `corporate.`,
+   `drive.`, `merchant.`, `ops.`, `restaurant-api.`
+3. **`X-HackerOne-Research: wahid_ratul` attached** (M14.2), and checked with
+   `hexora repeat --dry-run` before anything goes out.
+4. **A dry run first.** `Plan::prepare` is the sending function not being called, so a
+   dry run is a genuine answer to "what exactly would this do?".
 
-So: a **programme profile** — scope hosts, attached headers, and the finding classes
-this programme will not accept — filtering at the source rather than in a reader's head.
-Then a dry run against one in-scope host, so what would be sent can be read before it is
-sent.
+Worth running there: `authz.scheduled`, `auth.enforcement`, `redirect.destination` and
+the intruder. The programme names brute force and mass creation of entities as
+forbidden, which is a constraint on the scheduler and on `hexora fuzz`, not a
+suggestion.
 
-What is worth running against that programme once the profile exists: `authz.scheduled`,
-`auth.enforcement`, `redirect.destination` and the intruder — against the researcher's
-own test entities only. The programme names brute force and mass creation of entities as
-forbidden, which is a constraint on the scheduler and on `hexora fuzz`, not a suggestion.
+**The desktop window does not know about programmes yet.** `hexora programme` is
+CLI-only; the window shows findings without saying a class was excluded, which is the
+one place this feature can still mislead somebody. That is the next thing to build.
 
 **Stealth is not a goal, and should never become one.** The header exists to make
 research traffic *identifiable*. A programme that cannot tell a researcher's requests

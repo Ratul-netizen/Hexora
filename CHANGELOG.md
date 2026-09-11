@@ -508,6 +508,79 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M14.3, the programme profile
+
+Scope answers *which systems*. This answers the other question a bug bounty programme
+decides for you: **which kinds of finding it will accept**. Wolt's puts these out of
+scope as classes:
+
+```text
+CORS misconfiguration without proven impact
+Missing security headers
+Missing cookie flags
+Banner grabbing / version disclosure
+Username / email enumeration
+Bypassing or non-existence of rate-limits
+```
+
+That is most of what a passive scanner produces. A run that files forty of them is a
+run whose output gets skipped, and skipped output is how a real finding gets missed —
+the same failure as a scanner that cries wolf, arriving by a different road.
+
+**An exclusion is about reporting, not about looking**, and what follows from that is
+the whole design:
+
+- A **passive** detector that is excluded still runs — it costs the target nothing — and
+  its observations are still listed with their severity and their evidence. What it does
+  not do is produce a finding.
+- **The hypothesis it raises still reaches the active scheduler.** This is the point.
+  "CORS misconfiguration *without proven impact*" is out of scope; proven impact is in
+  scope, and the active check is the thing that proves it. So `cors.configuration`
+  excluded and `cors.reflection` kept is a coherent profile, and it is exactly what the
+  programme's wording describes. The exclusion is matched against the **check's** id,
+  not the hypothesis's, which is what makes that possible.
+- An **active** detector that is excluded is not scheduled at all. Sending somebody
+  traffic to produce a finding they have said they will not take is a cost with no
+  possible return, and it is their bandwidth.
+
+**Nothing is silenced.** The scan output, the run record, and both report formats name
+every excluded class and its reason. A reader has to be able to tell "nobody looked"
+from "it was looked at and this programme does not take them" — the two leave the same
+empty space in a findings list and mean opposite things about coverage. Invariant 15 by
+another road.
+
+- `hexora programme show|set|exclude|allow`. A detector id this build does not have is
+  refused with the list of the ones it does: a typo in an exclusion fails in the worst
+  direction, with the class still reported, the tester believing otherwise, and the
+  programme the one who tells them.
+- A reason is **required**. Six weeks later an exclusion with no reason is
+  indistinguishable from a mistake, and it is the sentence a reader of the report sees
+  where the findings would have been.
+- Findings recorded *before* a class was excluded are counted in "What this report
+  leaves out" rather than listed. The store keeps them — a finding is a record of what
+  was seen — but the document must not list one two sections under a heading saying this
+  programme will not accept it.
+- An exclusion never reaches a finding a **person** made, or an authorization matrix's:
+  a programme excludes classes of automated output, not a tester's conclusions.
+- Migration 10, including `excluded_reason` on the run record.
+
+Exercised against `testasp.vulnweb.com` with a Wolt-shaped profile: the same four
+captured exchanges produce **5 findings with no profile and 0 with it** — and they are
+exactly the five Wolt would have rejected. The eight observations are still on screen,
+each with the reason it was not filed.
+
+### Fixed — a setting could be reported as saved and stored nowhere
+
+`hexora header add` on a directory that was never `hexora project init`-ed printed
+**"Attached X-HackerOne-Research: …"** and stored nothing. Project settings live on the
+`project` row; the `UPDATE` matched no rows and said so to nobody.
+
+This is the worst possible direction for this particular bug: a researcher believes the
+header a programme requires is on every request, it is on none of them, and they find
+out when the report is rejected. Storage now refuses the write, and the CLI turns the
+refusal into `hexora project init <path>`. Both M14.2 setters and the new one are
+covered by a test.
+
 ### Added — M14.2, the headers a programme requires
 
 A bug bounty programme routinely asks a researcher to identify their traffic. Wolt's,
