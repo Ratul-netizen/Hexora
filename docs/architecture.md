@@ -34,7 +34,7 @@ influenced part of the process.
 | `core/verify` | The verification framework: detector and verifier traits, the one way to run an experiment, and the registry of what a build checks for | **Implemented** (M13.1) |
 | `core/scan` | Passive checks over captured traffic, and the pass that runs them. Takes no transport | **Implemented** (M13.2) |
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
-| `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic | **Implemented** (M12.3) |
+| `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic, and compiles a finding into a runnable reproduction | **Implemented** (M12.3, M12.9) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |
@@ -205,6 +205,31 @@ M12.1 and M12.5 were rewritten onto this in the same change, so the framework ha
 real user rather than a hypothetical one: `MatrixDetector` raises a hypothesis per
 violating cell, `ReplayVerifier` runs the second experiment through a `Lab`, and the
 findings come out the far end identical to what the hand-written path produced.
+
+## The last mile: evidence that can be run
+
+A claim in a report invites an argument. The two requests that produced it, in a form
+a triager can paste into a terminal, end one — so `core/report` compiles a finding's
+evidence into a reproduction:
+
+```text
+Finding
+  └── Evidence::Comparison { baseline, variant, difference }
+        │  read back from the project's traffic
+        ▼
+      Step 1  the control request, as User A
+      Step 2  the same request, as User B     Expect: the difference
+```
+
+Nothing is composed. Every step names a `RequestId` the project holds, the bytes come
+from that stored request, and a citation that cannot be resolved is printed as a gap
+rather than guessed at. Credentials become placeholders named after the identity —
+see invariant 13.
+
+`curl` is offered only where curl can express the request. Four conditions rule it out
+— a non-UTF-8 body, two `Content-Length` headers, a `Content-Length` that disagrees
+with the body, and a bare-LF header block — and each is a thing a real finding is
+sometimes about. The refusal carries the reason, and the raw form is always there.
 
 ## Passive and active are a type, not a convention
 

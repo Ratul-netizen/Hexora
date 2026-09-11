@@ -21,6 +21,7 @@ mod history;
 mod identifiers;
 mod identity;
 mod object;
+mod poc;
 mod project;
 mod proxy;
 mod repeat;
@@ -39,7 +40,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M13.2. The proxy, HTTP/1.x engine \
+                  Development status: M12.9. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -451,6 +452,27 @@ enum Command {
         after: Option<String>,
     },
 
+    /// Compile a finding into steps somebody can run.
+    ///
+    /// Built from the exchanges the finding already cites, with every credential
+    /// replaced by a named placeholder — a proof of concept is the most-forwarded
+    /// thing an engagement produces.
+    Poc {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The finding, from `hexora findings`.
+        id: String,
+
+        /// raw, curl, or markdown.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+
+        /// Write it to this file instead of printing it.
+        #[arg(long, value_name = "FILE")]
+        save: Option<PathBuf>,
+    },
+
     /// Turn a project's findings into a document somebody can be handed.
     ///
     /// A render, not a run: it sends no traffic and changes nothing. Every claim
@@ -493,6 +515,14 @@ enum Command {
         /// How much of each body to quote, in bytes.
         #[arg(long, value_name = "BYTES", default_value_t = 2048)]
         excerpt_bytes: usize,
+
+        /// Leave out the runnable reproduction blocks.
+        ///
+        /// They are included for established findings only, never for leads: a
+        /// runnable block attached to an unverified claim is the thing most likely
+        /// to be forwarded without the sentence that qualified it.
+        #[arg(long)]
+        no_poc: bool,
     },
 
     /// Print version and build information.
@@ -849,6 +879,18 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             no_save: *no_save,
             json: cli.json,
         }),
+        Command::Poc {
+            path,
+            id,
+            format,
+            save,
+        } => poc::run(poc::Args {
+            project: path,
+            id,
+            format,
+            save_to: save.as_deref(),
+            json: cli.json,
+        }),
         Command::Detectors => detectors::list(cli.json),
         Command::Snapshot(SnapshotCommand::Take { path, label, note }) => {
             snapshot::take(path, label.as_deref(), note.as_deref(), cli.json)
@@ -936,6 +978,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             actionable,
             show_secrets,
             excerpt_bytes,
+            no_poc,
         } => report::run(report::ReportArgs {
             project: path,
             format: format.as_deref(),
@@ -945,6 +988,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             actionable: *actionable,
             show_secrets: *show_secrets,
             excerpt_bytes: *excerpt_bytes,
+            no_poc: *no_poc,
             json: cli.json,
         }),
         Command::Project(ProjectCommand::Init { path, name }) => {
@@ -1086,14 +1130,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M13.2",
+            "milestone": "M12.9",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M13.2 (the passive scanner)");
+        println!("  milestone:               M12.9 (proof-of-concept compilation)");
     }
 }
 
@@ -1184,7 +1228,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M13.2"),
+            help.contains("M12.9"),
             "users must not mistake this for a finished tool"
         );
     }

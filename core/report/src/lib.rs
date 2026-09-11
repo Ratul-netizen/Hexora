@@ -43,6 +43,7 @@
 
 pub mod html;
 pub mod markdown;
+pub mod poc;
 
 use std::collections::HashMap;
 
@@ -95,6 +96,13 @@ pub struct ReportOptions {
     pub body_excerpt_bytes: usize,
     /// How aggressively to redact rendered traffic.
     pub redaction: RedactionPolicy,
+    /// Include a runnable reproduction for findings that are established.
+    ///
+    /// On by default, and deliberately *not* for leads: a lead's reproduction is
+    /// "send this request and read the header", which the evidence section already
+    /// shows. A runnable block attached to an unverified claim is the thing most
+    /// likely to be forwarded without the sentence that qualified it.
+    pub proof_of_concept: bool,
     /// When the report was produced. A parameter rather than a call to the clock, so
     /// a test — or a build that renders the same project twice — gets the same bytes.
     pub generated_at: DateTime<Utc>,
@@ -108,6 +116,7 @@ impl Default for ReportOptions {
             actionable_only: false,
             body_excerpt_bytes: 2048,
             redaction: RedactionPolicy::default(),
+            proof_of_concept: true,
             generated_at: Utc::now(),
         }
     }
@@ -226,6 +235,11 @@ pub struct ReportedFinding {
     pub finding: Finding,
     /// Its evidence, resolved against the project's traffic.
     pub evidence: Vec<CitedEvidence>,
+    /// A runnable reproduction, when the finding is established and the project can
+    /// still resolve its evidence.
+    ///
+    /// `None` for a lead, by design: see [`ReportOptions::proof_of_concept`].
+    pub reproduction: Option<crate::poc::Reproduction>,
 }
 
 /// One piece of evidence, with its exchanges resolved.
@@ -425,7 +439,19 @@ impl Report {
                 .map(|e| cite(&traffic, &labels, e, options))
                 .collect();
             dangling += evidence.iter().filter(|e| !fully_resolved(e)).count();
-            let reported = ReportedFinding { finding, evidence };
+            // Compiled only for what a reader may act on. A lead's reproduction is
+            // "send this request and read the header", which the evidence below
+            // already shows.
+            let reproduction = if options.proof_of_concept && finding.confidence.is_actionable() {
+                crate::poc::reproduce(project, &finding).ok()
+            } else {
+                None
+            };
+            let reported = ReportedFinding {
+                finding,
+                evidence,
+                reproduction,
+            };
             if reported.finding.confidence.is_actionable() {
                 established.push(reported);
             } else {
@@ -1274,6 +1300,94 @@ mod tests {
         assert!(report
             .render(Format::Markdown)
             .contains("What this report leaves out"));
+    }
+
+    #[test]
+    fn an_established_finding_carries_a_runnable_reproduction_and_a_lead_does_not() {
+        // The rule the option exists for: a runnable block attached to an unverified
+        // claim is the thing most likely to be forwarded without the sentence that
+        // qualified it.
+        let (project, request, target) = project_with_traffic();
+        project
+            .findings()
+            .save(&finding(
+                target,
+                Confidence::Confirmed,
+                one_exchange(request),
+            ))
+            .unwrap();
+        let mut lead = raw_finding(target, Confidence::Reported, one_exchange(request));
+        lead.title = "A lead".into();
+        project
+            .findings()
+            .save(&hexora_types::verify::Verified::from_trusted_finding(lead))
+            .unwrap();
+
+        let report = Report::build(&project, &options()).unwrap();
+        let established = report
+            .findings
+            .iter()
+            .find(|reported| reported.finding.confidence.is_actionable())
+            .expect("the established finding");
+        assert!(established.reproduction.is_some());
+
+        let lead = report
+            .leads
+            .iter()
+            .find(|reported| reported.finding.title == "A lead")
+            .expect("the lead");
+        assert!(
+            lead.reproduction.is_none(),
+            "a lead must not come with a script"
+        );
+    }
+
+    #[test]
+    fn the_reproduction_can_be_left_out_entirely() {
+        let (project, request, target) = project_with_traffic();
+        project
+            .findings()
+            .save(&finding(
+                target,
+                Confidence::Confirmed,
+                one_exchange(request),
+            ))
+            .unwrap();
+
+        let report = Report::build(
+            &project,
+            &ReportOptions {
+                proof_of_concept: false,
+                ..options()
+            },
+        )
+        .unwrap();
+        assert!(report.findings[0].reproduction.is_none());
+
+        let markdown = report.render(Format::Markdown);
+        assert!(!markdown.contains("**Run it**"), "{markdown}");
+    }
+
+    #[test]
+    fn a_rendered_reproduction_carries_placeholders_rather_than_credentials() {
+        let (project, request, target) = project_with_traffic();
+        project
+            .findings()
+            .save(&finding(
+                target,
+                Confidence::Confirmed,
+                one_exchange(request),
+            ))
+            .unwrap();
+
+        let report = Report::build(&project, &options()).unwrap();
+        for format in [Format::Markdown, Format::Html, Format::Json] {
+            let rendered = report.render(format);
+            assert!(
+                !rendered.contains("sk-live-not-a-real-token"),
+                "{format:?} leaked a credential"
+            );
+        }
     }
 
     #[test]

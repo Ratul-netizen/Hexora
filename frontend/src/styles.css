@@ -1036,3 +1036,36 @@ tr.violation td {
 .tag.info {
   color: var(--text-muted);
 }
+
+/* ---------------------------------------------------------------- *
+ * Reproduction
+ * ---------------------------------------------------------------- */
+
+.poc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.poc ol.claims {
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+}
+
+.poc ol.claims > li {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(42, 47, 58, 0.5);
+}
+
+.poc ol.claims > li:last-child {
+  border-bottom: 0;
+}
+
+/* A command is meant to be selected and copied, so it wraps rather than scrolling
+ * out of sight — a half-visible curl invocation is a half-copied one. */
+.poc pre.body {
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 4px 0;
+}

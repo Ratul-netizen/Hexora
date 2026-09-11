@@ -182,6 +182,65 @@ fn omissions(out: &mut String, report: &Report) {
     );
 }
 
+/// The runnable reproduction, for a reader who would rather run it than read it.
+///
+/// Placed above the evidence on purpose: a triager who can reproduce the behaviour in
+/// thirty seconds rarely needs to read the transcripts, and a triager who cannot is
+/// exactly the one who will.
+fn render_reproduction(out: &mut String, poc: &crate::poc::Reproduction) {
+    let _ = writeln!(out, "**Run it**\n");
+
+    if !poc.placeholders.is_empty() {
+        let _ = writeln!(
+            out,
+            "Supply these first — Hexora never puts a real credential in a report:\n"
+        );
+        for placeholder in &poc.placeholders {
+            let who = placeholder
+                .identity
+                .as_deref()
+                .map(|identity| format!("{identity}'s "))
+                .unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "- `{}` — {}`{}` header ({} bytes as sent)",
+                placeholder.token, who, placeholder.header, placeholder.bytes
+            );
+        }
+        let _ = writeln!(out);
+    }
+
+    for step in &poc.steps {
+        let _ = writeln!(out, "{}. {}\n", step.number, step.heading());
+
+        match &step.curl {
+            crate::poc::Curl::Command { command } => {
+                let _ = writeln!(out, "```bash\n{command}\n```\n");
+            }
+            crate::poc::Curl::Inexpressible { reason } => {
+                // Said rather than omitted: an absent command with no explanation
+                // reads as a missing feature rather than as the point.
+                let _ = writeln!(
+                    out,
+                    "No `curl` equivalent — {reason}. Send the request quoted under \
+                     Evidence, byte for byte.\n"
+                );
+            }
+            crate::poc::Curl::Unavailable => {
+                let _ = writeln!(out, "The project no longer holds this exchange.\n");
+            }
+        }
+
+        if let Some(expect) = &step.expect {
+            let _ = writeln!(out, "Expect: {expect}\n");
+        }
+    }
+
+    for caveat in &poc.caveats {
+        let _ = writeln!(out, "> {caveat}\n");
+    }
+}
+
 fn write_finding(out: &mut String, index: usize, reported: &ReportedFinding) {
     let f = &reported.finding;
     let _ = writeln!(out, "### {index}. {}\n", f.title);
@@ -220,6 +279,10 @@ fn write_finding(out: &mut String, index: usize, reported: &ReportedFinding) {
             let _ = writeln!(out, "{line}");
         }
         let _ = writeln!(out);
+    }
+
+    if let Some(poc) = &reported.reproduction {
+        render_reproduction(out, poc);
     }
 
     let _ = writeln!(out, "**Evidence**\n");

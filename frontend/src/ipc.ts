@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 7;
+export const EXPECTED_RPC_CONTRACT_VERSION = 8;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -416,6 +416,56 @@ export const addObject = (declaration: {
 
 export const removeObject = (id: string): Promise<ObjectView[]> =>
   invoke<ObjectView[]>("object_remove", { id });
+
+/* ------------------------------------------------------------------ *
+ * Proof of concept
+ * ------------------------------------------------------------------ */
+
+/** One step of a reproduction. */
+export interface StepView {
+  number: number;
+  /** What to do, and who to do it as. */
+  heading: string;
+  /** The exchange it came from. */
+  request: string;
+  /** The request as bytes, with credentials replaced. */
+  raw: string | null;
+  /** A shell command, when one can express the request. */
+  curl: string | null;
+  /** Why there is no command, when there is not. */
+  curl_refused: string | null;
+  expect: string | null;
+}
+
+/** A value the reader supplies before running the steps. */
+export interface PlaceholderView {
+  token: string;
+  header: string;
+  identity: string | null;
+  bytes: number;
+}
+
+/**
+ * A reproduction compiled from a finding's evidence.
+ *
+ * Carries no credential. Every one was replaced by a placeholder when the
+ * reproduction was compiled, not when it was rendered — so nothing downstream,
+ * including this payload, can carry one.
+ */
+export interface ReproductionView {
+  finding: string;
+  title: string;
+  confidence: string;
+  /** Whether any step can actually be run. */
+  runnable: boolean;
+  summary: string;
+  steps: StepView[];
+  placeholders: PlaceholderView[];
+  caveats: string[];
+}
+
+export const findingReproduction = (id: string): Promise<ReproductionView> =>
+  invoke<ReproductionView>("finding_reproduction", { id });
 
 /* ------------------------------------------------------------------ *
  * Passive scanning

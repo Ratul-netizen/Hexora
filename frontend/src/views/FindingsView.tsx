@@ -3,13 +3,129 @@ import { useCallback, useEffect, useState } from "react";
 import {
   describeError,
   findingDetail,
+  findingReproduction,
   listFindings,
   triageFinding,
   type FindingDetail,
   type FindingRow,
+  type ReproductionView,
 } from "../ipc";
 
 const PAGE_SIZE = 200;
+
+/**
+ * The finding, as steps somebody can run.
+ *
+ * Compiled on demand rather than with the finding: most of the time a reader wants
+ * the claim and the evidence, and building a reproduction means reading every cited
+ * exchange back out of the project.
+ *
+ * Every credential is a placeholder — replaced when the reproduction was compiled,
+ * not when it is displayed, so this component could not show one if it tried.
+ */
+function Reproduce({
+  id,
+  onOpenExchange,
+}: {
+  id: string;
+  onOpenExchange: (id: string) => void;
+}) {
+  const [poc, setPoc] = useState<ReproductionView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Cleared when the selected finding changes, so the panel never shows one
+  // finding's steps under another's title.
+  useEffect(() => {
+    setPoc(null);
+    setError(null);
+  }, [id]);
+
+  async function compile() {
+    setBusy(true);
+    setError(null);
+    try {
+      setPoc(await findingReproduction(id));
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (poc === null) {
+    return (
+      <div className="row wrap">
+        <button onClick={() => void compile()} disabled={busy}>
+          {busy ? "Compiling…" : "Compile a reproduction"}
+        </button>
+        <span className="muted small">
+          Built from the exchanges this finding cites, with every credential replaced
+          by a placeholder.
+        </span>
+        {error && <p className="error-text">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="poc">
+      {poc.placeholders.length > 0 && (
+        <>
+          <p className="muted small">
+            Supply these first — Hexora never puts a real credential in a
+            reproduction:
+          </p>
+          <ul className="delta">
+            {poc.placeholders.map((placeholder) => (
+              <li key={placeholder.token}>
+                <span className="mono">{placeholder.token}</span>{" "}
+                {placeholder.identity ? `${placeholder.identity}'s ` : ""}
+                {placeholder.header} header, {placeholder.bytes} bytes as sent
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <ol className="claims">
+        {poc.steps.map((step) => (
+          <li key={step.number}>
+            {/* Numbered in the text: `.claims` drops list markers, and a
+                reproduction whose steps read as an unordered pile is one somebody
+                runs in the wrong order. */}
+            <p>
+              <strong>{step.number}.</strong> {step.heading}
+            </p>
+            {step.curl && <pre className="body">{step.curl}</pre>}
+            {step.curl_refused && (
+              /* Said rather than omitted: an absent command with no explanation
+                 reads as a missing feature rather than as the point. */
+              <p className="muted small">
+                No curl equivalent — {step.curl_refused}. Send the raw form below.
+              </p>
+            )}
+            {step.raw && <pre className="body">{step.raw}</pre>}
+            {step.expect && (
+              <p className="muted small">
+                <strong>Expect:</strong> {step.expect}
+              </p>
+            )}
+            <button className="link" onClick={() => onOpenExchange(step.request)}>
+              open the exchange
+            </button>
+          </li>
+        ))}
+      </ol>
+
+      {poc.caveats.map((caveat, index) => (
+        <p key={index} className="notice">
+          {caveat}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 const TRIAGE_STATES = [
   "new",
@@ -231,6 +347,8 @@ function Detail({
 
       <h3>Reproduction</h3>
       <pre className="body">{detail.reproduction}</pre>
+
+      <Reproduce id={detail.row.id} onOpenExchange={onOpenExchange} />
 
       <h3>Evidence</h3>
       {detail.evidence.length === 0 ? (

@@ -255,6 +255,71 @@ fn omissions(out: &mut String, report: &Report) {
     );
 }
 
+/// The runnable reproduction.
+///
+/// Every value that came from the application — a header name, a URL, a reason — is
+/// escaped on the way in. The page carries no script and loads nothing, so a
+/// reproduction block is text in a `<pre>` and cannot become anything else.
+fn render_reproduction(out: &mut String, poc: &crate::poc::Reproduction) {
+    let _ = writeln!(out, "<p><strong>Run it</strong></p>");
+
+    if !poc.placeholders.is_empty() {
+        out.push_str(
+            "<p>Supply these first — Hexora never puts a real credential in a \
+             report.</p><ul>",
+        );
+        for placeholder in &poc.placeholders {
+            let who = placeholder
+                .identity
+                .as_deref()
+                .map(|identity| format!("{}&rsquo;s ", escape(identity)))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "<li><code>{}</code> — {}<code>{}</code> header ({} bytes as sent)</li>",
+                escape(&placeholder.token),
+                who,
+                escape(&placeholder.header),
+                placeholder.bytes
+            ));
+        }
+        out.push_str("</ul>");
+    }
+
+    out.push_str("<ol class=\"steps\">");
+    for step in &poc.steps {
+        out.push_str(&format!("<li><p>{}</p>", escape(&step.heading())));
+
+        match &step.curl {
+            crate::poc::Curl::Command { command } => {
+                out.push_str(&format!("<pre><code>{}</code></pre>", escape(command)));
+            }
+            crate::poc::Curl::Inexpressible { reason } => {
+                out.push_str(&format!(
+                    "<p class=\"note\">No <code>curl</code> equivalent — {}. Send the \
+                     request quoted under Evidence, byte for byte.</p>",
+                    escape(reason)
+                ));
+            }
+            crate::poc::Curl::Unavailable => {
+                out.push_str("<p class=\"note\">The project no longer holds this exchange.</p>");
+            }
+        }
+
+        if let Some(expect) = &step.expect {
+            out.push_str(&format!(
+                "<p><strong>Expect:</strong> {}</p>",
+                escape(expect)
+            ));
+        }
+        out.push_str("</li>");
+    }
+    out.push_str("</ol>");
+
+    for caveat in &poc.caveats {
+        out.push_str(&format!("<p class=\"note\">{}</p>", escape(caveat)));
+    }
+}
+
 fn write_finding(out: &mut String, index: usize, reported: &ReportedFinding) {
     let f = &reported.finding;
     let word = severity_word(f.severity);
@@ -296,6 +361,10 @@ fn write_finding(out: &mut String, index: usize, reported: &ReportedFinding) {
     if !f.reproduction.trim().is_empty() {
         let _ = writeln!(out, "<p><strong>Reproduction</strong></p>");
         let _ = writeln!(out, "<pre><code>{}</code></pre>", escape(&f.reproduction));
+    }
+
+    if let Some(poc) = &reported.reproduction {
+        render_reproduction(out, poc);
     }
 
     let _ = writeln!(out, "<p><strong>Evidence</strong></p>");

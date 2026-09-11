@@ -332,6 +332,36 @@ Built as described, with three decisions worth recording:
 - **`IdentifierCandidate` has no owner field**, and neither does its table. Security
   invariant 10 records this, with the tests that hold it.
 
+**M12.9 — Proof-of-concept compilation** · DONE
+
+The last mile. A finding already knows the exchanges behind it; this turns them into
+something a triager can run.
+
+```text
+Finding evidence          →  Steps
+Evidence::Comparison         1. the control request, as User A
+  baseline, variant          2. the same request, as User B
+  difference                    Expect: User B received acct-1000
+```
+
+Built from stored evidence and nothing else: a step that cites an exchange the project
+has lost says so rather than inventing a request. Credentials become placeholders
+named after the identity, the same one in every step, so a reader supplies two values
+and runs the whole thing — and can see that the two steps were sent as different
+people, which is the finding.
+
+`curl` where curl can express the request, and a stated reason where it cannot. A
+command that quietly recomputed a deliberately wrong `Content-Length` would undo
+`RequestSource::Raw` at the last step.
+
+Reproductions reach the report for established findings only. A runnable block on an
+unverified claim is the thing most likely to be forwarded without the sentence that
+qualified it.
+
+Deliberately not built: a reproduction that *runs itself*. Hexora can already re-run a
+request — that is the repeater — and a button that replays an exploit against a client
+system on a reader's behalf is a different feature with a different threat model.
+
 **M12.8 — Engagement snapshots** · DONE
 
 An engagement is not one moment. A consultant tests, the client fixes, the consultant

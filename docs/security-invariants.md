@@ -534,6 +534,63 @@ check ran and raised nothing* from *the check never ran*, and it is why
 
 ---
 
+## 13. A proof of concept carries placeholders, never credentials
+
+A reproduction is the most-forwarded artefact an engagement produces. It goes into a
+ticket, an email, a chat channel and eventually a screenshot, and it is the one
+document whose whole purpose is to be run by somebody who was not there.
+
+So it never carries a session:
+
+```text
+sent:        Authorization: Bearer eyJhbGciOi...
+reproduced:  Authorization: Bearer <USER_A_AUTHORIZATION>
+```
+
+The scheme stays, so a reader can see what kind of value the header wants. The
+credential is replaced with a token named after the identity the request was sent as,
+and **the same identity gets the same token in every step** — so a reader supplies two
+values and runs the whole thing, and can see at a glance that step 1 and step 2 were
+sent as different people, which is usually the entire finding.
+
+The recorded length is the credential's, not the header value's: a reader who pastes a
+40-byte token where a 200-byte one belongs should be able to notice, and a count that
+included `Bearer ` would be measuring the wrong thing.
+
+**Compiled from evidence, never invented.** Every step points at a `RequestId` the
+project holds, and the bytes come from that stored request. If a citation can no
+longer be resolved, the step says so and stops — a reproduction built from a guess
+fails when run, and the reader concludes the finding was wrong rather than that the
+evidence was missing.
+
+**`curl` is offered only when curl can do it.** curl recomputes `Content-Length`,
+normalises line endings, and cannot express a header block containing a bare LF —
+which are precisely the requests a smuggling or parser-differential finding is
+*about*. `Curl::Inexpressible` is therefore a first-class outcome carrying a reason,
+and the raw form is always present. Emitting a command that silently sent something
+else would undo `RequestSource::Raw` at the last step.
+
+**A lead does not get a runnable block.** The report compiles a reproduction for
+findings that are actionable and for no others. A script attached to an unverified
+claim is the thing most likely to be forwarded without the sentence that qualified it,
+and `hexora poc` prints the qualification on the artefact itself when asked for one
+anyway.
+
+**Tests.** `core/report/src/poc.rs` —
+`no_credential_survives_into_a_reproduction`,
+`one_identity_gets_one_placeholder_across_every_step`,
+`a_placeholder_measures_the_credential_and_not_the_scheme`,
+`curl_is_refused_with_a_reason_when_it_would_send_something_else`,
+`a_request_the_project_no_longer_holds_is_stated_rather_than_invented`,
+`a_lead_says_on_the_artefact_that_it_is_a_lead`,
+`a_shell_quoted_value_cannot_escape_its_quotes`,
+`a_non_utf8_body_is_described_rather_than_mangled`;
+`core/report/src/lib.rs` —
+`an_established_finding_carries_a_runnable_reproduction_and_a_lead_does_not`,
+`a_rendered_reproduction_carries_placeholders_rather_than_credentials`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

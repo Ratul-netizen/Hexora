@@ -94,6 +94,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | OAST / Collaborator | ✅ | ⚠️ hosted | PLANNED M16 | Self-hostable is a selling point |
 | Findings with Markdown + export | ⚠️ | ✅ | **IMPLEMENTED M12.3** | |
 | Finding says which check and version produced it | ⚠️ | — | **IMPLEMENTED M13.2** | Printed in the report, and what lets a retest tell a fix from a rewritten check |
+| Runnable proof of concept generated from evidence | ⚠️ manual | ⚠️ manual | **IMPLEMENTED M12.9** | Built from the stored exchanges, with credentials as named placeholders. `curl` where curl can express the request, and a stated reason where it cannot |
 
 ## 5. Extensibility
 

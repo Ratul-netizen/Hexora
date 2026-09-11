@@ -29,6 +29,8 @@ pub struct ReportArgs<'a> {
     pub actionable: bool,
     /// Include credentials in the quoted traffic.
     pub show_secrets: bool,
+    /// Leave the runnable reproductions out.
+    pub no_poc: bool,
     /// How much of each body to quote.
     pub excerpt_bytes: usize,
     /// The global `--json` flag, which selects the JSON render when `--format` was
@@ -58,6 +60,7 @@ pub fn run(args: ReportArgs<'_>) -> Result<()> {
         } else {
             RedactionPolicy::SensitiveHeaders
         },
+        proof_of_concept: !args.no_poc,
         generated_at: chrono::Utc::now(),
     };
 
@@ -153,6 +156,7 @@ mod tests {
             severity: None,
             actionable: false,
             show_secrets: false,
+            no_poc: false,
             excerpt_bytes: 2048,
             json: false,
         })
@@ -181,6 +185,7 @@ mod tests {
             severity: None,
             actionable: false,
             show_secrets: false,
+            no_poc: false,
             excerpt_bytes: 2048,
             json: false,
         })
@@ -202,6 +207,7 @@ mod tests {
             severity: None,
             actionable: false,
             show_secrets: false,
+            no_poc: false,
             excerpt_bytes: 2048,
             json: false,
         })

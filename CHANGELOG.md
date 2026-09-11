@@ -508,6 +508,60 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M12.9, proof-of-concept compilation
+
+The last mile of an engagement. A claim in a report invites an argument; the two
+requests that produced it, in a form a triager can paste into a terminal, end one.
+
+```text
+Finding evidence             →  Steps
+Evidence::Comparison            1. the control request, as User A
+  baseline, variant             2. the same request, as User B
+  difference                       Expect: User B received acct-1000
+```
+
+**Compiled from evidence, never invented.** Every step names a `RequestId` the project
+holds and the bytes come from that stored request. A citation the project can no longer
+resolve is printed as a gap — a reproduction built from a guess fails when run, and the
+reader concludes the finding was wrong rather than that the evidence was missing.
+
+**Credentials are placeholders, always.**
+
+```text
+sent:        Authorization: Bearer eyJhbGciOi...
+reproduced:  Authorization: Bearer <USER_A_AUTHORIZATION>
+```
+
+The scheme stays so a reader can see what kind of value belongs there; the credential
+does not. The same identity gets the same token in every step, so a reader supplies two
+values and runs the whole thing — and can see at a glance that step 1 and step 2 went
+out as different people, which is usually the entire finding. The recorded length is
+the credential's rather than the whole header value's, so a reader who pastes the wrong
+thing can notice. New security invariant 13.
+
+**`curl` only where curl can do it.** Four conditions rule it out — a non-UTF-8 body,
+two `Content-Length` headers, a `Content-Length` that disagrees with the body, and a
+bare-LF header block — and each is a thing a real finding is sometimes about.
+`Curl::Inexpressible` carries the reason and the raw form is always present. A command
+that quietly recomputed a deliberately wrong length would undo `RequestSource::Raw` at
+the last step.
+
+- `hexora poc <project> <finding> [--format raw|curl|markdown] [--save FILE]`.
+- The report carries a **Run it** block for established findings, above the evidence:
+  a triager who can reproduce the behaviour in thirty seconds rarely needs the
+  transcripts, and one who cannot is exactly the one who will. `--no-poc` leaves them
+  out.
+- A **Compile a reproduction** panel on a finding in the desktop window, with a link
+  from every step to the exchange behind it.
+- Reproductions are compiled for actionable findings only. A runnable block attached to
+  an unverified claim is the thing most likely to be forwarded without the sentence
+  that qualified it; `hexora poc` prints that sentence on the artefact when asked for
+  one anyway.
+
+Verified against the IDOR demo end to end: the generated commands were run with the
+real tokens substituted, and User B's token returned User A's account — the finding
+reproduced from its own proof of concept.
+
 ### Added — M13.2, the passive scanner
 
 The first scanner, built on M13.1 and deliberately boring: many observations, a few

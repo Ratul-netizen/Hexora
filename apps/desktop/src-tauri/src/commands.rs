@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M13.2",
+        milestone: "M12.9",
     }
 }
 
@@ -841,6 +841,104 @@ pub fn object_add(
         store.put(declaration).map_err(fail)?;
     }
     objects_list(state)
+}
+
+// ---------------------------------------------------------------------------
+// Proof of concept
+// ---------------------------------------------------------------------------
+
+/// One step of a reproduction, as the window shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct StepView {
+    pub number: usize,
+    /// What to do, and who to do it as.
+    pub heading: String,
+    /// The exchange it came from, for opening in History.
+    pub request: String,
+    /// The request as bytes, with credentials replaced.
+    pub raw: Option<String>,
+    /// A shell command, when one can express the request.
+    pub curl: Option<String>,
+    /// Why there is no command, when there is not.
+    pub curl_refused: Option<String>,
+    /// What the reader should see.
+    pub expect: Option<String>,
+}
+
+/// A value the reader supplies before running the steps.
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaceholderView {
+    pub token: String,
+    pub header: String,
+    pub identity: Option<String>,
+    pub bytes: usize,
+}
+
+/// A reproduction compiled from a finding's evidence.
+///
+/// Carries no credential: every one was replaced by a placeholder when the
+/// reproduction was compiled, not when it was rendered.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReproductionView {
+    pub finding: String,
+    pub title: String,
+    pub confidence: String,
+    /// Whether any step can actually be run.
+    pub runnable: bool,
+    pub summary: String,
+    pub steps: Vec<StepView>,
+    pub placeholders: Vec<PlaceholderView>,
+    pub caveats: Vec<String>,
+}
+
+/// Compiles a finding into steps somebody can run.
+///
+/// Reads the project and sends nothing — `poc::reproduce` takes a project and a
+/// finding, and there is no transport in its signature.
+#[tauri::command]
+pub fn finding_reproduction(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<ReproductionView> {
+    let project = open(&state)?;
+    let finding_id: hexora_types::ids::FindingId = id.parse().map_err(fail)?;
+    let finding = project.findings().get(finding_id).map_err(fail)?;
+    let poc = hexora_report::poc::reproduce(&project, &finding).map_err(fail)?;
+
+    Ok(ReproductionView {
+        finding: poc.finding.to_string(),
+        title: poc.title.clone(),
+        confidence: confidence_word(poc.confidence).to_string(),
+        runnable: poc.is_runnable(),
+        summary: poc.summary.clone(),
+        steps: poc
+            .steps
+            .iter()
+            .map(|step| StepView {
+                number: step.number,
+                heading: step.heading(),
+                request: step.request.to_string(),
+                raw: step.raw.clone(),
+                curl: step.curl.command().map(str::to_string),
+                curl_refused: match &step.curl {
+                    hexora_report::poc::Curl::Inexpressible { reason } => Some(reason.clone()),
+                    _ => None,
+                },
+                expect: step.expect.clone(),
+            })
+            .collect(),
+        placeholders: poc
+            .placeholders
+            .iter()
+            .map(|placeholder| PlaceholderView {
+                token: placeholder.token.clone(),
+                header: placeholder.header.clone(),
+                identity: placeholder.identity.clone(),
+                bytes: placeholder.bytes,
+            })
+            .collect(),
+        caveats: poc.caveats.clone(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1670,6 +1768,7 @@ pub fn report_render(
             } else {
                 hexora_types::redact::RedactionPolicy::SensitiveHeaders
             },
+            proof_of_concept: true,
             generated_at: chrono::Utc::now(),
         },
     )

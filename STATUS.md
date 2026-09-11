@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M13.2 (the passive scanner)
+- **Last updated:** M12.9 (proof-of-concept compilation)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -37,8 +37,14 @@ milestone.
 | **M12.8** — Engagement snapshots | A retest can finally answer *what changed*. `hexora snapshot take` records the project as it stood — claims, scope, identities, declared objects — as copies rather than references, so a later run cannot rewrite its own past. `snapshot diff` compares two moments, or one moment against the project as it stands, and it never says *fixed*: a claim that stopped appearing is reported as gone **with the reason**, and only one of the three reasons is about the application at all. A claim nothing re-tested between the two is listed as standing-but-untested rather than counted as unchanged, which is the failure a real retest run exposed. Credentials never reach a snapshot |
 | **M13.1** — The verification framework | A detector's suspicion and a finding's claim are different types, and the compiler keeps them apart: `FindingStore` takes a `Verified`, which only a `Verification` produces, so a check that is merely suspicious cannot record a claim — the call does not compile. Confidence is derived from what the experiment showed rather than chosen by the detector, which puts the ladder from lead to confirmed in one place instead of one per check. A verifier receives a `Lab` — send this as this principal — not a transport, so scope and attribution cannot be forgotten. M12.1 and M12.5 were rewritten onto it in the same change, with identical live results. `hexora detectors` says what this build looks for and which of it sends |
 | **M13.2** — The passive scanner | Six checks over traffic the project already holds, and nothing sent: `scan(&Project, &Selection)` has nowhere to put a transport, so "passive" is a property of the signature. Three products kept apart — an informational observation is listed and never filed, a reportable one becomes a *lead*, and a hypothesis stops until an experiment settles it. A check does not choose its own verification, so nothing passive can state itself above a lead. Five hundred endpoints missing one header is one finding citing three exchanges. A run records which detectors ran and at which versions, including the ones that saw nothing — which is the row that turns silence into a fact |
+| **M12.9** — Proof of concept | A finding compiles into steps somebody can run, built from the exchanges it already cites and nothing else — a citation the project has lost is printed as a gap rather than guessed at. Credentials become placeholders named after the identity, the same one in every step, so a reader supplies two values and runs the whole thing. `curl` where curl can express the request, and a stated reason where it cannot: a command that recomputed a deliberately wrong `Content-Length` would undo raw mode at the last step. `hexora poc`, a **Run it** block in the report for established findings, and a panel in the window |
 
 ## Next
+
+**The evidence spine is now end to end.** Traffic becomes an observation, an
+observation becomes a hypothesis, a hypothesis becomes a verification, a verification
+becomes a finding — and a finding now becomes something a triager can run. Each arrow
+is a thing somebody can check, which is the whole product.
 
 **M13.3, the active scheduler, is not implemented.** Nothing in this build sends a
 request that a tester did not ask for: the authorization checks run when `hexora
@@ -83,6 +89,12 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
+- **Structural differential analysis.** The comparison engine can say two responses
+  are 87% alike; it cannot yet say *which field* differed. "`$.email` was present for
+  User A and absent for User B" is a far stronger thing to put in front of a triager
+  than a percentage, and it is what turns a similarity score into a claim. Normalise
+  the structure first, then diff by path, then suppress the dynamic fields — recording
+  each normalisation rather than silently applying it.
 - **M13.3 — the active scheduler.** One queue, one `ScopeGuard`, bounded concurrency
   — and the first consumer of the hypotheses the passive pass now produces and cannot
   settle. Origin reflection is the worked example waiting for it: a second request
