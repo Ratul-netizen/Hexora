@@ -300,6 +300,34 @@ display, and the HTML report is still shown as text rather than rendered.
 M1.4 (connection pooling) stays deferred: the fuzzer needs it, the proxy does not, and
 a pool that mis-frames one response corrupts the next.
 
+### Where to pick up: a programme profile
+
+M14.2 attached the header a bug bounty programme requires. The next thing missing is
+the rest of the programme's terms, and it is the thing that decides whether a run
+against a real target is usable at all.
+
+Wolt's programme — the intended first real target — declares most of what Hexora's
+passive scanner currently produces to be **out of scope as a finding class**: CORS
+misconfiguration without proven impact, missing security headers, missing cookie flags,
+banner grabbing and version disclosure, username and email enumeration, and the absence
+of rate limits. A run that files forty of those is a run whose output gets skipped, and
+skipped output is how a real finding gets missed.
+
+So: a **programme profile** — scope hosts, attached headers, and the finding classes
+this programme will not accept — filtering at the source rather than in a reader's head.
+Then a dry run against one in-scope host, so what would be sent can be read before it is
+sent.
+
+What is worth running against that programme once the profile exists: `authz.scheduled`,
+`auth.enforcement`, `redirect.destination` and the intruder — against the researcher's
+own test entities only. The programme names brute force and mass creation of entities as
+forbidden, which is a constraint on the scheduler and on `hexora fuzz`, not a suggestion.
+
+**Stealth is not a goal, and should never become one.** The header exists to make
+research traffic *identifiable*. A programme that cannot tell a researcher's requests
+from an attacker's is entitled to treat them the same way, and evading detection while
+testing under somebody's authorization breaches the terms that authorization came with.
+
 Full plan: [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Open decisions
