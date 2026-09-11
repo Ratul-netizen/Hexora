@@ -44,7 +44,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M14.3. The proxy, HTTP/1.x engine with TLS, \
+                  Development status: M14.4. The proxy, HTTP/1.x engine with TLS, \
                   projects, traffic capture, the repeater, authorization testing, the \
                   passive scanner, the active scheduler, the intruder, findings and \
                   reports all work. There is no crawler: Hexora tests the traffic it \
@@ -156,6 +156,18 @@ enum Command {
         /// connection between Hexora and the target, not the one your browser sees.
         #[arg(short = 'k', long)]
         insecure_upstream: bool,
+
+        /// Put this project's attached headers on in-scope requests your browser makes.
+        ///
+        /// A bug bounty programme that requires `X-HackerOne-Research` requires it on
+        /// your traffic, not only on your scanner's — and while hunting, your browser
+        /// is most of your traffic.
+        ///
+        /// Applies to declared hosts only. Everything else you browse is untouched,
+        /// because broadcasting your researcher identity to your own mail provider is
+        /// not what you turned this on for. Needs --project, a header, and a scope.
+        #[arg(long, requires = "project")]
+        attach_headers: bool,
     },
 
     /// Manage the interception certificate authority.
@@ -1323,6 +1335,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             exempt,
             only,
             insecure_upstream,
+            attach_headers,
         } => proxy::run(proxy::ProxyArgs {
             project: project.as_deref(),
             in_scope_only: *in_scope_only,
@@ -1331,6 +1344,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             exempt,
             only,
             insecure_upstream: *insecure_upstream,
+            attach_headers: *attach_headers,
         }),
         Command::Ca {
             dir,
@@ -1394,14 +1408,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M14.3",
+            "milestone": "M14.4",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M14.3 (the programme profile)");
+        println!("  milestone:               M14.4 (the header on your own traffic)");
     }
 }
 
@@ -1544,7 +1558,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M14.3"),
+            help.contains("M14.4"),
             "users must not mistake this for a finished tool"
         );
     }

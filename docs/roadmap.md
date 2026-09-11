@@ -729,7 +729,8 @@ repeater and the scanner, and what an engagement is conducted under.
 M14.1  The intruder            one request, a payload list, responses grouped by behaviour  ✔
 M14.2  Attached headers        what a programme requires on every request  ✔
 M14.3  Programme profile       which finding classes the programme will accept  ✔
-M14.4  Programmes in the window  the desktop UI knows a class was excluded
+M14.4  Headers on your own traffic  the proxy identifies in-scope browsing  ✔
+M14.5  Programmes in the window    the desktop UI knows a class was excluded
 ```
 
 > **The number was reused, and the original M14 is gone.** M14 first read "Active

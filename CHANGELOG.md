@@ -508,6 +508,57 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M14.4, the header on your own traffic
+
+M14.2 put a programme's required headers on every request *Hexora* sends. It did
+nothing for the requests a **browser** makes, and during a bug bounty engagement those
+are the overwhelming majority. Wolt's rule is "add the following headers to requests" —
+not "to your scanner's requests". As shipped, a day of manual hunting would have
+breached the terms on every request while the tester believed they were covered. That is
+the same failure as the silent no-op fixed in M14.3, one layer up.
+
+`hexora proxy --project DIR --attach-headers`, built on the M2.4 interceptor seam.
+
+**Rewriting a browser's traffic is not a small thing**, so it is bounded three ways and
+each bound is the point:
+
+- **Declared hosts only.** A tester's browser goes to their own mail, their own bank, an
+  unrelated search. Attaching `X-HackerOne-Research: <username>` to all of it would
+  broadcast a real person's researcher identity to every site they visit, from a tool
+  they turned on for one engagement. An empty scope therefore attaches to **nothing** —
+  the same reading `Scope` gives everywhere else, and the safe one.
+- **Opt in, and announced.** Off unless asked for, and the proxy prints what it will add
+  before the first request. A proxy that quietly edits traffic is a proxy whose captures
+  cannot be trusted.
+- **Refused at startup when it would be a no-op.** No header, or no scope, and the proxy
+  will not start. The failure being guarded against is silent — a session of hunting
+  whose traffic was supposed to identify the researcher and did not — so it is caught
+  before the listener opens rather than discovered in a rejected report.
+
+Recorded as sent: the capture observer runs after the interceptor, so history holds what
+actually went out rather than what the browser originally wrote.
+
+**And now one rule, in every door.** Attached headers were previously applied by the
+repeater to *any* host. They name a real person, so a resend of a captured request to
+somebody else's server would have put that name in a stranger's logs. The repeater now
+applies the same scope rule the proxy does, `hexora repeat --dry-run` says plainly when
+it is **not** attaching, and a test holds the line.
+
+Verified on the wire: through the proxy, `httpbin.org` (in scope) received
+`X-Hackerone-Research: wahid_ratul` and `postman-echo.com` (out of scope) did not.
+
+### Fixed — every repeat was reported as out of scope
+
+`hexora repeat` built its scope guard with an **empty** scope, so
+`ScopeGuard::decide` had nothing to compare against and every resend printed *"Note:
+this target is not in the project scope"* — including the ones that were in it. A
+warning that fires on everything is a warning nobody reads, which is worse than not
+having one.
+
+It uses the project's real scope now. Nothing is newly blocked: a repeater send is
+human-driven, so an out-of-scope target is still flagged-and-sent rather than refused —
+the guard simply has to know the scope to say which one it is looking at.
+
 ### Added — M14.3, the programme profile
 
 Scope answers *which systems*. This answers the other question a bug bounty programme

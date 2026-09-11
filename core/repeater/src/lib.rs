@@ -366,10 +366,16 @@ impl<T: HttpTransport> Repeater<T> {
         }
     }
 
-    /// Puts these headers on every structured request this repeater sends.
+    /// Puts these headers on every structured request this repeater sends **to a
+    /// host the project declared**.
     ///
     /// Applied before the identity's credential, so a programme header cannot silently
     /// displace the thing that decides who the request is from.
+    ///
+    /// **In scope only.** These headers name a real person, and repeating a captured
+    /// request to an undeclared host would put that name in a stranger's logs. The
+    /// proxy applies the same rule to browser traffic, and there is deliberately no
+    /// door that skips it.
     ///
     /// **Not applied to a raw request**, for the same reason a credential is not: raw
     /// mode is byte-exact and rewriting a header block the tester wrote deliberately
@@ -505,13 +511,23 @@ impl<T: HttpTransport> Repeater<T> {
                 (decision, self.transport.send_raw(raw, options).await?)
             }
             RequestSource::Structured(mut request) => {
-                // The programme's header first, the identity's credential second: the
-                // credential decides who the request is from and must win any
-                // collision.
-                for header in &self.attached {
-                    request
-                        .headers
-                        .set(&header.name, header.value_lossy().into_owned());
+                // Declared hosts only. A project's attached header names a real person
+                // — `X-HackerOne-Research: <username>` is the usual shape — and a
+                // repeat of a captured request to somebody else's server would stamp
+                // that name on traffic they never agreed to identify themselves to.
+                //
+                // Asked here rather than trusted from the caller, so the rule is the
+                // same one the proxy applies and there is no door that skips it: in
+                // scope, attached; out of scope, not.
+                if self.transport.decide(&request, &options) == ScopeDecision::Allowed {
+                    // The programme's header first, the identity's credential second:
+                    // the credential decides who the request is from and must win any
+                    // collision.
+                    for header in &self.attached {
+                        request
+                            .headers
+                            .set(&header.name, header.value_lossy().into_owned());
+                    }
                 }
                 if let Some(identity) = sender.identity {
                     identity.authenticate(&mut request.headers);
@@ -1046,6 +1062,30 @@ mod tests {
 
         let raw = String::from_utf8(repeater.draft_from(sent.id).unwrap().to_raw()).unwrap();
         assert!(raw.contains("X-HackerOne-Research: wahid_ratul"), "{raw:?}");
+    }
+
+    #[tokio::test]
+    async fn an_attached_header_never_reaches_a_host_nobody_declared() {
+        // The header names a real person. Repeating a captured request to somebody
+        // else's server would put that name in a stranger's logs, from a tool the
+        // tester turned on for one engagement. The proxy applies the same rule to
+        // browser traffic, and there is deliberately no door that skips it.
+        let (repeater, _store, _project) =
+            repeater(Scope::new().include(ScopeRule::host("wolt.com")));
+        let repeater = repeater.attaching(vec![Header::new("X-HackerOne-Research", "wahid_ratul")]);
+
+        // `service()` is example.com, which this scope does not include.
+        let sent = repeater
+            .send(&Draft::new(HttpRequest::get(service(), "/")))
+            .await
+            .unwrap();
+        assert_eq!(sent.decision, ScopeDecision::AllowedOutOfScope);
+
+        let raw = String::from_utf8(repeater.draft_from(sent.id).unwrap().to_raw()).unwrap();
+        assert!(
+            !raw.contains("wahid_ratul"),
+            "a researcher's name reached an undeclared host: {raw:?}"
+        );
     }
 
     #[tokio::test]

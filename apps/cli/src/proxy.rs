@@ -7,6 +7,7 @@ use std::sync::Arc;
 use hexora_engine::guard::ScopeDecision;
 use hexora_engine::transport::Exchange;
 use hexora_http::{TcpTransport, TlsConfig};
+use hexora_proxy::attach::Attaching;
 use hexora_proxy::{
     trust, CertificateAuthority, ExchangeObserver, Fanout, InterceptionPolicy, ProjectCapture,
     ProxyConfig, ProxyServer, TrustState,
@@ -23,6 +24,8 @@ pub struct ProxyArgs<'a> {
     pub exempt: &'a [String],
     pub only: &'a [String],
     pub insecure_upstream: bool,
+    /// Put the project's attached headers on in-scope requests the browser makes.
+    pub attach_headers: bool,
 }
 
 /// Options for `hexora ca`.
@@ -112,6 +115,42 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         observers.push(Box::new(capture));
     }
 
+    // Worked out before the listener opens, so a tester who asked for this and cannot
+    // have it is told now rather than after a session of traffic that did not carry it.
+    let attach = match (&project, args.attach_headers) {
+        (Some(project), true) => {
+            let headers = project.settings().attached_headers()?;
+            if headers.is_empty() {
+                return Err(HexoraError::invalid_input(
+                    "--attach-headers",
+                    "this project has no attached headers, so there is nothing to put on \
+                     your browser's requests. Add one with `hexora header add`",
+                ));
+            }
+            let scope = project.settings().scope()?;
+            if scope.is_empty() {
+                // An empty scope matches nothing, so this would silently do nothing at
+                // all — and "silently does nothing" is the exact failure mode that makes
+                // a researcher think their traffic is identified when it is not.
+                return Err(HexoraError::invalid_input(
+                    "--attach-headers",
+                    "this project has no scope, and headers are attached only to hosts \
+                     the project declared — otherwise every site you browse would be \
+                     told who you are. Declare the programme's hosts with `hexora scope \
+                     add`",
+                ));
+            }
+            Some((headers, Arc::new(scope)))
+        }
+        (None, true) => {
+            return Err(HexoraError::invalid_input(
+                "--attach-headers",
+                "the headers come from a project, so this needs --project DIR",
+            ));
+        }
+        _ => None,
+    };
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -128,6 +167,15 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
             ca,
         )
         .await?;
+
+        let server = match &attach {
+            Some((headers, scope)) => server.with_interceptor(Arc::new(Attaching::new(
+                headers.clone(),
+                scope.clone(),
+                Arc::new(hexora_proxy::hook::PassThrough),
+            ))),
+            None => server,
+        };
 
         let addr = server.local_addr()?;
         eprintln!("Hexora proxy listening on {addr}");
@@ -153,6 +201,17 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
             None => {
                 eprintln!("NOT recording: pass --project DIR to keep what you capture.");
             }
+        }
+        if let Some((headers, _)) = &attach {
+            // Said before the first request, because a proxy that edits traffic without
+            // announcing it is a proxy whose captures cannot be trusted.
+            eprintln!("Adding to every IN-SCOPE request your browser makes:");
+            for header in headers {
+                eprintln!("  {}: {}", header.name, header.value_lossy());
+            }
+            eprintln!("  Out-of-scope traffic is untouched, so nothing else you browse");
+            eprintln!("  is told who you are. History records what was actually sent.");
+            eprintln!();
         }
         eprintln!();
         eprintln!("  + in scope   ? out of scope   - refused");
@@ -443,6 +502,77 @@ mod tests {
         assert!(dir.to_string_lossy().contains(".hexora"), "{dir:?}");
     }
 
+    /// A project with a scope and a header, as a real engagement would have.
+    fn engagement(headers: bool, scope: bool) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let project = hexora_storage::Project::open(dir.path()).unwrap();
+        project
+            .metadata()
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO project (id, name, created_at, updated_at)
+                 VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        if headers {
+            project
+                .settings()
+                .set_attached_headers(&[hexora_types::http::Header::new(
+                    "X-HackerOne-Research",
+                    "wahid_ratul",
+                )])
+                .unwrap();
+        }
+        if scope {
+            project
+                .settings()
+                .set_scope(&Scope::new().include(hexora_types::scope::ScopeRule::host("wolt.com")))
+                .unwrap();
+        }
+        dir
+    }
+
+    fn attaching_run(dir: &std::path::Path) -> HexoraError {
+        run(ProxyArgs {
+            project: Some(dir),
+            in_scope_only: false,
+            listen: "127.0.0.1:0",
+            ca_dir: None,
+            exempt: &[],
+            only: &[],
+            insecure_upstream: false,
+            attach_headers: true,
+        })
+        .unwrap_err()
+    }
+
+    #[test]
+    fn attaching_headers_without_a_header_to_attach_says_so_before_listening() {
+        // The failure this guards against is silent: a session of hunting whose traffic
+        // was supposed to identify the researcher and did not. So it is refused at
+        // startup rather than discovered in a rejected report.
+        let dir = engagement(false, true);
+        let err = attaching_run(dir.path());
+        assert_eq!(err.code(), "invalid_input");
+        assert!(err.to_string().contains("hexora header add"), "{err}");
+    }
+
+    #[test]
+    fn attaching_headers_without_a_scope_says_so_before_listening() {
+        // An empty scope matches nothing, so this would attach to nothing at all while
+        // the proxy cheerfully announced that it was attaching.
+        let dir = engagement(true, false);
+        let err = attaching_run(dir.path());
+        assert_eq!(err.code(), "invalid_input");
+        assert!(err.to_string().contains("hexora scope"), "{err}");
+        assert!(
+            err.to_string().contains("every site you browse"),
+            "and it says why it is scoped: {err}"
+        );
+    }
+
     #[test]
     fn a_bad_listen_address_is_rejected_with_the_value() {
         let err = run(ProxyArgs {
@@ -453,6 +583,7 @@ mod tests {
             exempt: &[],
             only: &[],
             insecure_upstream: false,
+            attach_headers: false,
         })
         .unwrap_err();
         assert_eq!(err.code(), "invalid_input");

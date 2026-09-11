@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M14.3 (the programme profile), after two runs against real targets
+- **Last updated:** M14.4 (the header on your own traffic)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -47,6 +47,7 @@ milestone.
 | **M14.1** — The intruder | One request, a payload list, and responses grouped by `(status, length)` so the crowd is one line and the outlier is a short row below it. Outliers are measured against the **majority** rather than the baseline — in two hundred usernames the unchanged request is one more wrong answer. It **concludes nothing**: no findings, no hypotheses, nothing in the findings store, because what a difference means is the judgement of whoever chose the payloads. It will replay a `POST` where the scheduler refuses to, and says the method and the count first. Found a real local file inclusion on `testasp.vulnweb.com` in twelve requests on its first use |
 | **M14.2** — The headers a programme requires | A bug bounty programme routinely makes identifying your traffic a condition of testing — Wolt's says testing without `X-HackerOne-Research` "can result in the forfeiture of the eligible bounty". This is the opposite of hiding: a programme that cannot tell a researcher's requests from an attacker's is entitled to treat them the same way. An identity's headers could not express it, because they cover authenticated replays and not the scanner's probes, the intruder's payloads or the anonymous control — the request most likely to be read as an attack. So it lives on the **project**, and is applied in the one function every structured send passes through, **before** the identity's credential so a project setting can never decide who a request is from. Not spliced into a raw send, which is byte-exact by definition — but `--dry-run` prints what is *not* being sent, so the omission is visible before the request goes out rather than after the report is rejected. `hexora header list|add|remove` |
 | **M14.3** — The programme profile | Scope says which systems; this says which kinds of finding the programme will **accept**. Wolt puts missing headers, cookie flags, CORS without proven impact, banner grabbing, username enumeration and absent rate limits out of scope as *classes* — most of what a passive scanner produces. An exclusion is about reporting, not looking: the passive check still runs and its observations are still listed, **the hypothesis it raises still reaches the active scheduler** (proven impact is in scope, and the experiment is what proves it), and an excluded *active* check is not scheduled at all because that traffic could never produce anything the programme would take. Nothing is silenced — the scan output, the run record and both report formats name every excluded class and its reason, so "nobody looked" and "it was looked at and they do not take them" cannot be confused. Against `testasp.vulnweb.com` the same four exchanges give **5 findings with no profile and 0 with a Wolt-shaped one** — exactly the five that would have been rejected |
+| **M14.4** — The header on your own traffic | M14.2 covered every request *Hexora* sends; while hunting, a browser sends most of them, and a programme's rule is about your traffic rather than your scanner's. `hexora proxy --attach-headers`, on the M2.4 interceptor seam. Bounded three ways, each deliberate: **declared hosts only** (a tester's browser also visits their mail and their bank, and a researcher's name does not belong in those logs — an empty scope attaches to nothing), opt-in and announced before the first request, and **refused at startup** when it would be a no-op, because the failure it guards against is silent. History records what was actually sent. The repeater now applies the same rule, so there is one rule and no door that skips it |
 
 ## Next
 
@@ -321,9 +322,10 @@ the intruder. The programme names brute force and mass creation of entities as
 forbidden, which is a constraint on the scheduler and on `hexora fuzz`, not a
 suggestion.
 
-**The desktop window does not know about programmes yet.** `hexora programme` is
-CLI-only; the window shows findings without saying a class was excluded, which is the
-one place this feature can still mislead somebody. That is the next thing to build.
+**The desktop window does not know about programmes or attached headers yet.**
+`hexora programme`, `hexora header` and `--attach-headers` are CLI-only; the window
+shows findings without saying a class was excluded, which is the one place these
+features can still mislead somebody.
 
 **Stealth is not a goal, and should never become one.** The header exists to make
 research traffic *identifiable*. A programme that cannot tell a researcher's requests

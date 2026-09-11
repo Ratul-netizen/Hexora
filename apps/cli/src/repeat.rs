@@ -60,10 +60,12 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
     } else {
         TcpTransport::new()
     };
-    // An empty scope does not block a repeater send — the tester chose to send it —
-    // but the decision is still reported so an accidental resend against production
-    // is visible rather than silent.
-    let guard = ScopeGuard::new(transport, Arc::new(Scope::new()));
+    // The project's real scope, not an empty one. A repeater send is human-driven, so
+    // an out-of-scope target is flagged and still sent — the tester chose to send it —
+    // but the guard has to know the scope to say which it is. With an empty scope every
+    // resend was reported as out of scope, including the ones that were not, and the
+    // attached headers had no host they would ever go to.
+    let guard = ScopeGuard::new(transport, Arc::new(project.settings().scope()?));
     // Whatever the programme requires on every request. A manual resend is still a
     // request, and a programme that cannot tell a researcher's traffic from an
     // attacker's is entitled to treat it the same way.
@@ -96,7 +98,9 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
                 "scope": describe(repeater.decide(&draft)),
                 // What the bytes above do not show. A dry run that hid this would be
                 // lying about what the real send does.
-                "attached": if mode == RequestMode::Raw {
+                "attached": if mode == RequestMode::Raw
+                    || repeater.decide(&draft) != ScopeDecision::Allowed
+                {
                     serde_json::json!([])
                 } else {
                     serde_json::json!(attached
@@ -110,7 +114,7 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
             print!("{}", String::from_utf8_lossy(&draft.to_raw()));
             println!();
             print_mode(mode);
-            print_attached(&attached, mode);
+            print_attached(&attached, mode, repeater.decide(&draft));
             print_warnings(&warnings);
             println!("Not sent (--dry-run).");
         }
@@ -154,8 +158,24 @@ fn print_mode(mode: RequestMode) {
 /// inside the send, so without this the answer on screen would be wrong — and wrong in
 /// the direction that costs a researcher their bounty, because the header that proves
 /// who they are would be missing from what they checked.
-fn print_attached(attached: &[hexora_types::http::Header], mode: RequestMode) {
+fn print_attached(
+    attached: &[hexora_types::http::Header],
+    mode: RequestMode,
+    decision: ScopeDecision,
+) {
     if attached.is_empty() {
+        return;
+    }
+    if decision != ScopeDecision::Allowed {
+        // The header names a real person, and this host is not one the project
+        // declared. Said out loud, because a dry run exists to answer "what goes out?"
+        // and the honest answer here is "less than you configured".
+        println!("This project attaches headers, but this host is not in its scope:");
+        for header in attached {
+            println!("  not sent: {}: {}", header.name, header.value_lossy());
+        }
+        println!("A programme header names you. It goes to declared hosts only.");
+        println!();
         return;
     }
     if mode == RequestMode::Raw {

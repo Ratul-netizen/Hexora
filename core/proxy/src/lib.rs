@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod attach;
 pub mod ca;
 pub mod capture;
 pub mod fanout;
