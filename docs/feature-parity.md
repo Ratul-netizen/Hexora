@@ -114,6 +114,9 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Programme terms filter what gets reported | ❌ | ❌ | **IMPLEMENTED M14.3** | `hexora programme exclude`. Bug bounty programmes reject whole finding classes; a run that files forty of them is a run whose output gets skipped. Excluded classes are still looked for and still named in the report |
 
+| Session handling / re-authentication | ✅ | ✅ | **PARTIAL M15.1** | `hexora identity refresh` adopts a session from proxy traffic. Deliberately not a replayed login macro: that stores a password and fails against captcha, MFA and SSO. A recorded renewal sequence for API targets is M15.2 |
+| Login sequence recorder | ✅ | ⚠️ | ❌ | See above — M15.2, and only useful where there is no captcha |
+
 ## 5. Extensibility
 
 | Capability | Burp Pro | Caido | Hexora | Notes |

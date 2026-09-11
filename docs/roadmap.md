@@ -717,7 +717,15 @@ STATUS.md as a decision rather than an omission.
 Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
 not an object and an object is not an ownership claim.
 
-**M15 — Custom scan checks** · PLANNED (a check DSL, in the spirit of BChecks)
+**M15 — Session handling** · IN PROGRESS
+
+```text
+M15.1  Session adoption      a person logs in, Hexora notices  ✔
+M15.2  Renewal sequence      a stored sequence with holes where secrets go
+M15.3  In-session detection  replay a known-good request, compare structurally
+```
+
+**M15.5 — Custom scan checks** · PLANNED (a check DSL, in the spirit of BChecks)
 
 **M16 — OAST** · PLANNED — self-hostable, DNS/HTTP/HTTPS/SMTP, correlated to the
 originating request. Self-hosting is a selling point over Burp Collaborator.

@@ -343,6 +343,93 @@ async fn preparing_a_plan_sends_nothing_at_all() {
 }
 
 #[tokio::test]
+async fn hexora_never_probes_a_header_it_attached_itself() {
+    // Found against a real bug bounty programme. The proxy attaches
+    // `X-HackerOne-Research: <username>` to in-scope browser traffic; that traffic is
+    // recorded with the header on it; and the reflection check read it back as
+    // application input. The plan included sending the target's login endpoint the
+    // researcher's own identifying header replaced by a marker full of `<>"';()`.
+    //
+    // Wrong twice over: the experiment proves nothing, because nothing the application
+    // did put that value there — and it mangles the one header whose entire job is to
+    // stay intact and say who is testing.
+    let project = Arc::new(Project::in_memory().unwrap());
+    project
+        .metadata()
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO project (id, name, created_at, updated_at)
+             VALUES ('prj_default', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    project
+        .settings()
+        .set_scope(
+            &hexora_types::scope::Scope::new()
+                .include(hexora_types::scope::ScopeRule::host("api.example.com")),
+        )
+        .unwrap();
+    project
+        .settings()
+        .set_attached_headers(&[hexora_types::http::Header::new(
+            "X-HackerOne-Research",
+            "wahid_ratul",
+        )])
+        .unwrap();
+
+    // A captured request carrying both a real input and Hexora's own header.
+    let service = HttpService::new("api.example.com", 443, true);
+    let mut request = HttpRequest::get(service, "/search?q=hello");
+    request.headers.set("X-HackerOne-Research", "wahid_ratul");
+    request.headers.set("X-Wolt-Client", "web");
+    project
+        .traffic()
+        .record(&CapturedExchange {
+            request,
+            raw_request: None,
+            response: HttpResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                version: hexora_types::http::HttpVersion::Http11,
+                headers: Headers::new(),
+                body: bytes::Bytes::from_static(b"hello"),
+                truncated: false,
+            },
+            encoded_body: None,
+            content_encoding: None,
+            origin: "proxy",
+            identity: None,
+            parent: None,
+            quirks: Vec::new(),
+            tls: None,
+            duration_ms: 10,
+        })
+        .unwrap();
+
+    let standing =
+        hexora_active::standing(&project, &hexora_scan::passive::Selection::default()).unwrap();
+    let names: Vec<String> = standing
+        .hypotheses
+        .iter()
+        .filter_map(|h| h.location.as_ref().map(|l| l.name.to_ascii_lowercase()))
+        .collect();
+
+    assert!(
+        !names.contains(&"x-hackerone-research".to_string()),
+        "Hexora planned to probe its own header: {names:?}"
+    );
+    // And it did not simply stop raising work: the application's own input is still there.
+    assert!(
+        names
+            .iter()
+            .any(|name| name == "q" || name == "x-wolt-client"),
+        "the real inputs must survive: {names:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_check_this_programme_does_not_accept_sends_nothing() {
     // Sending somebody traffic to produce a finding they have said they will not take
     // is a cost with no possible return, and it is their bandwidth. So an excluded

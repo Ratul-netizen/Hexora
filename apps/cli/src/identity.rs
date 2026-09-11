@@ -274,6 +274,100 @@ fn truncate(value: &str, width: usize) -> String {
     }
 }
 
+/// Options for `hexora identity refresh`.
+pub struct RefreshArgs<'a> {
+    pub project: &'a Path,
+    /// Which identity, by label or id.
+    pub who: &'a str,
+    /// Show what would be adopted without storing it.
+    pub dry_run: bool,
+    /// How many recent exchanges to look through.
+    pub limit: usize,
+    /// Only adopt a session seen on this host.
+    pub host: Option<&'a str>,
+    pub json: bool,
+}
+
+/// Adopts a newer session for an identity, from traffic a person generated.
+///
+/// A captured credential decays, and a stale one turns every authorization result into
+/// "could not be established". The fix is not to record the login and replay it — that
+/// means storing a password, and it fails against captcha, MFA and SSO, which is most
+/// real targets. It is to let the person log in the way they already do, through the
+/// proxy, and notice.
+pub fn refresh(args: RefreshArgs<'_>) -> Result<()> {
+    let project = crate::open_project(args.project)?;
+    let identities = project.identities();
+    let identity = resolve(&identities, args.who)?;
+
+    let traffic = project.traffic();
+    let scope = project.settings().scope()?;
+    let found =
+        hexora_authz::session::find_renewal(&traffic, &scope, &identity, args.limit, args.host)?;
+
+    let Some(renewal) = found else {
+        if args.json {
+            println!("{}", serde_json::json!({ "renewed": false }));
+            return Ok(());
+        }
+        println!(
+            "No newer session for {} in the last {} exchange(s).",
+            identity.label, args.limit
+        );
+        println!();
+        println!("Log in through the proxy and run this again. Only proxy traffic counts:");
+        println!("a credential Hexora sent itself is one it may have broken on purpose.");
+        return Ok(());
+    };
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "renewed": !args.dry_run,
+                "identity": identity.label,
+                "source": renewal.source.to_string(),
+                "host": renewal.host,
+                "sent_at": renewal.sent_at,
+                "slot": renewal.slot,
+                "bytes": renewal.length,
+            })
+        );
+        if args.dry_run {
+            return Ok(());
+        }
+        let mut updated = identity.clone();
+        updated.credential = renewal.credential(&identity.credential);
+        identities.put(&updated)?;
+        return Ok(());
+    }
+
+    // The value is never printed. A host, a time and a size are enough to decide
+    // whether this is the session you just created, and nothing like enough to use.
+    println!("Found a newer {} for {}:", renewal.slot, identity.label);
+    println!("  from {} at {}", renewal.host, renewal.sent_at);
+    println!(
+        "  {} bytes, captured by the proxy as {}",
+        renewal.length, renewal.source
+    );
+
+    if args.dry_run {
+        println!();
+        println!("Not stored (--dry-run).");
+        return Ok(());
+    }
+
+    let mut updated = identity.clone();
+    updated.credential = renewal.credential(&identity.credential);
+    identities.put(&updated)?;
+
+    println!();
+    println!("{} now authenticates with it.", identity.label);
+    println!("Re-run `hexora scan active` — the results that said the credential may no");
+    println!("longer be valid can be established now.");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

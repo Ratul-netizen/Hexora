@@ -151,6 +151,12 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         _ => None,
     };
 
+    // Read before the runtime starts, with the rest of the project's settings.
+    let scope_for_marking = match &project {
+        Some(project) => project.settings().scope()?,
+        None => Scope::new(),
+    };
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -159,9 +165,16 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
     runtime.block_on(async move {
         let server = ProxyServer::bind(
             config,
-            // An empty scope does not block proxied traffic: the tester's browser
-            // asked for it, and the proxy has to see a host before it can be scoped.
-            Arc::new(Scope::new()),
+            // The project's scope, so the per-request marker means something. Proxied
+            // traffic is human-driven, so an out-of-scope host is flagged and still
+            // forwarded — the browser asked for it, and the proxy has to see a host
+            // before anybody can decide it is in scope.
+            //
+            // It used to be an empty scope, which matches nothing, so every line of a
+            // browsing session read `?` — including the target's own. A marker that
+            // says the same thing about everything tells a tester nothing, and this is
+            // the signal they watch while deciding what is worth testing.
+            Arc::new(scope_for_marking),
             transport,
             Arc::new(observers),
             ca,

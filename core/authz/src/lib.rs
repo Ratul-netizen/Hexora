@@ -84,6 +84,7 @@
 pub mod analysis;
 pub mod compare;
 pub mod construct;
+pub mod session;
 pub mod suggest;
 
 use std::sync::Arc;

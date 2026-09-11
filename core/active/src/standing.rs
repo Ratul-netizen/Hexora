@@ -77,12 +77,41 @@ fn observed(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis>>
 ///
 /// Deduplicated on `(method, path-without-query, input)`, so a search page loaded
 /// forty times is one experiment and two endpoints that both take `q` are two.
+/// Whether this suspicion is about a header Hexora attached rather than one the
+/// application ever saw from a real client.
+fn is_ours(hypothesis: &Hypothesis, ours: &[String]) -> bool {
+    hypothesis.location.as_ref().is_some_and(|location| {
+        location.part == hexora_types::finding::MessagePart::Header
+            && ours.contains(&location.name.to_ascii_lowercase())
+    })
+}
+
 fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis>> {
     use std::collections::BTreeSet;
 
     let summary = hexora_scan::passive::scan(project, selection)?;
     let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
     let mut raised = Vec::new();
+
+    // Headers Hexora put on the request itself are not the application's input.
+    //
+    // Found against a real programme, and it was not a small thing: the proxy attaches
+    // `X-HackerOne-Research: <username>` to in-scope browser traffic, that traffic is
+    // recorded with the header on it, and the reflection check then read it back as
+    // something the application might echo. The plan included probing the target's
+    // login endpoint with the researcher's own identifying header replaced by a marker
+    // full of `<>"';()`.
+    //
+    // Two different kinds of wrong at once: the experiment is meaningless, because
+    // nothing the application does put that value there; and it mangles the one header
+    // whose whole purpose is to stay intact and say who is testing.
+    let ours: Vec<String> = project
+        .settings()
+        .attached_headers()
+        .unwrap_or_default()
+        .iter()
+        .map(|header| header.name.to_ascii_lowercase())
+        .collect();
 
     // The passive pass already read and filtered the traffic — by scope, by host, by
     // detector. Reusing what it examined means an active run tests exactly the
@@ -101,6 +130,9 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
             .chain(crate::checks::crossid::suspect(exchange));
 
         for hypothesis in raised_here {
+            if is_ours(&hypothesis, &ours) {
+                continue;
+            }
             let name = hypothesis
                 .location
                 .as_ref()

@@ -44,7 +44,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M14.4. The proxy, HTTP/1.x engine with TLS, \
+                  Development status: M15.1. The proxy, HTTP/1.x engine with TLS, \
                   projects, traffic capture, the repeater, authorization testing, the \
                   passive scanner, the active scheduler, the intruder, findings and \
                   reports all work. There is no crawler: Hexora tests the traffic it \
@@ -609,6 +609,44 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum IdentityCommand {
+    /// Adopt a newer session for an identity, from traffic you generated.
+    ///
+    /// A captured credential decays. Once it does, every authorization result reads
+    /// "the credential may no longer be valid" and establishes nothing — which is most
+    /// of what this tool is for.
+    ///
+    /// The fix is not to record your login and replay it: that means storing a
+    /// password, and it fails against captcha, MFA and SSO, which is most real targets.
+    /// Log in the way you already do, through the proxy, and run this.
+    ///
+    /// Only **proxy** traffic is eligible — your browser. Never the repeater, whose
+    /// requests you may have edited, and never the scanner or the authorization engine,
+    /// which send credentials they broke deliberately.
+    Refresh {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The identity, by label or id.
+        who: String,
+
+        /// Show what would be adopted without storing it.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// How many recent exchanges to look through.
+        #[arg(long, default_value_t = 500)]
+        limit: usize,
+
+        /// Only adopt a session seen on this host.
+        ///
+        /// Cookies are per host and an engagement's scope covers many: against a real
+        /// target the newest in-scope cookie came from the image CDN, which is not the
+        /// session the API accepts. Without this, the host it came from is printed so
+        /// you can judge.
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+    },
+
     /// Add an identity.
     ///
     /// The credential is read from an environment variable or a file, never from an
@@ -1022,6 +1060,20 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             headers,
             json: cli.json,
         }),
+        Command::Identity(IdentityCommand::Refresh {
+            path,
+            who,
+            dry_run,
+            limit,
+            host,
+        }) => identity::refresh(identity::RefreshArgs {
+            project: path,
+            who,
+            dry_run: *dry_run,
+            limit: *limit,
+            host: host.as_deref(),
+            json: cli.json,
+        }),
         Command::Identity(IdentityCommand::List { path }) => identity::list(path, cli.json),
         Command::Identity(IdentityCommand::Remove { path, who }) => {
             identity::remove(path, who, cli.json)
@@ -1408,14 +1460,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M14.4",
+            "milestone": "M15.1",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M14.4 (the header on your own traffic)");
+        println!("  milestone:               M15.1 (keeping a session alive)");
     }
 }
 
@@ -1558,7 +1610,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M14.4"),
+            help.contains("M15.1"),
             "users must not mistake this for a finished tool"
         );
     }

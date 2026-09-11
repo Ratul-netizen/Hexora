@@ -365,7 +365,39 @@ fn is_transport_header(lower: &str) -> bool {
             | "te"
             | "trailer"
             | "content-type"
-    )
+    ) || is_browser_metadata(lower)
+}
+
+/// Headers the *browser* writes about itself, which no application treats as input.
+///
+/// Found against a real target, and it is a cost paid in somebody else's bandwidth:
+/// 86 captured exchanges produced **940** experiments, because every header on every
+/// request became something to probe — including `Sec-Fetch-Dest`, `sec-ch-ua-mobile`
+/// and `Accept-Encoding`. A plan that large cannot finish inside a sane budget, so what
+/// ran was an arbitrary five per cent of it, which is worse than testing nothing:
+/// it *looks* like coverage.
+///
+/// The line is who writes the header and why. Client hints and fetch metadata are the
+/// user agent describing itself under a spec that says servers may vary on them and
+/// nothing more. They are not a place an application puts data it later prints.
+///
+/// **`User-Agent`, `Referer` and `Origin` stay probeable** — deliberately. Those three
+/// really do reach error pages, admin panels and log viewers, and they are the classic
+/// stored-reflection vectors. Narrowing the list to what is genuinely inert is the
+/// point; narrowing it until nothing is left would be a scanner that finds nothing and
+/// says so quickly.
+fn is_browser_metadata(lower: &str) -> bool {
+    matches!(
+        lower,
+        "accept"
+            | "accept-encoding"
+            | "accept-language"
+            | "accept-charset"
+            | "dnt"
+            | "priority"
+            | "upgrade-insecure-requests"
+    ) || lower.starts_with("sec-ch-")
+        || lower.starts_with("sec-fetch-")
 }
 
 // ---------------------------------------------------------------------------

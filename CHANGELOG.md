@@ -508,6 +508,56 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M15.1, keeping a session alive
+
+A captured credential is a decaying asset, and the first run against a real bug bounty
+target proved it: **three of five active checks came back inconclusive** with
+
+```text
+the credential the request was captured with may no longer be valid — so nothing
+is established either way
+```
+
+Cross-identity testing is the best thing this tool does, and a stale session makes it
+worthless. `hexora identity refresh <project> <who>` adopts a newer session out of
+traffic **a person generated**, and nothing else.
+
+**Why not a recorded login sequence, which is what Burp and AppScan do.** Two reasons,
+and the second was decided by the target rather than by taste:
+
+- A recorded login has to hold the **password**. Everything else here goes the other
+  way — `identity add` refuses a credential as an argument and takes `--from-env` or
+  `--from-file`, because `ps` and shell history both capture arguments. Storing a
+  replayable password to save retyping a token is a poor trade.
+- It does not survive the defences real targets have. The programme this was built
+  against sends `h-captcha-response` with its login POST. A replayed captcha token is a
+  rejected login, and MFA, device checks and SSO fail the same way. **Building the Burp
+  shape first would have produced a feature useless against the first real target it
+  met.** So the person logs in, through the proxy, as they already do — and solves the
+  captcha, which is what captchas are for.
+
+**Only proxy traffic is eligible, and that is the whole safety argument.** The
+`auth.enforcement` check deliberately sends a request whose JWT signature has one
+character changed, and that request lands in history like any other. Under a "newest
+credential wins" rule Hexora would adopt a credential **it broke on purpose**, replacing
+a working session with an invalid one — and every later result would be wrong in a way
+that reads like a finding. A test is named for it.
+
+- **A value is never printed.** The host, the time, the byte count and the source
+  request are enough to decide whether this is the session you just created, and nothing
+  like enough to use. `Debug` is written by hand, because the derived one prints private
+  fields — and the test caught the derived one.
+- `--host`, because **cookies are per host**. Found immediately: the newest in-scope
+  cookie on a real engagement came from the image CDN, which is not the session the API
+  accepts. Without it, the host is printed so a person can judge.
+- Out-of-scope hosts are never adopted: a tester's browser visits their own mail.
+- An unchanged session is reported as nothing-to-do rather than rewritten.
+- Basic credentials are left alone: a username and password is not a session.
+
+Still to come as **M15.2**: a recorded renewal sequence with holes where secrets go,
+filled at replay from an env var or the OS keychain. That is the right shape for
+machine-to-machine APIs and CI. It is the wrong shape for anything with a captcha.
+
 ### Added — M14.4, the header on your own traffic
 
 M14.2 put a programme's required headers on every request *Hexora* sends. It did
