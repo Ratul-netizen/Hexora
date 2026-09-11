@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M13.7 (cross-identity access, scheduled)
+- **Last updated:** M13.7, plus the first run against a real third-party target
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -116,6 +116,11 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
+- **Discovery.** The first real-target run found its one bug the moment the right page
+  was in the project, and would have found nothing otherwise: coverage is exactly what
+  somebody captured. Whether that gap is closed by a crawler, by better capture
+  ergonomics, or by both is an open question — but it now has evidence behind it rather
+  than being a guess about what a scanner needs.
 - **M14 — the manual-testing pillar.** Intercept editor, Repeater tabs, match/replace,
   scope organisation, search and filter, manual findings as first-class. The scanner
   work of M13 is built on evidence a person gathers; the interface for gathering it by
@@ -130,12 +135,47 @@ large payload generators, autonomous AI exploitation, hundreds of vulnerability
 signatures, or Burp extension compatibility. Each multiplies the surface area that has
 to be trustworthy before any of it is.
 
-**What the active scheduler has and has not been run against.** One local demo
-application with a deliberately reflecting endpoint and a correctly allowlisted one,
-over plain HTTP on loopback. The pacing and ceiling are unit-tested against a
-recording lab with real timing, and the whole thing has never been pointed at a large
-application, a rate-limited one, or one behind a CDN that answers differently to an
-unfamiliar `Origin`.
+**What the active scheduler has been run against.** Local demos with deliberate bugs
+and correct controls beside them — and, once, a real third-party target.
+
+*Acunetix `testasp.vulnweb.com` and `rest.vulnweb.com`, published by the vendor for
+testing security tools.* Eight pages hand-captured through the proxy, then the full
+pass: 31 requests, 35 seconds, one host at a time, 600ms apart.
+
+```text
+passive   40 header observations  →  5 grouped leads
+active    30 experiments          →  1 finding, 29 refutations, 0 false positives
+```
+
+The finding is real: `Logout.asp?RetURL=` is an open redirect, established at
+Medium/Confirmed by two *different* probe hosts both being obeyed, and the compiled
+proof of concept reproduces it verbatim — pasting step 2 returns
+`Location: https://hexora-probe.invalid/`.
+
+**Every refutation was checked by hand**, because a scanner that finds nothing on a
+deliberately vulnerable site is either right or broken. `Search.asp`, `Templatize.asp`
+and `showforum.asp` genuinely do not reflect their query parameters;
+`Login.asp?RetURL=` genuinely comes back percent-encoded inside a quoted attribute,
+which is what the tool said. No false positives and no false negatives among the checks
+that exist, on the inputs they tested.
+
+**What it did not find, and why — the more useful half:**
+
+* **SQL injection.** `testasp` is known for it and Hexora has no SQLi check. An absence,
+  not a miss.
+* **The `Login.asp?RetURL` open redirect.** Real, and out of reach: that redirect fires
+  only after a `POST` login, the redirect check queues only endpoints whose *captured*
+  response was 3xx, and invariant 18 forbids replaying a `POST`. Two documented limits
+  meeting on a real target.
+* **`Search.asp`**, whose input is in a `POST` body. Bodies are not probed.
+* **Coverage is exactly what a person captured.** The tool found the bug the moment
+  `Logout.asp` was in the project, and would never have found it otherwise — a human
+  reading the site found that page, not Hexora. There is no crawler, and this is the
+  single biggest limiter on what a scan is worth today.
+
+Still untested: a rate-limited application, one behind a CDN that answers differently to
+an unfamiliar `Origin`, and anything at the scale where 20 000 exchanges and a
+two-hundred-request ceiling start to conflict.
 
 **What the scheduled cross-identity check does not cover.** *Constructed* requests —
 substituting a declared object identifier that belongs to somebody else. M12.5 does
@@ -197,8 +237,13 @@ The authorization work — replay, construction and the report — has been exer
 to end against a local application with a deliberate IDOR *and* a correctly built
 version of the same endpoint, from the CLI and from the window. The broken one produced
 a High finding naming the exact substitution; the correct one produced nothing at all.
-None of it has been run against a large real application, where response noise is worse
-than any fixture.
+
+The *scanner* has now met one real application (see above) and behaved: real headers,
+real cookies, a real IIS server, and nothing overstated. The authorization checks
+specifically have not — `testasp.vulnweb.com` was browsed anonymously, so no session
+was captured and `auth.enforcement` and `authz.scheduled` raised no work. Testing those
+against a real application needs a real login flow, which is the next thing worth
+doing.
 
 **What raw mode does and does not cover.** HTTP/1.x request bytes, and nothing else:
 there is no raw frame injection for HTTP/2 or HTTP/3, and no raw WebSocket frames.
