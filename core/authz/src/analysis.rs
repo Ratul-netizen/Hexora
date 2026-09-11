@@ -251,7 +251,7 @@ impl Verifier for ReplayVerifier<'_> {
 /// Separated from [`ReplayVerifier`] because it is the half that needs no network:
 /// what the first experiment showed, judged. The verifier adds the second experiment
 /// on top of it.
-pub(crate) fn judge(
+pub fn judge(
     cell: &Cell,
     owner_label: &str,
     owner_request: Option<hexora_types::ids::RequestId>,

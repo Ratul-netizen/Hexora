@@ -1523,6 +1523,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "hexora-authz",
  "hexora-engine",
  "hexora-http",
  "hexora-repeater",

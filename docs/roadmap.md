@@ -676,9 +676,42 @@ scheduling it across an engagement is M13.7. Recorded so nobody reads
 Deliberately not built: session fixation, rotation and expiry, which need a login flow
 rather than one captured request.
 
-**M13.7 — IDOR/BOLA automation** · PLANNED — M12.5 becomes a scanner primitive:
-identifier → ownership → cross-identity substitution → control → constructed request →
-differential → verification.
+**M13.7 — Cross-identity access, scheduled** · DONE
+
+M12.1's matrix across an engagement's traffic rather than one request a tester names.
+
+Whose session was captured is the question everything rests on, and proxy traffic does
+not answer it — a browser announces no identity id. So each declared credential is
+applied to a copy of the request's own headers and compared byte for byte: an exact
+answer or none at all. An endpoint whose credential matches nothing declared is reported
+as untested with that reason.
+
+One implementation, two front doors. The check calls `hexora_authz::replay_once` and
+`analysis::judge`, made public rather than reimplemented — M13.1 built them to take a
+`Lab` precisely so this seam could open. A scheduled run that classified responses
+differently from `hexora authz` would be two sets of verdicts for one question.
+
+Against the IDOR demo it reached **Firm with no declared object identifiers**, through
+M12.10's same-document path behind a refused anonymous control. That is the payoff of
+three earlier milestones landing at once: the structural comparison establishes *the
+same document*, the anonymous control establishes *not a public page*, and neither
+needed a human to declare anything.
+
+Two false positives were removed on the way. `GET /profile` — the textbook
+correctly-scoped endpoint — was reported as a violation on every run without
+declarations; `every_value_differs()`, which M12.10 built and nothing used, clears it on
+evidence. And breaking a credential can land on another valid one, which reads exactly
+like a session nobody verified; the project knows what it declared, so that is now
+checked rather than risked.
+
+**Scope.** The roadmap named the constructed chain — identifier → ownership →
+substitution → constructed request. What shipped is the **replay** half, which needs no
+declarations and works on every engagement. Scheduling M12.5's constructed attempts is a
+smaller increment now that the replay machinery is schedulable, and is recorded in
+STATUS.md as a decision rather than an omission.
+
+Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
+not an object and an object is not an ownership claim.
 
 **M15 — Custom scan checks** · PLANNED (a check DSL, in the spirit of BChecks)
 

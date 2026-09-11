@@ -147,11 +147,21 @@ pub struct Summary {
     /// it here means the active run tests exactly the traffic the passive pass
     /// reported on rather than a second, differently-filtered set.
     ///
-    /// **Traffic the scanner generated is left out.** A project accumulates Hexora's
-    /// own probes, and an endpoint described by one of them would be reported to a
-    /// tester as `?q=hxa3f9<>"';()hxb1k2` — a URL nobody's application has, named in a
-    /// finding about that application. Reading our own output back as though it were
-    /// evidence is the shape of mistake this whole codebase is arranged to avoid.
+    /// **Traffic Hexora generated is left out**, whichever subsystem generated it.
+    ///
+    /// A project accumulates the tool's own requests: probes from the scanner, replays
+    /// from the authorization matrix. Reading those back as though they were the
+    /// application's traffic goes wrong in two ways, and both have happened:
+    ///
+    /// * an endpoint described by a probe is reported as `?q=hxa3f9<>"';()hxb1k2` — a
+    ///   URL nobody's application has, named in a finding about that application;
+    /// * an endpoint described by an *anonymous* authorization replay carries no
+    ///   credential, so every check that needs authenticated traffic silently stops
+    ///   raising work for it after the first run.
+    ///
+    /// The line is [`Origin::is_automated`](hexora_engine::transport::Origin) draws:
+    /// the proxy and the repeater are a person doing something, everything else is
+    /// Hexora doing something.
     pub endpoints: Vec<Exchange>,
     /// What each detector did, including the ones that found nothing.
     pub detectors: Vec<DetectorRun>,
@@ -244,7 +254,7 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
 
             // Query strings differ between two loads of one page; the endpoint does
             // not. Keyed without the query so `?q=shoes` and `?q=hats` are one place.
-            if exchange.origin != "scanner" {
+            if human_driven(&exchange.origin) {
                 let endpoint = exchange
                     .path
                     .split('?')
@@ -473,6 +483,20 @@ fn wanted(
         }
     }
     true
+}
+
+/// Whether an exchange was made because a person did something.
+///
+/// The proxy saw a browser; the repeater sent what somebody typed. Everything else —
+/// the scanner, the authorization matrix, a future fuzzer — is Hexora's own traffic,
+/// and reading it back as the application's is how a tool starts reporting on itself.
+///
+/// Matched on the stored string rather than on
+/// [`Origin`](hexora_engine::transport::Origin), because this crate deliberately does
+/// not depend on the transport layer. An origin nobody recognises is treated as
+/// Hexora's, which is the direction to be wrong in.
+fn human_driven(origin: &str) -> bool {
+    matches!(origin, "proxy" | "repeater")
 }
 
 /// Reads one stored exchange by id, into the shape a check sees.

@@ -97,7 +97,8 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
         let raised_here = crate::checks::echo::suspect(exchange)
             .into_iter()
             .chain(crate::checks::redirect::suspect(exchange))
-            .chain(crate::checks::auth::suspect(exchange));
+            .chain(crate::checks::auth::suspect(exchange))
+            .chain(crate::checks::crossid::suspect(exchange));
 
         for hypothesis in raised_here {
             let name = hypothesis
@@ -215,6 +216,36 @@ mod tests {
             standing.hypotheses.is_empty(),
             "the scanner enumerated its own traffic: {:#?}",
             standing.hypotheses
+        );
+    }
+
+    #[test]
+    fn no_subsystem_of_hexoras_own_traffic_is_read_back_as_the_applications() {
+        // The second half of this, found by running the scheduler twice: an *anonymous*
+        // authorization replay carries no credential, so when it became the
+        // representative exchange for an endpoint, every check needing authenticated
+        // traffic silently stopped raising work for it after the first run.
+        let project = Project::in_memory().unwrap();
+        for origin in ["scanner", "authz", "fuzzer", "workflow", "extension"] {
+            capture_as(&project, "/search?q=generated", origin);
+        }
+
+        let standing = standing(&project, &everything()).unwrap();
+        assert!(
+            standing.hypotheses.is_empty(),
+            "Hexora enumerated its own traffic: {:#?}",
+            standing.hypotheses
+        );
+    }
+
+    #[test]
+    fn traffic_a_person_caused_is_read() {
+        // The other side of the same line: the repeater is somebody typing.
+        let project = Project::in_memory().unwrap();
+        capture_as(&project, "/search?q=typed", "repeater");
+        assert_eq!(
+            standing(&project, &everything()).unwrap().hypotheses.len(),
+            1
         );
     }
 

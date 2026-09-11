@@ -700,6 +700,7 @@ mod tests {
             )),
             target: exchange.target,
             exchange,
+            identities: std::sync::Arc::new(Vec::new()),
         }
     }
 

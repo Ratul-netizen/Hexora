@@ -508,6 +508,74 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M13.7, cross-identity access across an engagement
+
+M12.1 replays one captured request as every identity, when a tester names it. This is
+that across an engagement's traffic — the difference between a tool that answers a
+question and one that asks it of everything.
+
+```text
+captured:  GET /accounts/acct-1000   as User A   →  200  the owner's record
+replayed:  the same request          as User B   →  200  the *same document*
+                                     anonymous   →  401
+```
+
+**Whose session was it?** Proxy traffic announces no identity id, and everything a
+cross-identity test concludes rests on the answer. So the credential is the evidence:
+each declared credential is applied to a copy of the request's own headers and compared
+byte for byte. An exact match or none at all — an endpoint whose captured credential
+matches nothing the project declares is reported as untested with that reason. Hexora
+will not decide that a session belongs to somebody.
+
+**One implementation, two front doors.** The check calls `hexora_authz::replay_once` and
+`analysis::judge` — the same functions `hexora authz` uses, made public rather than
+reimplemented. A scheduled run that classified responses differently from the on-demand
+one would be two sets of verdicts for one question. M13.1 built those to take a `Lab`
+precisely so this seam could open.
+
+**A budget too small sends nothing at all.** Testing against three identities needs
+four requests; a budget of two means the run says so rather than testing a subset and
+reporting it as the whole.
+
+### Fixed — the endpoint that is working was reported as a violation
+
+`GET /profile` — the textbook correctly-scoped endpoint, serving each caller their own
+record — was reported as cross-identity access on every run unless a tester had declared
+object identifiers for it. Nobody declares them for every endpoint in an engagement, and
+a scanner that cries wolf about the endpoint that is working is one whose output gets
+skipped.
+
+M12.10 built `Diff::every_value_differs()` for exactly this and nothing used it. Two
+documents of identical shape whose *every* value differs are two users' own records: an
+IDOR would have returned the owner's values, not different ones. `replay_once` now
+clears the cell on that evidence, with no declaration needed — and an identical response
+is still a violation, which is the test that makes the rule safe.
+
+### Fixed — breaking a credential can land on somebody else's
+
+Changing one character of a token can produce another *valid* credential. It is
+vanishingly unlikely against real tokens and certain against a fixture whose users
+differ by their last character — and the result is a 200 that reads exactly like a
+session nobody verified, which is the worst false positive `auth.enforcement` could
+produce. The project knows every credential it declared, so the probe is now checked
+against them and the experiment is skipped with the reason rather than run.
+
+### Fixed — a request could not be attributed to a principal the project lacks
+
+`requests.identity_id` has a foreign key, so an anonymous replay failed at the last step
+with a database constraint and the cell read `Anonymous (failed)` — which quietly took
+`appears_public` and M12.10's same-document upgrade off the table for every scheduled
+run. `Plan::prepare` now ensures the anonymous principal exists, the way `hexora authz`
+always has.
+
+Verified live against the IDOR demo, scheduled rather than pointed at one request:
+`/accounts/acct-1000` Medium/**Firm** with no declared object ids — "User B and User A
+were served the same document at every one of its 4 field(s), and an unauthenticated
+request was refused it" — `/status` High/Firm from `auth.enforcement` with the
+cross-identity check deferring to it rather than duplicating it, and `/profile` and
+`/secure/accounts` both ruled out. Zero false positives, and no credential in the
+Markdown report, the HTML report or the scan JSON.
+
 ### Added — M13.6, authentication enforcement
 
 Two failures a cross-identity matrix cannot see. Every identity in a matrix holds a

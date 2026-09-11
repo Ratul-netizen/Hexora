@@ -104,6 +104,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Redirect destinations are never followed | ❓ | ❓ | **IMPLEMENTED M13.5** | Invariant 16. The header is read; no request is made to a host the target named |
 | Detects a session that is read but not verified | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | A JWT with one signature character changed, header and payload byte-identical. A cross-identity matrix cannot see this: every identity in one holds a valid token |
 | Scanner refuses to replay state-changing requests | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | Invariant 18, enforced by the scheduler rather than by each check |
+| Cross-identity access tested across captured traffic | ⚠️ | ⚠️ | **IMPLEMENTED M13.7** | Owner inferred from the captured credential by exact match, never guessed. Same `replay_once` and confidence ladder as the on-demand matrix |
+| Correctly-scoped endpoints are cleared without a declaration | ❌ | ❌ | **IMPLEMENTED M13.7** | Every value differing is the shape of per-caller data; an IDOR returns the owner's values, not different ones |
 
 ## 5. Extensibility
 

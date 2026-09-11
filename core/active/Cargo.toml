@@ -13,6 +13,7 @@ hexora-storage.workspace = true
 hexora-verify.workspace = true
 hexora-repeater.workspace = true
 hexora-scan.workspace = true
+hexora-authz.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 chrono.workspace = true

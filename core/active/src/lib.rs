@@ -67,6 +67,7 @@ use async_trait::async_trait;
 use hexora_repeater::Draft;
 use hexora_scan::Exchange;
 use hexora_types::finding::Hypothesis;
+use hexora_types::identity::Identity;
 use hexora_types::ids::TargetId;
 use hexora_types::verify::{DetectorInfo, Verification, Writeup};
 use hexora_types::Result;
@@ -148,9 +149,40 @@ pub struct Subject {
     pub draft: Draft,
     /// The target the finding belongs to.
     pub target: TargetId,
+    /// The identities the project holds, for a check that replays as somebody else.
+    ///
+    /// Shared rather than copied per subject: an engagement has a handful of these and
+    /// a queue has hundreds of experiments. Most checks ignore it — it is here because
+    /// the cross-identity check cannot be written without it and handing that one check
+    /// a whole `Project` would give every check the run of the database.
+    pub identities: Arc<Vec<Identity>>,
 }
 
 impl Subject {
+    /// Which identity's credential the captured request actually carried.
+    ///
+    /// Matched by applying each declared credential to a copy of the request's own
+    /// headers and comparing: an exact answer rather than a guess, and the only kind
+    /// worth having, because everything a cross-identity test concludes rests on
+    /// knowing whose session was captured. Proxy traffic carries no identity id — the
+    /// browser did not announce one — so the credential itself is the evidence.
+    ///
+    /// `None` when nothing matches, which is the common case for an engagement whose
+    /// identities were added after the traffic was captured.
+    pub fn whose(&self) -> Option<&Identity> {
+        let sent = &self.draft.request.headers;
+        self.identities.iter().find(|identity| {
+            let mut theirs = sent.clone();
+            identity.credential.apply(&mut theirs);
+            identity.credential.header_names().iter().all(|name| {
+                match (sent.get(name), theirs.get(name)) {
+                    (Some(a), Some(b)) => a.value == b.value,
+                    _ => false,
+                }
+            })
+        })
+    }
+
     /// The host this experiment would be sent to.
     ///
     /// The queue key: everything with the same host shares one sequential queue.
@@ -193,6 +225,7 @@ impl Cancel {
 pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
     vec![
         Box::new(checks::auth::AuthEnforcement),
+        Box::new(checks::crossid::CrossIdentity),
         Box::new(checks::reflection::OriginReflection),
         Box::new(checks::echo::InputReflection),
         Box::new(checks::redirect::RedirectDestination),

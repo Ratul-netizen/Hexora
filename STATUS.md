@@ -4,7 +4,7 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M13.6 (authentication enforcement)
+- **Last updated:** M13.7 (cross-identity access, scheduled)
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
 
@@ -43,6 +43,7 @@ milestone.
 | **M13.4** — Reflected input | The check a scanner is most often wrong about, built to be right about it. A probe carries its own markers and the characters worth testing in one value, so one request answers both *did it come back* and *what survived*. Seven contexts are told apart — HTML text, quoted and unquoted attributes, comments, script strings, script source, style, JSON — under the response's **declared** content type rather than a guess, because `{"q":"<script>"}` is inert as JSON and is markup as HTML and the bytes are identical. Confirmed means a *second, different* marker landed the same way, not the same request twice. It never says "cross-site scripting": it says which character came back unencoded and where, then says what it would take to know more |
 | **M13.5** — Redirect destination | The `Location` header is resolved the way a browser resolves it and **never followed** — following a destination the target chose is the one way an automated tool gets talked into traffic nobody authorized, and the scope guard is a backstop rather than a reason to try. The answer is a *host*, not a substring: `//elsewhere`, `/\elsewhere` and `https://trusted@elsewhere` are all taken and all invisible to a filter matching `http`, while `/redirect?to=https://elsewhere` is carried and is refuted **with the reason**. An application that refuses the absolute form and accepts the protocol-relative one is reported as what it is — a filter that does not cover a form browsers treat identically. Probe destinations are `.invalid`, so they never resolve and nobody can ever register them. New invariant 16 |
 | **M13.6** — Authentication enforcement | Two failures a cross-identity matrix cannot see, because every identity in one holds a *valid* credential. Three requests per endpoint: replayed as captured (the baseline — without it an expired session makes everything look refused and the run would report *enforced* having tested nothing), then with no credential, then with the captured credential's **JWT signature** changed by one character and its header and payload byte-identical. An application that accepts the third is not verifying signatures, which is a different sentence from *authentication is missing*. The middle outcome — same status, different content — is its own answer and reaches a report as a lead, because that is what a sign-in page answered 200 looks like. Credentials are broken without ever being written down: no `Display`, a redacting `Debug`, one named accessor. New invariants 17 and 18 |
+| **M13.7** — Cross-identity access, scheduled | M12.1's matrix across an engagement's traffic rather than one request a tester names. Whose session was captured is answered by **applying each declared credential and comparing byte for byte** — an exact answer or none at all, because proxy traffic announces no identity id and everything a cross-identity test concludes rests on getting it right. One implementation, two front doors: the check calls the same `replay_once` and `judge` that `hexora authz` does, so a scheduled verdict and an on-demand one cannot disagree. A budget too small for every identity sends **nothing** rather than testing a subset and reporting it as the whole. Against the IDOR demo it reached **Firm with no declared object ids**, through M12.10's same-document path behind a refused anonymous control |
 
 ## Next
 
@@ -115,14 +116,12 @@ M13.7  IDOR/BOLA automation          M12.5 as a scanner primitive
 
 The one immediately next, in more detail:
 
-- **M13.7 — IDOR/BOLA automation.** M12.5 becomes a scheduler primitive: identifier →
-  ownership → cross-identity substitution → control → constructed request →
-  differential → verification. This is also where the **multi-identity** half of
-  M13.6's roadmap line lands — replaying one endpoint as User A, User B and Anonymous
-  across an engagement's traffic rather than one request at a time. M12.1 already does
-  it on demand today; scheduling it needs `AuthzTester` to work over a `Lab` rather
-  than owning a `Repeater`, which is a seam worth opening deliberately rather than in
-  passing.
+- **M14 — the manual-testing pillar.** Intercept editor, Repeater tabs, match/replace,
+  scope organisation, search and filter, manual findings as first-class. The scanner
+  work of M13 is built on evidence a person gathers; the interface for gathering it by
+  hand has had one milestone (M12.4) to the scanner's eight. *Manual testing is not a
+  legacy mode beneath automation — it is the source of experiments, evidence and
+  eventually automation.*
 
 Still open in M12: **attack chains** that retain evidence at every step.
 
@@ -137,6 +136,19 @@ over plain HTTP on loopback. The pacing and ceiling are unit-tested against a
 recording lab with real timing, and the whole thing has never been pointed at a large
 application, a rate-limited one, or one behind a CDN that answers differently to an
 unfamiliar `Origin`.
+
+**What the scheduled cross-identity check does not cover.** *Constructed* requests —
+substituting a declared object identifier that belongs to somebody else. M12.5 does
+that on demand and the roadmap named it as part of M13.7; what shipped is the **replay**
+half, which needs no declarations and therefore works on every engagement. The
+constructed half needs `hexora object add` to have been used, and scheduling it is a
+smaller increment now that the replay machinery is schedulable. Recorded as a decision
+rather than an omission.
+
+Also not covered: an endpoint whose captured credential matches no declared identity is
+reported as untested rather than guessed at, so an engagement whose identities were
+added after the traffic was captured gets nothing from this check until the traffic is
+re-captured.
 
 **What authentication enforcement covers, and what it does not.** M13.6's roadmap
 line named two things: *"the same request as User A, User B and Anonymous, compared

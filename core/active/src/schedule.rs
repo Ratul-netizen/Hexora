@@ -132,6 +132,28 @@ impl Plan {
             .check()
             .map_err(|why| hexora_types::HexoraError::invalid_input("budget", why))?;
 
+        // Read once for the whole plan rather than per experiment. A project has a
+        // handful of identities and a queue has hundreds of subjects.
+        //
+        // The anonymous principal is created here if the project does not hold one.
+        // Not a nicety: `requests.identity_id` has a foreign key, so a request
+        // attributed to a principal the project has never heard of cannot be stored,
+        // and the send fails at the last step with an error about a database
+        // constraint. `hexora authz` has always done this for the same reason.
+        //
+        // It writes a row and sends nothing, which is the promise `prepare` makes.
+        let mut identities = project.identities().list().unwrap_or_default();
+        if !identities
+            .iter()
+            .any(|identity| identity.privilege == hexora_types::identity::PrivilegeLevel::Anonymous)
+        {
+            let anonymous = hexora_types::identity::Identity::anonymous();
+            if project.identities().put(&anonymous).is_ok() {
+                identities.push(anonymous);
+            }
+        }
+        let identities = std::sync::Arc::new(identities);
+
         let mut work = Vec::new();
         let mut skipped = Vec::new();
 
@@ -221,6 +243,7 @@ impl Plan {
                 target: exchange.target,
                 exchange,
                 draft,
+                identities: identities.clone(),
             });
         }
 

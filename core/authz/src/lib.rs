@@ -589,7 +589,7 @@ impl<T: HttpTransport> AuthzTester<T> {
 /// repeater, because the verifier needs exactly this and must not be handed a
 /// transport of its own. Both callers go through the same scope guard because there
 /// is only one way to send.
-pub(crate) async fn replay_once(
+pub async fn replay_once(
     lab: &dyn hexora_verify::Lab,
     draft: &hexora_repeater::Draft,
     identity: &Identity,
@@ -645,6 +645,25 @@ pub(crate) async fn replay_once(
                 "served this identity's own data ({})",
                 cell.own_object_ids.join(", ")
             ));
+        } else if cell.leaked_object_ids.is_empty()
+            && cell
+                .structure
+                .as_ref()
+                .is_some_and(|structure| structure.every_value_differs())
+        {
+            // The same conclusion, reached without a declaration. Two documents of
+            // identical shape whose *every* value differs are two users' own records:
+            // an IDOR would have returned the owner's values, not different ones.
+            //
+            // M12.10 built `every_value_differs` for exactly this and nothing used it.
+            // Without it, `GET /profile` — the textbook correctly-scoped endpoint — is
+            // reported as a violation in every scheduled run, and a scanner that cries
+            // wolf about the endpoint that is working is one whose output gets skipped.
+            cell.outcome = Outcome::Different;
+            cell.note = Some(
+                "every value in this response differs from the owner's, which is what an                  endpoint that scopes its lookup to the caller looks like"
+                    .into(),
+            );
         }
         cell.verdict = verdict_for(&cell, identity, owner);
         cell
@@ -1083,6 +1102,96 @@ mod tests {
             "an application that scopes the lookup to the session is working"
         );
         assert!(cell.note.as_deref().unwrap().contains("own data"));
+    }
+
+    #[tokio::test]
+    async fn an_endpoint_scoped_to_the_caller_is_cleared_without_any_declaration() {
+        // The same conclusion as the test above, reached with no `owned_object_ids` at
+        // all. Two documents of identical shape whose *every* value differs are two
+        // users' own records — an IDOR would have returned the owner's values, not
+        // different ones.
+        //
+        // This is what a scheduled run needs: nobody declares object identifiers for
+        // every endpoint in an engagement, and without it `GET /profile` is reported as
+        // a violation on every pass.
+        let app = Application::with(&[
+            (
+                "Bearer TOKEN_A",
+                200,
+                r#"{"id":"acct-1000","owner":"alice","balance":17}"#,
+            ),
+            (
+                "Bearer TOKEN_B",
+                200,
+                r#"{"id":"acct-2000","owner":"bob","balance":92}"#,
+            ),
+        ]);
+        let (store, identities) = project();
+        let base = capture(&store);
+        let tester = tester(app, store, identities);
+
+        // No declarations on either side.
+        let mut owner = Identity::bearer("User A", "TOKEN_A");
+        owner.owned_object_ids.clear();
+        let peer = Identity::bearer("User B", "TOKEN_B");
+
+        let matrix = tester
+            .run(&Plan::new(base, owner, vec![peer]))
+            .await
+            .unwrap()
+            .matrix;
+
+        let cell = &matrix.cells[0];
+        assert!(cell.own_object_ids.is_empty(), "nothing was declared");
+        assert!(cell.leaked_object_ids.is_empty());
+        assert!(
+            cell.structure.as_ref().unwrap().every_value_differs(),
+            "the structural comparison is what establishes this"
+        );
+        assert_eq!(cell.outcome, Outcome::Different);
+        assert_eq!(
+            cell.verdict,
+            Verdict::Expected,
+            "reporting the endpoint that is working is how a scanner's output gets \
+             skipped"
+        );
+        assert!(cell.note.as_deref().unwrap().contains("scopes its lookup"));
+    }
+
+    #[tokio::test]
+    async fn an_identical_response_is_still_a_violation_without_declarations() {
+        // The other half, and the reason the rule above is safe: when the peer is
+        // served the *owner's* values rather than different ones, nothing is cleared.
+        let app = Application::with(&[
+            (
+                "Bearer TOKEN_A",
+                200,
+                r#"{"id":"acct-1000","owner":"alice","balance":17}"#,
+            ),
+            (
+                "Bearer TOKEN_B",
+                200,
+                r#"{"id":"acct-1000","owner":"alice","balance":17}"#,
+            ),
+        ]);
+        let (store, identities) = project();
+        let base = capture(&store);
+        let tester = tester(app, store, identities);
+
+        let mut owner = Identity::bearer("User A", "TOKEN_A");
+        owner.owned_object_ids.clear();
+        let peer = Identity::bearer("User B", "TOKEN_B");
+
+        let matrix = tester
+            .run(&Plan::new(base, owner, vec![peer]))
+            .await
+            .unwrap()
+            .matrix;
+
+        let cell = &matrix.cells[0];
+        assert!(!cell.structure.as_ref().unwrap().every_value_differs());
+        assert_eq!(cell.outcome, Outcome::Allowed);
+        assert_eq!(cell.verdict, Verdict::Violation);
     }
 
     #[tokio::test]

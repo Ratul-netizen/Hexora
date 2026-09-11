@@ -151,8 +151,11 @@ impl ActiveCheck for AuthEnforcement {
             return Ok(Verification::Refuted {
                 note: format!(
                     "{} {} answered {} without a credential, so a session is required. \
-                     The captured request carried no credential this check knows how to \
-                     break, so whether the session is verified was not tested",
+                     Whether it is verified was not tested: the captured request either \
+                     carried no credential this check knows how to break, or breaking it \
+                     produced another credential this project declares — which would \
+                     have been answered legitimately and read as a session nobody \
+                     checked",
                     subject.exchange.method,
                     path_of(&subject.exchange.url),
                     none.status,
@@ -451,6 +454,18 @@ async fn send(subject: &Subject, lab: &dyn Lab, probe: Probe) -> Attempt {
                 return Attempt::Answered(skipped());
             };
             let tampered = credential.tamper();
+
+            // Changing one character can land on another *valid* credential. It is
+            // vanishingly unlikely against real tokens and certain against a test
+            // fixture whose users differ by their last character — and the result is a
+            // 200 that reads exactly like a session nobody verified, which is the
+            // worst false positive this check could produce.
+            //
+            // The project knows every credential it declared, so this is checkable
+            // rather than a risk to be accepted.
+            if collides(&draft.request.headers, &tampered, &subject.identities) {
+                return Attempt::Answered(skipped());
+            }
             what = Some(tampered.describe());
             // The one place the probe bytes are used. They go onto the wire and
             // nowhere else: `what` carries the description, never the value.
@@ -473,6 +488,31 @@ async fn send(subject: &Subject, lab: &dyn Lab, probe: Probe) -> Attempt {
         }),
         Err(e) => Attempt::Failed(e.to_string()),
     }
+}
+
+/// Whether a broken credential happens to be another declared identity's.
+///
+/// Compared by applying each declared credential to a copy of the headers the probe
+/// would send, which is the same technique `Subject::whose` uses and for the same
+/// reason: an exact answer, and no credential written down anywhere.
+fn collides(
+    headers: &hexora_types::http::Headers,
+    tampered: &hexora_types::credential::Tampered,
+    identities: &[hexora_types::identity::Identity],
+) -> bool {
+    let mut probe = headers.clone();
+    probe.set(tampered.header(), tampered.expose_value());
+
+    identities.iter().any(|identity| {
+        let mut theirs = probe.clone();
+        identity.credential.apply(&mut theirs);
+        identity.credential.header_names().iter().all(|name| {
+            match (probe.get(name), theirs.get(name)) {
+                (Some(a), Some(b)) => a.value == b.value,
+                _ => false,
+            }
+        })
+    })
 }
 
 fn skipped() -> Answer {
