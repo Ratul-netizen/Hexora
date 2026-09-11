@@ -27,10 +27,19 @@
 //! project the report *says so* rather than printing a reference that resolves to
 //! nothing — see [`Citation::Missing`].
 //!
-//! **Credentials do not travel.** Sensitive headers are redacted by default under
-//! [`RedactionPolicy`], and the report states that it did so. A reader who cannot
-//! tell whether a blank `Authorization` header means "redacted" or "not sent" cannot
-//! reproduce anything.
+//! **The credentials Hexora sent do not travel.** Sensitive headers are redacted by
+//! default under [`RedactionPolicy`], and the report states that it did so. A reader
+//! who cannot tell whether a blank `Authorization` header means "redacted" or "not
+//! sent" cannot reproduce anything.
+//!
+//! **Response bodies are printed as the application served them**, and that is not the
+//! same promise. If an application puts a session token in a JSON body, it is in the
+//! transcript — because the transcript is the evidence, and a report that quietly
+//! rewrote what a server sent would be citing something that never happened. The
+//! caveat block says so in as many words, so a reader deciding who may receive the
+//! document knows what is in it. The field-by-field comparison in
+//! [`hexora_types::structure`] withholds credential-named *values*; the transcript
+//! below it does not, and the two are deliberately different.
 //!
 //! ## Excluded findings are counted, not hidden
 //!
@@ -472,7 +481,9 @@ impl Report {
             caveats.push(format!(
                 "Credentials are redacted: header values shown as {REDACTED} were sent \
                  with a real value. Requests below will not reproduce as printed \
-                 without them."
+                 without them. Response bodies are printed as the application served \
+                 them and are not redacted — anything the application itself put in a \
+                 body, a session token included, is in this document."
             ));
         }
         if !leads.is_empty() {

@@ -249,7 +249,9 @@ impl<T: HttpTransport> AuthzTester<T> {
                 hexora_types::HexoraError::invalid_input(
                     "declaration",
                     format!(
-                        "{} could not be recorded ({e}). A declaration names the                          identity that owns the object, and that identity has to be one                          the project already holds",
+                        "{} could not be recorded ({e}). A declaration names the \
+                         identity that owns the object, and that identity has to be \
+                         one the project already holds",
                         declaration.describe()
                     ),
                 )
@@ -1734,7 +1736,8 @@ mod tests {
         assert_eq!(
             findings[0].finding().confidence,
             Confidence::Firm,
-            "an identity received a document of the object's shape carrying the              identifier it asked for: that is a fact about the bytes, not a guess"
+            "an identity received a document of the object's shape carrying the \
+             identifier it asked for: that is a fact about the bytes, not a guess"
         );
         assert!(findings[0].finding().confidence.is_actionable());
         assert!(

@@ -30,6 +30,7 @@
 use std::collections::BTreeSet;
 
 use hexora_types::http::HttpResponse;
+use hexora_types::structure::{Diff, Policy};
 
 /// A response reduced to the parts a cross-identity comparison can use.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +113,53 @@ impl Fingerprint {
                 }
             }
         }
+    }
+}
+
+/// The owner's own response, kept whole so a later comparison can say *what* differed.
+///
+/// A [`Fingerprint`] answers "did the same kind of document come back?" and throws the
+/// document away doing it. That is the right reduction for a score and the wrong one
+/// for a sentence somebody can act on, so the baseline keeps the bytes as well:
+///
+/// ```text
+/// fingerprint  →  "97% alike"                       a number nobody can check
+/// structure    →  "$.email was present for User A   a claim somebody can check
+///                  and absent for User B"
+/// ```
+///
+/// It costs one response body held for the length of a run, which is the same body the
+/// run has already stored.
+#[derive(Debug, Clone)]
+pub struct Baseline {
+    /// The reduced form, for scoring.
+    pub fingerprint: Fingerprint,
+    /// The owner's response body, exactly as it arrived.
+    body: bytes::Bytes,
+}
+
+impl Baseline {
+    /// Takes the owner's fresh response as the thing every other cell is compared to.
+    pub fn of(response: &HttpResponse) -> Self {
+        Self {
+            fingerprint: Fingerprint::of(response),
+            body: response.body.clone(),
+        }
+    }
+
+    /// How alike another response is, 0.0 to 1.0.
+    pub fn similarity(&self, other: &Fingerprint) -> f32 {
+        self.fingerprint.similarity(other)
+    }
+
+    /// Where another response differs from the owner's, field by field.
+    ///
+    /// Under [`Policy::default`], which withholds credential values and sets aside the
+    /// fields an application changes on every request — each one still listed with its
+    /// reason, because a comparison that quietly dropped evidence would be the thing
+    /// this crate exists not to be.
+    pub fn structure(&self, response: &HttpResponse) -> Diff {
+        Diff::of(&self.body, &response.body, &Policy::default())
     }
 }
 

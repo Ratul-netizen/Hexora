@@ -591,6 +591,56 @@ anyway.
 
 ---
 
+## 14. A comparison never sets evidence aside without saying so
+
+Two responses from a real application always differ somewhere — a timestamp, a nonce,
+a CSRF token. Ignoring those is necessary for a comparison to mean anything, and it is
+exactly the point where a tool starts quietly altering the evidence it reports on.
+
+So normalization is a **policy the caller passes in**, and two rules hold:
+
+1. **Nothing is removed.** A field the policy set aside is still in the difference
+   list, carrying the reason and both values. A reader can see what was ignored and
+   disagree with it.
+2. **The policy is reportable.** `Policy::describe()` goes into the CLI output, the
+   matrix JSON, the finding's evidence line and the window, so a report never says
+   "these two responses matched" without saying what was allowed not to match.
+
+`Policy::strict()` sets nothing aside at all, and is what to use when the question is
+whether two documents are identical.
+
+**`id`, `uuid` and `key` are never treated as dynamic.** They are precisely what a
+cross-identity comparison exists to look at; a policy that set one aside would set
+aside the finding. `an_identifier_is_never_treated_as_dynamic` asserts it by name.
+
+**Credential-named fields report the difference and withhold the value.** That a
+session token differs between two identities is correct and worth seeing. What it was
+does not belong in a comparison, a matrix, or a report — see invariants 4 and 13.
+
+**Duplicate keys are reported rather than collapsed.** `{"id":"1000","id":"1001"}` is
+valid JSON that every parser reduces to one key, and which one survives is the
+parser's business rather than the application's. The comparison flags the body instead
+of comparing something the server did not send.
+
+**The original bytes are never touched.** The normalized form lives inside one
+comparison and is never stored, quoted as evidence, or re-sent. Every other layer
+still cites the response exactly as it arrived.
+
+**Tests.** `core/types/src/structure.rs` —
+`a_strict_policy_sets_nothing_aside`,
+`a_field_the_policy_sets_aside_is_still_reported_with_its_reason`,
+`the_policy_says_what_it_did`,
+`an_identifier_is_never_treated_as_dynamic`,
+`a_credential_field_reports_the_change_and_withholds_the_value`,
+`a_credential_is_recognised_however_the_application_spells_it`,
+`a_repeated_key_is_reported_rather_than_silently_collapsed`,
+`the_bodies_are_never_modified`;
+`core/authz/src/analysis.rs` —
+`a_credential_in_a_body_does_not_reach_the_evidence`,
+`the_same_document_without_an_anonymous_control_stays_a_lead`.
+
+---
+
 ## Changing an invariant
 
 These can change — but through a deliberate decision recorded in `docs/`, with the

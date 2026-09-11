@@ -48,6 +48,7 @@ pub mod raw;
 pub mod redact;
 pub mod scope;
 pub mod snapshot;
+pub mod structure;
 pub mod tls;
 pub mod verify;
 
@@ -62,6 +63,7 @@ pub use raw::{RawRequest, RequestMode, RequestSource};
 pub use redact::{RedactionPolicy, Secret};
 pub use scope::{Scope, ScopeRule};
 pub use snapshot::{Comparison, Contents as SnapshotContents, Snapshot};
+pub use structure::{Comparable, Diff, FieldChange, FieldDifference, Policy, Quirk, SetAside};
 pub use tls::{CertificateSummary, TlsInfo};
 pub use verify::{
     DetectorId, DetectorInfo, DetectorMode, Observation, Significance, Support, Verification,
@@ -76,4 +78,4 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped whenever the UI/engine boundary changes shape. The desktop client refuses
 /// to talk to an engine reporting a different major value rather than misinterpreting
 /// messages.
-pub const RPC_CONTRACT_VERSION: u32 = 8;
+pub const RPC_CONTRACT_VERSION: u32 = 9;

@@ -95,6 +95,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Findings with Markdown + export | ⚠️ | ✅ | **IMPLEMENTED M12.3** | |
 | Finding says which check and version produced it | ⚠️ | — | **IMPLEMENTED M13.2** | Printed in the report, and what lets a retest tell a fix from a rewritten check |
 | Runnable proof of concept generated from evidence | ⚠️ manual | ⚠️ manual | **IMPLEMENTED M12.9** | Built from the stored exchanges, with credentials as named placeholders. `curl` where curl can express the request, and a stated reason where it cannot |
+| Response comparison names the field that differed | ⚠️ visual diff | ⚠️ visual diff | **IMPLEMENTED M12.10** | By JSON path with array indices kept, under a normalization policy that is reported rather than applied silently. Credential-named fields report the difference and withhold the value |
 
 ## 5. Extensibility
 

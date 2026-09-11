@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 8;
+export const EXPECTED_RPC_CONTRACT_VERSION = 9;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -318,6 +318,43 @@ export interface CellView {
   verification_note: string | null;
   error: string | null;
   note: string | null;
+  /**
+   * Where this response differs from the owner's, field by field. `null` when
+   * nothing was sent, so there was nothing to compare.
+   */
+  structure: StructureView | null;
+}
+
+/** One field where two responses disagree. */
+export interface DifferenceView {
+  /** `$.account.email`. */
+  path: string;
+  /** `appeared`, `disappeared`, `changed` or `type changed`. */
+  change: string;
+  /** The whole thing in one line, naming both identities. */
+  detail: string;
+  /** Whether the field's name suggests it carries something personal. */
+  notable: boolean;
+}
+
+/** A structural comparison of two responses. */
+export interface StructureView {
+  /** `structurally`, `not_structured` or `only_one_side`. */
+  comparable: string;
+  /** Whether the two responses are the same document everywhere that counts. */
+  same_document: boolean;
+  /** Whether every shared value differs, which is what a scoped endpoint looks like. */
+  every_value_differs: boolean;
+  shared_paths: number;
+  total_paths: number;
+  /** What the comparison was allowed to ignore, in words. */
+  policy: string;
+  /** The differences that count, most notable first. */
+  differences: DifferenceView[];
+  /** The ones the policy set aside — listed, never dropped. */
+  set_aside: DifferenceView[];
+  /** Anything about the bodies a reader should know first. */
+  quirks: string[];
 }
 
 /** One constructed cross-identity attempt. */

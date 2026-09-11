@@ -22,8 +22,17 @@
 //! | ---------------- | ------------ | ---------- |
 //! | Another identity got a response of the same shape | `Supported(Consistent)` | `Tentative` |
 //! | The owner's own object identifier appeared in it | `Supported(Distinctive)` | `Firm` |
+//! | It was the *same document*, and anonymous was refused it | `Supported(Distinctive)` | `Firm` |
 //! | A second experiment produced the same result | `Reproduced` | `Confirmed` |
 //! | A second experiment did not | `Supported(Consistent)` | `Tentative` |
+//!
+//! The second row needs a declaration; the third does not, which is the point of it —
+//! M12.10's field-by-field comparison can establish that two identities were served
+//! not a document of the same *shape* but the same *document*, and that is a fact
+//! about the bytes rather than a score. It is gated on the unauthenticated control
+//! because two identities reading an identical *public* page looks exactly the same
+//! from inside a comparison, and [`AnonymousControl::NotTried`] does not clear the
+//! gate: a run that did not look has not shown anything.
 //!
 //! The last row is a deliberate change of behaviour. A violation that did not happen
 //! again used to keep whatever confidence the first result had earned, with a note
@@ -56,8 +65,9 @@ use hexora_types::verify::{
 use hexora_types::Result;
 use hexora_verify::{Detector, Lab, Verifier};
 
+use crate::compare::Baseline;
 use crate::construct::{Attempt, Construction};
-use crate::{Cell, Fingerprint, Matrix, Outcome, Verdict};
+use crate::{AnonymousControl, Cell, Matrix, Outcome, Verdict};
 
 /// The check that replays one captured request as everybody.
 pub const CROSS_IDENTITY: DetectorInfo = DetectorInfo {
@@ -151,7 +161,9 @@ pub struct ReplayVerifier<'a> {
     /// The identity the captured request belonged to.
     pub owner: &'a Identity,
     /// The owner's response, to compare a second reply against.
-    pub baseline: &'a Fingerprint,
+    pub baseline: &'a Baseline,
+    /// What an unauthenticated request established, if one was sent.
+    pub control: AnonymousControl,
     /// The owner's own request, so a comparison cites both sides.
     pub owner_request: Option<hexora_types::ids::RequestId>,
     /// Whether to perform the second experiment.
@@ -173,12 +185,16 @@ impl Verifier for ReplayVerifier<'_> {
         lab: &dyn Lab,
     ) -> Result<Verification> {
         let cell = &case.cell;
-        let distinctive = !cell.leaked_object_ids.is_empty();
         let evidence = evidence_for(cell, self.owner_request, &self.owner.label);
 
         if !self.repeat {
-            let _ = (distinctive, evidence);
-            return Ok(judge(cell, &self.owner.label, self.owner_request));
+            let _ = evidence;
+            return Ok(judge(
+                cell,
+                &self.owner.label,
+                self.owner_request,
+                self.control,
+            ));
         }
 
         let Some(identity) = &case.identity else {
@@ -234,25 +250,26 @@ pub(crate) fn judge(
     cell: &Cell,
     owner_label: &str,
     owner_request: Option<hexora_types::ids::RequestId>,
+    control: AnonymousControl,
 ) -> Verification {
     supported(
-        !cell.leaked_object_ids.is_empty(),
         cell,
         owner_label,
+        control,
         evidence_for(cell, owner_request, owner_label),
     )
 }
 
 fn supported(
-    distinctive: bool,
     cell: &Cell,
     owner_label: &str,
+    control: AnonymousControl,
     evidence: Vec<Evidence>,
 ) -> Verification {
-    if distinctive {
+    if !cell.leaked_object_ids.is_empty() {
         // Not a similarity score: a declared identifier belonging to somebody else,
         // in a response served to this caller. That is a fact about the bytes.
-        Verification::Supported {
+        return Verification::Supported {
             support: Support::Distinctive,
             note: format!(
                 "the response served to {} contained {}, declared as {}'s",
@@ -261,18 +278,59 @@ fn supported(
                 owner_label
             ),
             evidence,
+        };
+    }
+
+    // The same strength of fact, reached without a declaration. Two identities served
+    // *the same document* — not a document of the same shape, the same one — is a
+    // claim a reader can check field by field, which a percentage never is.
+    //
+    // Gated on the unauthenticated control, because the one thing that reading
+    // identical is also consistent with is a public page. `NotTried` does not clear
+    // that gate: a run that did not look has not shown anything.
+    if control == AnonymousControl::Refused {
+        if let Some(structure) = &cell.structure {
+            if structure.same_document() {
+                return Verification::Supported {
+                    support: Support::Distinctive,
+                    note: format!(
+                        "{} and {} were served the same document at every one of its \
+                         {} field(s), and an unauthenticated request was refused it, \
+                         so it is not a public page ({})",
+                        cell.label,
+                        owner_label,
+                        structure.shared_paths,
+                        structure.policy.describe(),
+                    ),
+                    evidence,
+                };
+            }
         }
-    } else {
-        Verification::Supported {
-            support: Support::Consistent,
-            note: format!(
+    }
+
+    Verification::Supported {
+        support: Support::Consistent,
+        note: match cell
+            .structure
+            .as_ref()
+            .filter(|d| d.counted().next().is_some())
+        {
+            Some(structure) => format!(
+                "{} received a response {:.0}% alike the one served to {}, differing \
+                 at {}",
+                cell.label,
+                cell.similarity * 100.0,
+                owner_label,
+                structure.summary(owner_label, &cell.label),
+            ),
+            None => format!(
                 "{} received a response {:.0}% alike the one served to {}",
                 cell.label,
                 cell.similarity * 100.0,
                 owner_label
             ),
-            evidence,
-        }
+        },
+        evidence,
     }
 }
 
@@ -287,12 +345,27 @@ fn evidence_for(
     };
 
     let difference = if cell.leaked_object_ids.is_empty() {
+        // A percentage is where this used to stop. The structural comparison says
+        // which fields it is a percentage *of*, which is the difference between a
+        // number a developer can argue with and a line they can go and look at.
+        let structure = match cell.structure.as_ref() {
+            Some(structure) if structure.same_document() => format!(
+                " — the same document at every one of its {} field(s) ({})",
+                structure.shared_paths,
+                structure.policy.describe(),
+            ),
+            Some(structure) if structure.counted().next().is_some() => {
+                format!(" — {}", structure.summary(owner_label, &cell.label))
+            }
+            _ => String::new(),
+        };
         format!(
-            "{} received a response {:.0}% alike the one served to {} (status {})",
+            "{} received a response {:.0}% alike the one served to {} (status {}){}",
             cell.label,
             cell.similarity * 100.0,
             owner_label,
             cell.status.unwrap_or(0),
+            structure,
         )
     } else {
         format!(
@@ -863,6 +936,7 @@ mod tests {
             request: Some(RequestId::new()),
             status: Some(200),
             similarity: 0.98,
+            structure: None,
             outcome: Outcome::Allowed,
             verdict,
             leaked_object_ids: Vec::new(),
@@ -871,6 +945,26 @@ mod tests {
             error: None,
             note: None,
         }
+    }
+
+    /// A cell carrying a real structural comparison of two bodies.
+    fn compared(label: &str, verdict: Verdict, control: &str, variant: &str) -> Cell {
+        let mut cell = cell(label, PrivilegeLevel::User, verdict);
+        cell.structure = Some(hexora_types::structure::Diff::of(
+            control.as_bytes(),
+            variant.as_bytes(),
+            &hexora_types::structure::Policy::default(),
+        ));
+        cell
+    }
+
+    /// An unauthenticated cell that was refused, which is what makes "the same
+    /// document" mean something.
+    fn refused_anonymous() -> Cell {
+        let mut cell = cell("anonymous", PrivilegeLevel::Anonymous, Verdict::Expected);
+        cell.status = Some(403);
+        cell.outcome = Outcome::Denied;
+        cell
     }
 
     fn matrix(cells: Vec<Cell>) -> Matrix {
@@ -897,7 +991,12 @@ mod tests {
                     .cells
                     .iter()
                     .find(|cell| cell.request == Some(hypothesis.source_request))?;
-                let verification = judge(cell, &matrix.owner.label, matrix.owner.request);
+                let verification = judge(
+                    cell,
+                    &matrix.owner.label,
+                    matrix.owner.request,
+                    matrix.anonymous_control(),
+                );
                 Verified::conclude(
                     &hypothesis,
                     &verification,
@@ -956,6 +1055,92 @@ mod tests {
     }
 
     #[test]
+    fn the_same_document_behind_a_refused_anonymous_request_is_stated_firmly() {
+        // The claim a percentage cannot make. Two identities were served not a
+        // document of the same shape but *the same document*, and an unauthenticated
+        // request did not get it — so it is not a public page. That is checkable field
+        // by field, which is what raises it above a lead.
+        let body = r#"{"id":"acct-1000","owner":"User A","balance":4210}"#;
+        let matrix = matrix(vec![
+            compared("User B", Verdict::Violation, body, body),
+            refused_anonymous(),
+        ]);
+        assert_eq!(matrix.anonymous_control(), AnonymousControl::Refused);
+
+        let findings = findings(&matrix, TargetId::new());
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert_eq!(findings[0].confidence, Confidence::Firm);
+        assert!(findings[0].confidence.is_actionable());
+    }
+
+    #[test]
+    fn the_same_document_without_an_anonymous_control_stays_a_lead() {
+        // A run that did not try an unauthenticated request has not shown the resource
+        // is non-public. Two identities reading an identical public page is exactly
+        // what this looks like, so it does not get to be a firm claim.
+        let body = r#"{"id":"acct-1000","owner":"User A","balance":4210}"#;
+        let matrix = matrix(vec![compared("User B", Verdict::Violation, body, body)]);
+        assert_eq!(matrix.anonymous_control(), AnonymousControl::NotTried);
+
+        let findings = findings(&matrix, TargetId::new());
+        assert_eq!(findings[0].confidence, Confidence::Tentative);
+    }
+
+    #[test]
+    fn two_different_documents_are_not_raised_however_alike_they_score() {
+        // 98% alike and every value belonging to somebody else. The score says yes,
+        // the fields say no, and the fields win.
+        let matrix = matrix(vec![
+            compared(
+                "User B",
+                Verdict::Violation,
+                r#"{"id":"acct-1000","owner":"User A","balance":4210}"#,
+                r#"{"id":"acct-2000","owner":"User B","balance":17}"#,
+            ),
+            refused_anonymous(),
+        ]);
+        let findings = findings(&matrix, TargetId::new());
+        assert_eq!(findings[0].confidence, Confidence::Tentative);
+    }
+
+    #[test]
+    fn the_evidence_names_the_field_that_differed_rather_than_only_a_percentage() {
+        let matrix = matrix(vec![compared(
+            "User B",
+            Verdict::Violation,
+            r#"{"id":"acct-1000","email":"alice@example.com"}"#,
+            r#"{"id":"acct-1000"}"#,
+        )]);
+        let findings = findings(&matrix, TargetId::new());
+        let difference = findings[0]
+            .evidence
+            .iter()
+            .find_map(|e| match e {
+                Evidence::Comparison { difference, .. } => Some(difference.clone()),
+                _ => None,
+            })
+            .expect("a comparison");
+        assert!(difference.contains("$.email"), "{difference}");
+        assert!(difference.contains("absent for User B"), "{difference}");
+    }
+
+    #[test]
+    fn a_credential_in_a_body_does_not_reach_the_evidence() {
+        // The comparison reads response bodies, so it is a path a session value could
+        // travel down. It reports that the field differed and withholds what it was.
+        let matrix = matrix(vec![compared(
+            "User B",
+            Verdict::Violation,
+            r#"{"id":"acct-1000","session_token":"secret-value-for-a"}"#,
+            r#"{"id":"acct-1000","session_token":"secret-value-for-b"}"#,
+        )]);
+        let findings = findings(&matrix, TargetId::new());
+        let rendered = format!("{:#?}", findings[0]);
+        assert!(!rendered.contains("secret-value-for-a"), "{rendered}");
+        assert!(!rendered.contains("secret-value-for-b"), "{rendered}");
+    }
+
+    #[test]
     fn a_leaked_identifier_raises_confidence_and_severity() {
         let mut violating = cell("User B", PrivilegeLevel::User, Verdict::Violation);
         violating.leaked_object_ids = vec!["acct-1000".into()];
@@ -1009,9 +1194,14 @@ mod tests {
         )]);
         let reproduced = Verification::Reproduced {
             note: "it happened again".into(),
-            evidence: judge(&matrix.cells[0], &matrix.owner.label, matrix.owner.request)
-                .evidence()
-                .to_vec(),
+            evidence: judge(
+                &matrix.cells[0],
+                &matrix.owner.label,
+                matrix.owner.request,
+                matrix.anonymous_control(),
+            )
+            .evidence()
+            .to_vec(),
         };
         let findings = finding_with(&matrix, &reproduced)
             .into_iter()

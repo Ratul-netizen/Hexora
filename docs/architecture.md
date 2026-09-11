@@ -35,6 +35,7 @@ influenced part of the process.
 | `core/scan` | Passive checks over captured traffic, and the pass that runs them. Takes no transport | **Implemented** (M13.2) |
 | `core/authz` | Authorization matrices: replay as several identities, compare structurally, produce evidence-gated findings. Constructs cross-identity requests from declared object identifiers (M12.5). Suggests values that might *be* identifiers, without deciding that they are (M12.7) | **Implemented** (M12.1, M12.5, M12.7) |
 | `core/report` | Renders a project's findings into Markdown, self-contained HTML or JSON, resolving every citation against the stored traffic, and compiles a finding into a runnable reproduction | **Implemented** (M12.3, M12.9) |
+| `core/types::structure` | Says *where* two response bodies differ, by JSON path, under a normalization policy the caller passes in and the report prints | **Implemented** (M12.10) |
 | `apps/cli` | `hexora` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |
@@ -205,6 +206,31 @@ M12.1 and M12.5 were rewritten onto this in the same change, so the framework ha
 real user rather than a hypothetical one: `MatrixDetector` raises a hypothesis per
 violating cell, `ReplayVerifier` runs the second experiment through a `Lab`, and the
 findings come out the far end identical to what the hand-written path produced.
+
+## A comparison that produces a sentence
+
+`Fingerprint` answers "did the same kind of document come back?" and throws the
+document away doing it. That is the right reduction for a score and the wrong one for
+something a reader can check, so `Baseline` keeps the owner's bytes as well and
+`hexora_types::structure` compares against them:
+
+```text
+fingerprint  →  "97% alike"                      a number nobody can verify
+structure    →  "$.email was present for         a claim somebody can check
+                 User A and absent for User B"
+```
+
+Normalization is the dangerous part, so it is a `Policy` the caller passes in rather
+than a behaviour the engine has. Nothing is removed — a field set aside is still
+listed with both values and the reason — and `Policy::describe()` travels with the
+comparison into the CLI output, the matrix JSON, the evidence line and the window. See
+invariant 14.
+
+It buys the authorization engine a second route to `Support::Distinctive`: two
+identities served *the same document*, with an unauthenticated request refused that
+document, without a hand-declared object id. The anonymous control is the gate,
+because two identities reading an identical *public* page looks exactly the same from
+inside the comparison.
 
 ## The last mile: evidence that can be run
 

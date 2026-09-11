@@ -40,7 +40,7 @@ mod snapshot;
     about = "Hexora — the modern offensive security workbench",
     long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
-                  Development status: M12.9. The proxy, HTTP/1.x engine \
+                  Development status: M12.10. The proxy, HTTP/1.x engine \
                   with TLS, projects, traffic capture, the repeater, authorization \
                   testing with constructed attempts, findings and reports all work. The \n                  scanner and fuzzer do not."
 )]
@@ -1130,14 +1130,14 @@ fn print_version(json: bool) {
             "version": version,
             "schema_version": schema,
             "rpc_contract_version": rpc,
-            "milestone": "M12.9",
+            "milestone": "M12.10",
         });
         println!("{payload}");
     } else {
         println!("hexora {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
-        println!("  milestone:               M12.9 (proof-of-concept compilation)");
+        println!("  milestone:               M12.10 (structural differential analysis)");
     }
 }
 
@@ -1228,7 +1228,7 @@ mod tests {
     fn help_states_the_development_status() {
         let help = Cli::command().render_long_help().to_string();
         assert!(
-            help.contains("M12.9"),
+            help.contains("M12.10"),
             "users must not mistake this for a finished tool"
         );
     }

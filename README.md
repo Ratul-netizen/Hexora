@@ -12,7 +12,7 @@ the same engine, and an extension system with a real permission model.
 
 ---
 
-## Status: M12.9 — findings you can hand somebody and they can run
+## Status: M12.10 — a comparison that says which field, not how alike
 
 Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
@@ -25,6 +25,13 @@ Baseline: User A → 200
 IDENTITY               PRIVILEGE      STATUS  OUTCOME       SIM    VERDICT
 User B                 user           200     allowed       1.00   VIOLATION
 Anonymous              anonymous      401     denied        0.00   ok
+
+Compared with User A's response, field by field:
+
+  User B: the same document at every one of its 7 field(s)
+    2 field(s) set aside: 21 field name(s) treated as changing every request; credential values withheld
+      $.csrf_token — value withheld: the field name says it is a credential
+      $.served_at — `2026-09-11T11:00:01Z` for User A, `2026-09-11T11:00:04Z` for User B (the policy treats this field as changing every request)
 
 1 candidate finding(s):
 
@@ -83,6 +90,7 @@ work.
 | Verification framework: a detector raises a hypothesis, only a verifier's result can be stored, and the compiler enforces it (`hexora detectors`) | **IMPLEMENTED** |
 | Passive scanner: six checks over captured traffic, sending nothing, every result a lead (`hexora scan passive`) | **IMPLEMENTED** |
 | Proof-of-concept compilation: a finding becomes runnable steps, credentials replaced by placeholders (`hexora poc`) | **IMPLEMENTED** |
+| Structural response comparison: which JSON field differed, at which path, under a normalization policy the report states | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings, the report and snapshots | **IMPLEMENTED** |

@@ -622,6 +622,8 @@ function Result({
           </p>
         ))}
 
+      <StructuralDifferences matrix={matrix} />
+
       <h3>
         {matrix.findings.length === 0
           ? "No authorization violations"
@@ -652,6 +654,84 @@ function Result({
           : `${matrix.saved} new, ${matrix.updated} updated in the project. Re-running a test refreshes a claim and leaves its triage decision alone.`}
       </p>
     </section>
+  );
+}
+
+/** How many differing fields a row shows before it stops. */
+const MAX_DIFFERENCES = 6;
+
+/**
+ * What differed, for the rows where a percentage is not an answer.
+ *
+ * A similarity column tells a tester that two responses were 97% alike and leaves them
+ * to open both and find out why. This says which field — which is the part they were
+ * going to go and look for.
+ */
+function StructuralDifferences({ matrix }: { matrix: MatrixView }): JSX.Element | null {
+  const rows = matrix.cells.filter(
+    (cell) => cell.structure !== null && cell.structure.comparable === "structurally",
+  );
+  if (rows.length === 0) return null;
+
+  return (
+    <>
+      <h3>Compared with {matrix.owner.label}'s response, field by field</h3>
+      {rows.map((cell) => {
+        const structure = cell.structure!;
+        const shown = structure.differences.slice(0, MAX_DIFFERENCES);
+        return (
+          <div key={`${cell.identity}-structure`} className="structure">
+            <p>
+              <strong>{cell.label}:</strong>{" "}
+              {structure.same_document
+                ? `the same document at every one of its ${structure.shared_paths} field(s)`
+                : structure.every_value_differs
+                  ? `every one of ${structure.shared_paths} shared value(s) differs — consistent with each caller being served their own record`
+                  : `${structure.differences.length} of ${structure.total_paths} field(s) differ`}
+            </p>
+            {shown.length > 0 && (
+              <ul className="differences">
+                {shown.map((difference) => (
+                  <li
+                    key={difference.path}
+                    className={difference.notable ? "notable" : undefined}
+                  >
+                    <code>{difference.path}</code> {difference.detail.slice(difference.path.length + 3)}
+                  </li>
+                ))}
+                {structure.differences.length > shown.length && (
+                  <li className="muted">
+                    … and {structure.differences.length - shown.length} more
+                  </li>
+                )}
+              </ul>
+            )}
+            {structure.set_aside.length > 0 && (
+              /* Named rather than omitted. A comparison that decided some fields did
+                 not count and did not say so would be altering the evidence. */
+              <details>
+                <summary className="muted small">
+                  {structure.set_aside.length} field(s) set aside: {structure.policy}
+                </summary>
+                <ul className="differences">
+                  {structure.set_aside.map((difference) => (
+                    <li key={difference.path} className="muted">
+                      <code>{difference.path}</code>{" "}
+                      {difference.detail.slice(difference.path.length + 3)}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {structure.quirks.map((quirk) => (
+              <p key={quirk} className="muted small">
+                {quirk}
+              </p>
+            ))}
+          </div>
+        );
+      })}
+    </>
   );
 }
 

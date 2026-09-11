@@ -17,6 +17,7 @@ use hexora_repeater::Repeater;
 use hexora_storage::{FindingStore, Recorded};
 use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
+use hexora_types::structure::Comparable;
 use hexora_types::verify::Verified;
 use hexora_types::{HexoraError, Result};
 
@@ -113,7 +114,8 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
         if declarations.is_empty() {
             return Err(HexoraError::invalid_input(
                 "--construct",
-                "no objects are declared in this project, so there is nothing to                  construct a request for. Declare one with `hexora object add`",
+                "no objects are declared in this project, so there is nothing to \
+                 construct a request for. Declare one with `hexora object add`",
             ));
         }
         let senders = std::iter::once(plan.owner.clone())
@@ -240,6 +242,96 @@ fn choose(
         .collect()
 }
 
+/// What differed, for the rows where a percentage is not an answer.
+///
+/// A similarity column tells a tester that two responses were 97% alike and leaves
+/// them to open both and find out why. This says which field, which is the part they
+/// were going to go and look for.
+fn print_structure(matrix: &Matrix) {
+    let interesting: Vec<&Cell> = matrix
+        .cells
+        .iter()
+        .filter(|cell| cell.structure.is_some())
+        .collect();
+    if interesting.is_empty() {
+        return;
+    }
+
+    let mut printed_heading = false;
+    for cell in interesting {
+        let Some(structure) = &cell.structure else {
+            continue;
+        };
+        if structure.comparable != Comparable::Structurally {
+            continue;
+        }
+        if !printed_heading {
+            println!();
+            println!(
+                "Compared with {}'s response, field by field:",
+                matrix.owner.label
+            );
+            printed_heading = true;
+        }
+        println!();
+        if structure.same_document() {
+            println!(
+                "  {}: the same document at every one of its {} field(s)",
+                cell.label, structure.shared_paths
+            );
+        } else {
+            let ranked = structure.ranked();
+            println!(
+                "  {}: {} of {} field(s) differ",
+                cell.label,
+                ranked.len(),
+                structure.total_paths
+            );
+            if structure.every_value_differs() {
+                // An observation, not a claim: Hexora does not know whose record is
+                // whose without a declaration. It is the shape a correctly-scoped
+                // endpoint has, and a reader can check it against the list below.
+                println!(
+                    "    every one of {} shared value(s) differs — consistent with \
+                     each caller being served their own record",
+                    structure.shared_paths
+                );
+            }
+            for difference in ranked.iter().take(MAX_DIFFERENCES) {
+                println!(
+                    "    {}",
+                    difference.describe(&matrix.owner.label, &cell.label)
+                );
+            }
+            if ranked.len() > MAX_DIFFERENCES {
+                println!("    … and {} more", ranked.len() - MAX_DIFFERENCES);
+            }
+        }
+
+        let aside = structure.set_aside();
+        if aside > 0 {
+            // Named rather than omitted. A comparison that decided some fields did not
+            // count and did not say so would be altering the evidence it reports on.
+            println!(
+                "    {aside} field(s) set aside: {}",
+                structure.policy.describe()
+            );
+            for difference in structure.differences.iter().filter(|d| !d.counts()) {
+                println!(
+                    "      {}",
+                    difference.describe(&matrix.owner.label, &cell.label)
+                );
+            }
+        }
+        for quirk in &structure.quirks {
+            println!("    note: {}", quirk.as_str());
+        }
+    }
+}
+
+/// How many differing fields a matrix row prints before it stops.
+const MAX_DIFFERENCES: usize = 6;
+
 fn print_human(
     matrix: &Matrix,
     construction: Option<&Construction>,
@@ -277,6 +369,8 @@ fn print_human(
         println!("appears to be public. Per-identity results are inconclusive as a result —");
         println!("the finding, if there is one, is that it needs no session at all.");
     }
+
+    print_structure(matrix);
 
     for cell in &matrix.cells {
         if let Some(note) = &cell.note {
@@ -353,6 +447,7 @@ fn print_json(
                 "request": cell.request.map(|r| r.to_string()),
                 "status": cell.status,
                 "similarity": cell.similarity,
+                "structure": cell.structure.as_ref(),
                 "outcome": cell.outcome.as_str(),
                 "verdict": cell.verdict.as_str(),
                 "leaked_object_ids": cell.leaked_object_ids,
@@ -459,6 +554,7 @@ mod tests {
             request: Some(RequestId::new()),
             status: Some(200),
             similarity: 0.97,
+            structure: None,
             outcome: Outcome::Allowed,
             verdict,
             leaked_object_ids: Vec::new(),

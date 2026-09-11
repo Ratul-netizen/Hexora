@@ -508,6 +508,57 @@ Exercised end to end against a local application with a deliberate IDOR *and* a
 correctly built version of the same endpoint: the first produced a High/Confirmed
 finding naming the substitution, the second produced nothing at all.
 
+### Added — M12.10, structural differential analysis
+
+The comparison engine could say two responses were 97% alike. It can now say *which
+field*, which is the difference between a number a developer can dispute and a line
+they can go and look at.
+
+```text
+before:  User B received a response 97% alike the one served to User A
+after:   $.email — `alice@example.com` for User A, absent for User B
+```
+
+**JSON-aware paths, with the indices kept.** Bodies are flattened to one node per path
+— `$.items[3].price`, not `$.items[].price` — and every object and array is recorded
+as well as every leaf, so `{}` and `{"a":null}` agree at the root and differ at `$.a`.
+Each path is classified as `Appeared`, `Disappeared`, `Changed` or `TypeChanged`; a
+number becoming a string is a change of *shape* and is kept apart from a value moving.
+
+**Normalization is an explicit policy, never a silent behaviour.** Two responses from a
+real application always differ at a timestamp or a nonce, and ignoring those is exactly
+where a comparison engine starts quietly altering evidence. So:
+
+- a field the policy sets aside is **still listed**, with both its values and the
+  reason — nothing is removed;
+- `Policy::describe()` prints into the report, so a reader never sees "these matched"
+  without seeing what was allowed not to match;
+- `Policy::strict()` sets nothing aside at all;
+- `id`, `uuid` and `key` are deliberately **not** in the default dynamic list — they
+  are what a cross-identity comparison exists to look at, and setting one aside would
+  set aside the finding. A test asserts it.
+
+**Credential-named fields report the difference and withhold the value.** That a
+session token differs between two identities is correct and worth seeing; what it was
+never travels. Matched on stems, so `session_token` and `x_api_key` are covered
+without the list enumerating every spelling.
+
+**Duplicate JSON keys are reported, not collapsed.** `{"id":"1000","id":"1001"}` is
+valid JSON that every parser reduces to one key, and which one it keeps is the
+parser's business rather than the application's. A body containing repeated keys is
+flagged on the comparison.
+
+**A second route to a firm claim.** Two identities served byte-for-byte the same
+document — with an unauthenticated request *refused* that document — now supports
+`Support::Distinctive` without a hand-declared object id. The anonymous control is the
+gate, and `NotTried` does not clear it: a run that did not look has not shown the
+resource is non-public. Verdicts are unchanged; only the confidence of a claim already
+being made can rise.
+
+Surfaced in the `hexora authz` output, in the matrix JSON, in the evidence line that
+reaches the report, and in a **Compared field by field** section in the window. RPC
+contract version 9.
+
 ### Added — M12.9, proof-of-concept compilation
 
 The last mile of an engagement. A claim in a report invites an argument; the two

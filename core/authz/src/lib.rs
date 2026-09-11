@@ -61,6 +61,15 @@
 //! [`Confidence::Confirmed`] only when a second replay reproduced the same result.
 //! See [`analysis`].
 //!
+//! There is a second route to [`Confidence::Firm`], added in M12.10 and needing no
+//! declaration: two identities served not a document of the same *shape* but the same
+//! *document*, field for field, behind an unauthenticated request that was refused it.
+//! The anonymous control is the gate — two identities reading an identical public page
+//! looks exactly the same from inside a comparison — and
+//! [`AnonymousControl::NotTried`] does not clear it, because a run that did not look
+//! has not shown anything. See [`compare::Baseline`] and
+//! [`hexora_types::structure`].
+//!
 //! ## Requests that change things
 //!
 //! A matrix replays whatever it is given. Pointing one at `DELETE /accounts/42` will
@@ -88,7 +97,7 @@ use hexora_types::identity::{Identity, PrivilegeLevel};
 use hexora_types::ids::{IdentityId, RequestId, TargetId};
 use hexora_verify::Detector;
 
-use crate::compare::{contains_any, Fingerprint, SAME_RESOURCE};
+use crate::compare::{contains_any, Baseline, Fingerprint, SAME_RESOURCE};
 
 /// Methods that are safe to replay because they are not supposed to change anything.
 ///
@@ -159,6 +168,22 @@ impl Verdict {
     }
 }
 
+/// What happened when an unauthenticated request was tried.
+///
+/// The question that separates "two identities were served the same document" from
+/// "two identities were served the same *public* document". Without it, a marketing
+/// page and a bank statement look alike to a comparison, and only one of them is a
+/// finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnonymousControl {
+    /// No unauthenticated request was sent, so nothing is known either way.
+    NotTried,
+    /// An unauthenticated request was sent and did not receive the resource.
+    Refused,
+    /// An unauthenticated request received it too, and the resource is public.
+    Allowed,
+}
+
 /// One identity's replay of the base request.
 #[derive(Debug, Clone)]
 pub struct Cell {
@@ -175,6 +200,13 @@ pub struct Cell {
     pub status: Option<u16>,
     /// How alike the owner's fresh response and this one were, 0.0 to 1.0.
     pub similarity: f32,
+    /// Where this response differs from the owner's, field by field.
+    ///
+    /// The sentence a score cannot produce: not "97% alike" but "`$.email` was present
+    /// for User A and absent for User B". `None` when nothing was sent, so there was
+    /// nothing to compare. Carries the normalization policy that was applied, because
+    /// a comparison that set fields aside without saying so would be altering evidence.
+    pub structure: Option<hexora_types::structure::Diff>,
     /// What happened.
     pub outcome: Outcome,
     /// What it means.
@@ -225,6 +257,34 @@ pub struct Matrix {
 }
 
 impl Matrix {
+    /// What an unauthenticated request established, if one was sent.
+    ///
+    /// [`AnonymousControl::NotTried`] is deliberately not the same as
+    /// [`AnonymousControl::Refused`]: a run without an anonymous control has not shown
+    /// that the resource is non-public, it has merely not looked.
+    pub fn anonymous_control(&self) -> AnonymousControl {
+        let anonymous: Vec<&Cell> = self
+            .cells
+            .iter()
+            .filter(|cell| cell.privilege == PrivilegeLevel::Anonymous)
+            .collect();
+        if anonymous.is_empty() {
+            return AnonymousControl::NotTried;
+        }
+        if anonymous
+            .iter()
+            .any(|cell| cell.outcome == Outcome::Allowed)
+        {
+            return AnonymousControl::Allowed;
+        }
+        // A failed send says nothing; only a reply that was not the resource does.
+        if anonymous.iter().any(|cell| cell.status.is_some()) {
+            AnonymousControl::Refused
+        } else {
+            AnonymousControl::NotTried
+        }
+    }
+
     /// Every cell that showed an identity reaching something it should not have.
     pub fn violations(&self) -> impl Iterator<Item = &Cell> {
         self.cells
@@ -359,7 +419,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             .repeater
             .send_as(&draft, SendAs::authz(&plan.owner))
             .await?;
-        let owner_fingerprint = Fingerprint::of(&owner_sent.exchange.response);
+        let owner_baseline = Baseline::of(&owner_sent.exchange.response);
         let owner_cell = Cell {
             identity: plan.owner.id,
             label: plan.owner.label.clone(),
@@ -367,6 +427,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             request: Some(owner_sent.id),
             status: Some(owner_sent.exchange.response.status),
             similarity: 1.0,
+            structure: None,
             outcome: Outcome::Allowed,
             verdict: Verdict::Expected,
             leaked_object_ids: Vec::new(),
@@ -391,7 +452,7 @@ impl<T: HttpTransport> AuthzTester<T> {
         let mut cells = Vec::with_capacity(identities.len());
         for identity in &identities {
             cells.push(
-                self.replay(&draft, identity, &plan.owner, &owner_fingerprint)
+                self.replay(&draft, identity, &plan.owner, &owner_baseline)
                     .await,
             );
         }
@@ -426,7 +487,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             draft,
             identities,
             owner: plan.owner.clone(),
-            baseline: owner_fingerprint,
+            baseline: owner_baseline,
             repeat: plan.verify,
         })
     }
@@ -466,6 +527,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             draft: &run.draft,
             owner: &run.owner,
             baseline: &run.baseline,
+            control: run.matrix.anonymous_control(),
             owner_request: run.matrix.owner.request,
             repeat: run.repeat,
         };
@@ -508,7 +570,7 @@ impl<T: HttpTransport> AuthzTester<T> {
         draft: &hexora_repeater::Draft,
         identity: &Identity,
         owner: &Identity,
-        baseline: &Fingerprint,
+        baseline: &Baseline,
     ) -> Cell {
         replay_once(
             &hexora_verify::RepeaterLab::new(&self.repeater),
@@ -532,7 +594,7 @@ pub(crate) async fn replay_once(
     draft: &hexora_repeater::Draft,
     identity: &Identity,
     owner: &Identity,
-    baseline: &Fingerprint,
+    baseline: &Baseline,
 ) -> Cell {
     {
         let mut cell = Cell {
@@ -542,6 +604,7 @@ pub(crate) async fn replay_once(
             request: None,
             status: None,
             similarity: 0.0,
+            structure: None,
             outcome: Outcome::Failed,
             verdict: Verdict::Inconclusive,
             leaked_object_ids: Vec::new(),
@@ -566,6 +629,10 @@ pub(crate) async fn replay_once(
         cell.request = Some(sent.id);
         cell.status = Some(response.status);
         cell.similarity = similarity;
+        // Computed for every cell, including the ones that turn out to be fine: a
+        // tester reading a matrix wants to know *why* a row was dismissed as much as
+        // why one was raised, and "every value differed" is that answer.
+        cell.structure = Some(baseline.structure(response));
         cell.outcome = classify(response.status, similarity);
         cell.leaked_object_ids = contains_any(&response.body, &owner.owned_object_ids);
         cell.own_object_ids = contains_any(&response.body, &identity.owned_object_ids);
@@ -608,7 +675,7 @@ pub struct Run {
     draft: hexora_repeater::Draft,
     identities: Vec<Identity>,
     owner: Identity,
-    baseline: Fingerprint,
+    baseline: Baseline,
     repeat: bool,
 }
 
@@ -1208,6 +1275,7 @@ mod tests {
             request: None,
             status: Some(404),
             similarity: 0.0,
+            structure: None,
             outcome: Outcome::NotFound,
             verdict: Verdict::Inconclusive,
             leaked_object_ids: Vec::new(),
@@ -1229,6 +1297,7 @@ mod tests {
             request: None,
             status: Some(200),
             similarity: 0.1,
+            structure: None,
             outcome: Outcome::Different,
             verdict: Verdict::Inconclusive,
             leaked_object_ids: vec!["acct-1000".into()],

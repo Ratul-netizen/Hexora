@@ -957,7 +957,8 @@ mod tests {
         assert_eq!(
             exchange.encoded_body.as_deref(),
             Some(compressed.as_slice()),
-            "and the bytes that actually arrived are kept, which is what shows the              response was a bomb in the first place"
+            "and the bytes that actually arrived are kept, which is what shows the \
+             response was a bomb in the first place"
         );
     }
 

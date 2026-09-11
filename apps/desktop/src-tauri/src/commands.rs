@@ -84,7 +84,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M12.9",
+        milestone: "M12.10",
     }
 }
 
@@ -1383,6 +1383,50 @@ pub struct CellView {
     pub error: Option<String>,
     /// Why a violation was demoted, when it was.
     pub note: Option<String>,
+    /// Where this response differs from the owner's, field by field.
+    ///
+    /// The sentence the similarity column cannot produce. `None` when nothing was
+    /// sent, so there was nothing to compare.
+    pub structure: Option<StructureView>,
+}
+
+/// One field where two responses disagree, ready to render.
+#[derive(Debug, Clone, Serialize)]
+pub struct DifferenceView {
+    /// `$.account.email`.
+    pub path: String,
+    /// `appeared`, `disappeared`, `changed` or `type changed`.
+    pub change: String,
+    /// The whole thing in one line, naming both identities.
+    pub detail: String,
+    /// Whether the field's name suggests it carries something personal.
+    pub notable: bool,
+}
+
+/// A structural comparison, rendered.
+///
+/// Rendered in Rust rather than shipped raw, so the decision about which values are
+/// quoted — see the credential rule in `hexora_types::structure` — is made once, on
+/// the side of the boundary that holds the bytes.
+#[derive(Debug, Clone, Serialize)]
+pub struct StructureView {
+    /// `structurally`, `not_structured` or `only_one_side`.
+    pub comparable: String,
+    /// Whether the two responses are the same document everywhere that counts.
+    pub same_document: bool,
+    /// Whether every shared value differs, which is what a correctly-scoped endpoint
+    /// looks like.
+    pub every_value_differs: bool,
+    pub shared_paths: usize,
+    pub total_paths: usize,
+    /// What the comparison was allowed to ignore, in words.
+    pub policy: String,
+    /// The differences that count, most notable first.
+    pub differences: Vec<DifferenceView>,
+    /// The ones the policy set aside — listed, never dropped.
+    pub set_aside: Vec<DifferenceView>,
+    /// Anything about the bodies a reader should know first.
+    pub quirks: Vec<String>,
 }
 
 /// One constructed cross-identity attempt, as the window shows it.
@@ -1579,8 +1623,12 @@ pub async fn authz_run(
         base: matrix.base.to_string(),
         method: matrix.method.clone(),
         url: matrix.url.clone(),
-        owner: cell_view(&matrix.owner),
-        cells: matrix.cells.iter().map(cell_view).collect(),
+        owner: cell_view(&matrix.owner, &matrix.owner.label),
+        cells: matrix
+            .cells
+            .iter()
+            .map(|cell| cell_view(cell, &matrix.owner.label))
+            .collect(),
         appears_public: matrix.appears_public,
         constructed: construction
             .as_ref()
@@ -2125,7 +2173,7 @@ fn attempt_view(attempt: &hexora_authz::construct::Attempt) -> AttemptView {
     }
 }
 
-fn cell_view(cell: &Cell) -> CellView {
+fn cell_view(cell: &Cell, owner_label: &str) -> CellView {
     CellView {
         identity: cell.identity.to_string(),
         label: cell.label.clone(),
@@ -2142,6 +2190,49 @@ fn cell_view(cell: &Cell) -> CellView {
         verification_note: cell.verification.as_ref().map(|v| v.note().to_string()),
         error: cell.error.clone(),
         note: cell.note.clone(),
+        structure: cell
+            .structure
+            .as_ref()
+            .map(|structure| structure_view(structure, owner_label, &cell.label)),
+    }
+}
+
+fn structure_view(
+    structure: &hexora_types::structure::Diff,
+    control: &str,
+    variant: &str,
+) -> StructureView {
+    let render = |difference: &hexora_types::structure::FieldDifference| DifferenceView {
+        path: difference.path.clone(),
+        change: difference.change.as_str().to_string(),
+        detail: difference.describe(control, variant),
+        notable: difference.notable,
+    };
+
+    StructureView {
+        comparable: match structure.comparable {
+            hexora_types::structure::Comparable::Structurally => "structurally",
+            hexora_types::structure::Comparable::NotStructured => "not_structured",
+            hexora_types::structure::Comparable::OnlyOneSide => "only_one_side",
+        }
+        .to_string(),
+        same_document: structure.same_document(),
+        every_value_differs: structure.every_value_differs(),
+        shared_paths: structure.shared_paths,
+        total_paths: structure.total_paths,
+        policy: structure.policy.describe(),
+        differences: structure.ranked().into_iter().map(render).collect(),
+        set_aside: structure
+            .differences
+            .iter()
+            .filter(|difference| !difference.counts())
+            .map(render)
+            .collect(),
+        quirks: structure
+            .quirks
+            .iter()
+            .map(|quirk| quirk.as_str().to_string())
+            .collect(),
     }
 }
 
@@ -2535,6 +2626,7 @@ mod tests {
             request: Some(request),
             status: Some(200),
             similarity: 1.0,
+            structure: None,
             outcome: hexora_authz::Outcome::Allowed,
             verdict: Verdict::Violation,
             leaked_object_ids: vec!["acct-1000".into()],
@@ -2547,7 +2639,7 @@ mod tests {
             note: None,
         };
 
-        let view = cell_view(&cell);
+        let view = cell_view(&cell, "User A");
         assert_eq!(view.request.as_deref(), Some(request.to_string().as_str()));
         assert!(view.violation);
         assert_eq!(view.verdict, "violation");

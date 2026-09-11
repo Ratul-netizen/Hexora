@@ -332,6 +332,44 @@ Built as described, with three decisions worth recording:
 - **`IdentifierCandidate` has no owner field**, and neither does its table. Security
   invariant 10 records this, with the tests that hold it.
 
+**M12.10 — Structural differential analysis** · DONE
+
+M12.1 could say two responses were 97% alike. This says *which field* — the difference
+between a number a developer can dispute and a line they can go and look at.
+
+```text
+before:  User B received a response 97% alike the one served to User A
+after:   $.email — `alice@example.com` for User A, absent for User B
+```
+
+Four layers, and the third is the one that matters:
+
+1. **Representation.** Bodies are flattened to one node per JSON path, containers
+   included, so `{}` and `{"a":null}` agree at the root and differ at `$.a`.
+2. **Deterministic paths, with the indices kept.** `$.items[3].price`, not
+   `$.items[].price` — a tester told an invoice differs wants to know which one. The
+   cost is honest: an array whose order changed shows as many differences, because as
+   far as the comparison can tell, it did change.
+3. **Classification.** `Appeared`, `Disappeared`, `Changed`, `TypeChanged`. A number
+   becoming a string is a change of *shape*, kept apart from a value moving.
+4. **An explicit normalization policy.** Not automatic scrubbing of anything that
+   *looks* dynamic — that would recreate the exact problem Hexora exists not to have.
+   A field set aside is still listed with both values and the reason, the policy
+   prints itself into the report, and `Policy::strict()` sets nothing aside at all.
+   `id`, `uuid` and `key` are never in the dynamic list, with a test saying so.
+
+Credential-named fields report that they differed and withhold what they were.
+Duplicate JSON keys are flagged rather than collapsed by the parser in silence.
+
+It also gives the authorization engine a second route to a firm claim: two identities
+served *the same document*, with an unauthenticated request refused it, no longer
+needs a hand-declared object id. The anonymous control is the gate, and `NotTried`
+does not clear it.
+
+Deliberately not built: JSON Schema validation. Nothing here knows what an application
+*should* return; it compares two documents that were actually served. A schema layer
+can arrive when a check needs one.
+
 **M12.9 — Proof-of-concept compilation** · DONE
 
 The last mile. A finding already knows the exchanges behind it; this turns them into
