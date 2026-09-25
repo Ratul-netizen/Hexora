@@ -117,9 +117,10 @@ fn parse_format(value: &str) -> Result<Format> {
         "markdown" | "md" => Ok(Format::Markdown),
         "html" => Ok(Format::Html),
         "json" => Ok(Format::Json),
+        "sarif" => Ok(Format::Sarif),
         other => Err(HexoraError::invalid_input(
             "--format",
-            format!("{other:?} is not one of markdown, html, json"),
+            format!("{other:?} is not one of markdown, html, json, sarif"),
         )),
     }
 }
@@ -132,6 +133,7 @@ mod tests {
     fn formats_are_accepted_in_the_forms_people_type() {
         assert_eq!(parse_format("MD").unwrap(), Format::Markdown);
         assert_eq!(parse_format("html").unwrap(), Format::Html);
+        assert_eq!(parse_format("SARIF").unwrap(), Format::Sarif);
         assert!(parse_format("pdf").is_err());
     }
 

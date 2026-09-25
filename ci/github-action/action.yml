@@ -1,0 +1,70 @@
+# Hexora — reusable GitHub composite action.
+#
+# Renders a Hexora project's established findings as SARIF and leaves the file where a
+# workflow can upload it to GitHub code scanning. It does not itself send traffic: a
+# Hexora run is an engagement a person conducts, and this action turns the project that
+# run produced into something the Security tab shows. Point it at a project directory a
+# previous step created (checked in, restored from a cache, or downloaded as an
+# artifact) and it produces `hexora.sarif`.
+#
+# Why SARIF and not a bespoke check: GitHub keys results by their `partialFingerprints`,
+# and Hexora sets that to each finding's stable id. So a finding that was present last
+# run and is present this run is recognised as the *same* finding rather than a new one,
+# which is what makes "fail only on new findings" work without guessing.
+name: "Hexora SARIF"
+description: "Render a Hexora project's findings as SARIF for GitHub code scanning."
+author: "Hexora contributors"
+
+inputs:
+  project:
+    description: "Path to the Hexora project directory to report on."
+    required: true
+  output:
+    description: "Where to write the SARIF file."
+    required: false
+    default: "hexora.sarif"
+  severity:
+    description: "Omit findings below this severity (info, low, medium, high, critical)."
+    required: false
+    default: ""
+  hexora-version:
+    description: "Hexora CLI version to install from crates. 'source' builds from the checked-out tree instead."
+    required: false
+    default: "source"
+
+outputs:
+  sarif-file:
+    description: "The SARIF file that was written."
+    value: ${{ inputs.output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Rust
+      if: inputs.hexora-version == 'source'
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build Hexora from source
+      if: inputs.hexora-version == 'source'
+      shell: bash
+      run: cargo build --release -p hexora-cli
+
+    - name: Install Hexora from crates
+      if: inputs.hexora-version != 'source'
+      shell: bash
+      run: cargo install hexora-cli --version "${{ inputs.hexora-version }}" --locked
+
+    - name: Render SARIF
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Prefer the source build when it exists, else the installed binary on PATH.
+        HEXORA="./target/release/hexora"
+        if [ ! -x "$HEXORA" ]; then HEXORA="hexora"; fi
+
+        ARGS=(report "${{ inputs.project }}" --format sarif --output "${{ inputs.output }}")
+        if [ -n "${{ inputs.severity }}" ]; then
+          ARGS+=(--severity "${{ inputs.severity }}")
+        fi
+        "$HEXORA" "${ARGS[@]}"
+        echo "Wrote ${{ inputs.output }}"

@@ -53,6 +53,7 @@
 pub mod html;
 pub mod markdown;
 pub mod poc;
+pub mod sarif;
 
 use std::collections::HashMap;
 
@@ -79,6 +80,9 @@ pub enum Format {
     Html,
     /// The report model itself, for whatever consumes it next.
     Json,
+    /// SARIF 2.1.0, for a CI pipeline — GitHub code scanning, GitLab, and anything else
+    /// that ingests the format. Established findings gate a build; leads never do.
+    Sarif,
 }
 
 impl Format {
@@ -88,6 +92,8 @@ impl Format {
             Self::Markdown => "md",
             Self::Html => "html",
             Self::Json => "json",
+            // `.sarif` is the conventional extension; GitHub also accepts `.sarif.json`.
+            Self::Sarif => "sarif",
         }
     }
 }
@@ -547,6 +553,7 @@ impl Report {
             Format::Html => html::render(self),
             Format::Json => serde_json::to_string_pretty(self)
                 .unwrap_or_else(|e| format!("{{\"error\":{e:?}}}")),
+            Format::Sarif => sarif::render(self),
         }
     }
 
@@ -1624,13 +1631,77 @@ mod tests {
             .unwrap();
 
         let report = Report::build(&project, &options()).unwrap();
-        for format in [Format::Markdown, Format::Html, Format::Json] {
+        for format in [Format::Markdown, Format::Html, Format::Json, Format::Sarif] {
             let rendered = report.render(format);
             assert!(
                 !rendered.contains("sk-live-not-a-real-token"),
                 "{format:?} leaked a credential"
             );
         }
+    }
+
+    #[test]
+    fn sarif_is_well_formed_and_carries_the_finding_a_platform_needs() {
+        let (project, request, target) = project_with_traffic();
+        project
+            .findings()
+            .save(&finding(target, Confidence::Confirmed, one_exchange(request)))
+            .unwrap();
+
+        let report = Report::build(&project, &options()).unwrap();
+        let sarif: serde_json::Value =
+            serde_json::from_str(&report.render(Format::Sarif)).expect("SARIF must be valid JSON");
+
+        assert_eq!(sarif["version"], "2.1.0");
+        let run = &sarif["runs"][0];
+        assert_eq!(run["tool"]["driver"]["name"], "Hexora");
+
+        let result = &run["results"][0];
+        // The authorization subsystem's fixed rule id, matching what the CLI reports.
+        assert_eq!(result["ruleId"], "authz");
+        // High severity fails a build.
+        assert_eq!(result["level"], "error");
+        assert_eq!(result["properties"]["confidence"], "confirmed");
+        assert_eq!(result["properties"]["security-severity"], "8.0");
+        assert_eq!(result["properties"]["cwe"], "CWE-639");
+        assert_eq!(result["properties"]["unverified"], false);
+        // The finding's stable id is the fingerprint a re-run correlates against.
+        assert!(result["partialFingerprints"]["hexoraFindingId/v1"].is_string());
+        // The exchange's URL reached the location.
+        assert_eq!(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "https://api.example.com/accounts/acct-1000"
+        );
+
+        // The rule links out to the CWE definition.
+        let rule = &run["tool"]["driver"]["rules"][0];
+        assert_eq!(rule["id"], "authz");
+        assert!(rule["helpUri"]
+            .as_str()
+            .unwrap()
+            .contains("639"));
+    }
+
+    #[test]
+    fn a_lead_is_present_in_sarif_but_never_fails_a_build() {
+        let (project, request, target) = project_with_traffic();
+        // Below Firm, so Report::build files it as a lead rather than a finding.
+        project
+            .findings()
+            .save(&finding(target, Confidence::Tentative, one_exchange(request)))
+            .unwrap();
+
+        let report = Report::build(&project, &options()).unwrap();
+        assert!(report.findings.is_empty(), "a tentative claim is a lead");
+        assert_eq!(report.leads.len(), 1);
+
+        let sarif: serde_json::Value =
+            serde_json::from_str(&report.render(Format::Sarif)).unwrap();
+        let result = &sarif["runs"][0]["results"][0];
+        // A lead reaches the security tab so a human sees it, at note level so no
+        // pipeline turns red on an unverified claim.
+        assert_eq!(result["level"], "note");
+        assert_eq!(result["properties"]["unverified"], true);
     }
 
     #[test]

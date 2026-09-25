@@ -560,7 +560,12 @@ enum Command {
         /// Project directory.
         path: PathBuf,
 
-        /// Output format: markdown, html or json.
+        /// Output format: markdown, html, json or sarif.
+        ///
+        /// `sarif` emits SARIF 2.1.0 for a CI pipeline: upload it to GitHub code
+        /// scanning or GitLab and every established finding appears in the platform's
+        /// security tab, keyed by a stable id so a re-run tells a new finding from an
+        /// old one. Unverified leads are included at note level and never fail a build.
         #[arg(short, long, value_name = "FORMAT")]
         format: Option<String>,
 
