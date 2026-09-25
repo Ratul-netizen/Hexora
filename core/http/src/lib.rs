@@ -30,7 +30,10 @@
 //! is turned on with [`transport::TcpTransport::http2`] and the target offers `h2` at
 //! ALPN (M5.1a). That path is *conforming* — it wraps the `h2` crate to reach modern
 //! targets; the adversarial, frame-level h2 that sends deliberately-malformed frames is a
-//! later milestone. The streaming path the proxy uses stays HTTP/1.x for now.
+//! later milestone. HTTP/2 connections are pooled per host and multiplexed, so repeated
+//! and concurrent requests to one target share one connection (M5.1b); a hostile peer is
+//! bounded by the `h2` handshake's header-list cap, the analogue of the decompression-bomb
+//! guard. The streaming path the proxy uses stays HTTP/1.x for now.
 //!
 //! Not implemented, and failing loudly rather than guessing: connection reuse (M1.4)
 //! and redirects (M1.6).
@@ -42,6 +45,7 @@ pub mod body;
 pub mod chunked;
 pub mod decode;
 pub mod h2;
+pub mod h2pool;
 pub mod parse;
 pub mod request;
 pub mod tls;

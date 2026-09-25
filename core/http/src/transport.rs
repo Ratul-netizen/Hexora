@@ -65,6 +65,12 @@ pub struct TcpTransport {
     /// scanner, `hexora send`) turns this on to reach h2-only targets, while the proxy's
     /// own transport is unaffected even though it is the same type.
     http2: bool,
+    /// Reusable HTTP/2 connections, one per host, shared across clones of this transport.
+    ///
+    /// An `Arc` so that a scan or repeater which clones the transport still reuses the one
+    /// pool: connection reuse across a whole run is the point of it. Empty and idle until
+    /// the first h2 negotiation.
+    h2_pool: std::sync::Arc<crate::h2pool::H2Pool>,
 }
 
 /// The parts of a request needed to write it and frame the response, kept together so
@@ -95,6 +101,7 @@ impl TcpTransport {
         Self {
             tls: TlsConfig::verified(),
             http2: false,
+            h2_pool: std::sync::Arc::new(crate::h2pool::H2Pool::new()),
         }
     }
 
@@ -105,7 +112,11 @@ impl TcpTransport {
     /// *this engagement*, and building a second transport is how you say the next one
     /// is different. It is never a process-wide toggle.
     pub fn with_tls(tls: TlsConfig) -> Self {
-        Self { tls, http2: false }
+        Self {
+            tls,
+            http2: false,
+            h2_pool: std::sync::Arc::new(crate::h2pool::H2Pool::new()),
+        }
     }
 
     /// Enables (or disables) HTTP/2 on the buffered [`HttpTransport::send`] path.
@@ -392,6 +403,37 @@ impl HttpTransport for TcpTransport {
         if self.http2 && request.service.secure {
             let started = Instant::now();
             let limits = options.limits.clone();
+            let key = (request.service.host.clone(), request.service.port);
+
+            // Fast path: multiplex a new stream onto a connection already open to this
+            // host. No lock is held across this, so concurrent requests to the one host
+            // share the connection rather than queueing.
+            //
+            // A failure on a *reused* connection is retried once on a fresh one: readiness
+            // cannot always tell a connection the peer closed between the check and the
+            // send, and a pooled connection that refuses a new stream did not process the
+            // request, so reconnecting is safe. A fresh connection's failure is returned.
+            if let Some((handle, tls)) = self.h2_pool.reuse(&key).await {
+                match crate::h2::send_on(handle, tls, request.clone(), &limits, started).await {
+                    Ok(exchange) => return Ok(exchange),
+                    Err(_) => self.h2_pool.evict(&key),
+                }
+            }
+
+            // Miss: establish, but serialise it per host so a first-connect race opens one
+            // connection, not one per racing request. Different hosts still connect at
+            // once, since the gate is per host.
+            let gate = self.h2_pool.gate(&key);
+            let establishing = gate.lock().await;
+
+            // Another request may have established the connection while we waited.
+            if let Some((handle, tls)) = self.h2_pool.reuse(&key).await {
+                match crate::h2::send_on(handle, tls, request.clone(), &limits, started).await {
+                    Ok(exchange) => return Ok(exchange),
+                    Err(_) => self.h2_pool.evict(&key),
+                }
+            }
+
             let tcp = connect(&request.service.host, request.service.port, &limits).await?;
 
             // Offer h2 with an HTTP/1.1 fallback, unless the caller already pinned an
@@ -406,11 +448,20 @@ impl HttpTransport for TcpTransport {
                 crate::tls::handshake(tcp, &request.service.host, &tls_config, &limits).await?;
 
             if info.alpn.as_deref() == Some("h2") {
-                return crate::h2::send(stream, info, request, &limits, started).await;
+                let handle = crate::h2::handshake(stream, &limits).await?;
+                self.h2_pool.store(key, handle.clone(), info.clone());
+                // The gate covers opening the connection, not sending on it: once the
+                // connection is pooled, other requests to this host multiplex onto it
+                // freely rather than waiting for this request to finish.
+                drop(establishing);
+                return crate::h2::send_on(handle, info, request, &limits, started).await;
             }
 
             // The server declined h2; run the ordinary HTTP/1.x exchange over the
-            // connection already open rather than reconnecting.
+            // connection already open rather than reconnecting. Not pooled — HTTP/1.x
+            // connection reuse is M1.4, and a mis-framed reuse corrupts the next response.
+            // Nothing was stored, so the gate can be released now.
+            drop(establishing);
             let wire = serialize_request(&request);
             let method = request.method.clone();
             return Self::exchange_over(
@@ -1501,6 +1552,185 @@ mod tests {
             .unwrap();
         assert_eq!(exchange.response.version, HttpVersion::Http11);
         assert_eq!(exchange.tls.unwrap().alpn.as_deref(), Some("http/1.1"));
+    }
+
+    /// Serves HTTP/2 over TLS, counting TCP connections and optionally closing a
+    /// connection after it has carried `streams_per_conn` streams (0 = never close).
+    ///
+    /// The connection count is what a reuse test asserts on: many requests that share one
+    /// connection increment it once. Closing after N streams is how a re-establish test
+    /// forces the client to notice a dead connection and reconnect.
+    async fn serve_h2_counting(
+        status: u16,
+        body: &'static [u8],
+        streams_per_conn: usize,
+    ) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio_rustls::TlsAcceptor;
+
+        let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert = rustls::pki_types::CertificateDer::from(issued.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(issued.key_pair.serialize_der().into());
+
+        let mut config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .unwrap();
+        config.alpn_protocols = vec![b"h2".to_vec()];
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let acceptor = TlsAcceptor::from(std::sync::Arc::new(config));
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_task = count.clone();
+        tokio::spawn(async move {
+            loop {
+                let (socket, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => break,
+                };
+                count_task.fetch_add(1, Ordering::SeqCst);
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let tls = match acceptor.accept(socket).await {
+                        Ok(tls) => tls,
+                        Err(_) => return,
+                    };
+                    let mut connection = match ::h2::server::handshake(tls).await {
+                        Ok(connection) => connection,
+                        Err(_) => return,
+                    };
+                    let mut served = 0usize;
+                    while let Some(accepted) = connection.accept().await {
+                        let (request, mut responder) = match accepted {
+                            Ok(pair) => pair,
+                            Err(_) => break,
+                        };
+                        let mut request_body = request.into_body();
+                        while let Some(chunk) = request_body.data().await {
+                            if let Ok(chunk) = chunk {
+                                let _ = request_body.flow_control().release_capacity(chunk.len());
+                            }
+                        }
+                        let response = http::Response::builder().status(status).body(()).unwrap();
+                        if let Ok(mut send) = responder.send_response(response, false) {
+                            let _ = send.send_data(bytes::Bytes::copy_from_slice(body), true);
+                        }
+                        served += 1;
+                        if streams_per_conn != 0 && served >= streams_per_conn {
+                            // Close the way a real server does — a GOAWAY the client sees,
+                            // sent *after* this stream's response — rather than dropping the
+                            // socket mid-flight. Draining the accept loop flushes it.
+                            connection.graceful_shutdown();
+                            while connection.accept().await.is_some() {}
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        (port, count)
+    }
+
+    #[tokio::test]
+    async fn http2_connections_are_reused_across_requests() {
+        use std::sync::atomic::Ordering;
+        let (port, count) = serve_h2_counting(200, b"ok", 0).await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true);
+        for _ in 0..3 {
+            let exchange = transport
+                .send(
+                    https_request(port),
+                    SendOptions::interactive(Origin::Repeater),
+                )
+                .await
+                .unwrap();
+            assert_eq!(exchange.response.status, 200);
+        }
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "three sequential requests must share one pooled connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_http2_requests_multiplex_over_one_connection() {
+        use std::sync::atomic::Ordering;
+        let (port, count) = serve_h2_counting(200, b"ok", 0).await;
+
+        // Shared so every task uses the one pool; the gate must collapse the first-connect
+        // race to a single connection while the requests themselves multiplex.
+        let transport =
+            std::sync::Arc::new(TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true));
+
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let transport = transport.clone();
+            tasks.push(tokio::spawn(async move {
+                transport
+                    .send(
+                        https_request(port),
+                        SendOptions::interactive(Origin::Repeater),
+                    )
+                    .await
+            }));
+        }
+        for task in tasks {
+            let exchange = task.await.unwrap().unwrap();
+            assert_eq!(exchange.response.status, 200);
+        }
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "eight concurrent requests must share one pooled connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dead_http2_connection_is_evicted_and_replaced() {
+        use std::sync::atomic::Ordering;
+        // The server closes each connection after one stream, so the second request finds
+        // a dead pooled handle and must reconnect rather than fail.
+        let (port, count) = serve_h2_counting(200, b"ok", 1).await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true);
+
+        let first = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.response.status, 200);
+
+        // Let the server's close propagate so the pooled handle is observably dead.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let second = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.response.status, 200);
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "a closed connection must be replaced, not reused"
+        );
     }
 
     #[tokio::test]

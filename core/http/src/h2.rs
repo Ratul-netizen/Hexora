@@ -53,36 +53,66 @@ fn is_dropped_request_header(lower_name: &str) -> bool {
     )
 }
 
-/// Sends one request over a freshly negotiated HTTP/2 connection and returns the
-/// buffered exchange.
+/// Negotiates an HTTP/2 connection over an already-established (ALPN-selected) stream and
+/// returns the handle new streams are opened on.
 ///
-/// `stream` is the already-established (and already h2-negotiated, per ALPN) transport;
-/// `tls` is what that handshake produced, recorded on the exchange. `started` is passed
-/// in rather than taken here so the duration covers the connect and handshake the caller
-/// already paid for.
-pub async fn send<S>(
+/// The returned [`h2::client::SendRequest`] is cheaply cloneable and `Send`: many requests
+/// can be multiplexed onto the one connection through clones of it, which is what makes
+/// connection reuse (M5.1b) possible. The connection's I/O is driven by a background task
+/// that ends when the last handle is dropped or the peer goes away.
+///
+/// # A hostile peer is bounded here
+///
+/// The `h2` builder is where the analogue of the HTTP/1.x decompression-bomb guard lives:
+/// `max_header_list_size` caps the HPACK-decoded header block a server can make us hold,
+/// so a header bomb is refused as it is decoded rather than after. Server push is
+/// disabled outright — Hexora never wants a stream it did not ask for.
+pub async fn handshake<S>(
     stream: S,
-    tls: TlsInfo,
-    request: HttpRequest,
     limits: &Limits,
-    started: Instant,
-) -> Result<Exchange>
+) -> Result<h2::client::SendRequest<Bytes>>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let (send_request, connection) = h2::client::handshake(stream)
-        .await
-        .map_err(|e| conn_error(&request, e))?;
+    let mut builder = h2::client::Builder::new();
+    builder.enable_push(false);
+    if limits.max_header_bytes > 0 {
+        builder.max_header_list_size(limits.max_header_bytes.min(u32::MAX as usize) as u32);
+    }
 
-    // The connection future drives all I/O for the streams multiplexed over it. With one
-    // request there is still exactly one, but it has to be polled for anything to move, so
-    // it runs as its own task and ends when the request and its body are done with it.
+    let (send_request, connection) = builder
+        .handshake::<_, Bytes>(stream)
+        .await
+        .map_err(handshake_error)?;
+
+    // The connection future drives all I/O for every stream multiplexed over it. It runs
+    // as its own task and ends when the peer goes away or the last handle is dropped.
     tokio::spawn(async move {
         if let Err(e) = connection.await {
             tracing::debug!(error = %e, "http/2 connection ended with an error");
         }
     });
 
+    Ok(send_request)
+}
+
+/// Opens one stream on an existing HTTP/2 connection and returns the buffered exchange.
+///
+/// `send_request` is a handle from [`handshake`], reused across requests to the same host;
+/// `tls` is what that connection's handshake produced, recorded on every exchange it
+/// carries because the TLS facts are a property of the connection, not the stream.
+/// `started` is passed in so the duration reflects what the caller measured, including a
+/// wait for a free stream when the server is at its concurrency limit.
+pub async fn send_on(
+    send_request: h2::client::SendRequest<Bytes>,
+    tls: TlsInfo,
+    request: HttpRequest,
+    limits: &Limits,
+    started: Instant,
+) -> Result<Exchange> {
+    // Waiting here is how the server's MAX_CONCURRENT_STREAMS is honoured: `ready`
+    // resolves once a stream slot is free, so a burst of requests to one host queues on
+    // the connection rather than overrunning it or opening a second one.
     let mut send_request = send_request
         .ready()
         .await
@@ -251,4 +281,9 @@ fn conn_error(request: &HttpRequest, error: h2::Error) -> HexoraError {
         "http/2 to {}: {error}",
         request.service.authority()
     )))
+}
+
+/// Maps a handshake-time `h2` error, before there is a request to attribute it to.
+fn handshake_error(error: h2::Error) -> HexoraError {
+    HexoraError::Network(NetworkError::Io(format!("http/2 handshake: {error}")))
 }
