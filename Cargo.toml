@@ -87,6 +87,13 @@ x509-parser = "0.16"
 flate2 = "1.0"
 brotli = "7.0"
 
+# HTTP/2. The conforming client path (M5.1a) wraps the `h2` crate — the same one
+# hyper/reqwest use — for reaching h2-only targets; the adversarial frame-level path
+# (M5.1e) is a separate, later concern. `http` supplies the request/response types the
+# `h2` API speaks. Both are MIT, compatible with this project's AGPL.
+h2 = "0.4"
+http = "1"
+
 # Hashing (content-addressed blob store)
 sha2 = "0.10"
 # Only ever a lookup key for the Windows certificate store, never a security

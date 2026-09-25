@@ -117,9 +117,9 @@ pub fn active(args: Args<'_>) -> Result<()> {
     let hypotheses = standing.hypotheses;
 
     let transport = if args.insecure {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
     // The project's own scope. An active run is automated traffic by definition, and
     // the guard refuses automated traffic to hosts nobody declared.

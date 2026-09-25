@@ -81,7 +81,10 @@ fn build_transport(args: &SendArgs<'_>) -> Result<TcpTransport> {
         }
     };
 
-    Ok(TcpTransport::with_tls(tls))
+    // A structured send negotiates HTTP/2 when the target offers it, falling back to
+    // HTTP/1.1. A raw send is unaffected — it is byte-exact HTTP/1.x by definition, and
+    // frame-level h2 is a later milestone.
+    Ok(TcpTransport::with_tls(tls).http2(true))
 }
 
 fn build_request(

@@ -12,7 +12,12 @@
 //! downloads, server-sent events and long-poll endpoints.
 //!
 //! [`HttpTransport::send`] is the buffered convenience built on top of it, for
-//! callers — the repeater, `hexora send` — that genuinely want the whole body.
+//! callers — the repeater, `hexora send` — that genuinely want the whole body. It is
+//! also the only path that speaks **HTTP/2**: with [`TcpTransport::http2`] enabled and a
+//! target that offers `h2` at ALPN, `send` hands the connection to [`crate::h2`] and
+//! returns the same [`Exchange`]; a server that declines gets the ordinary HTTP/1.x
+//! exchange over the same socket. The streaming path stays HTTP/1.x, so the proxy is
+//! untouched until M5.1c.
 //!
 //! Connection reuse is M1.4. Each request currently opens its own connection, which is
 //! deliberate: a pool that mis-frames one response corrupts the next, so the framing
@@ -53,6 +58,22 @@ const READ_CHUNK: usize = 16 * 1024;
 #[derive(Debug, Clone)]
 pub struct TcpTransport {
     tls: TlsConfig,
+    /// Whether the buffered [`HttpTransport::send`] may negotiate HTTP/2.
+    ///
+    /// Off by default, and only ever consulted by `send` — never by the streaming path
+    /// the proxy uses, which stays HTTP/1.x until M5.1c. So a client (the repeater, the
+    /// scanner, `hexora send`) turns this on to reach h2-only targets, while the proxy's
+    /// own transport is unaffected even though it is the same type.
+    http2: bool,
+}
+
+/// The parts of a request needed to write it and frame the response, kept together so
+/// they travel as one argument rather than a handful that are always passed in lockstep.
+struct Outgoing {
+    request: HttpRequest,
+    wire: Vec<u8>,
+    method: String,
+    raw: Option<bytes::Bytes>,
 }
 
 impl Default for TcpTransport {
@@ -73,6 +94,7 @@ impl TcpTransport {
     pub fn new() -> Self {
         Self {
             tls: TlsConfig::verified(),
+            http2: false,
         }
     }
 
@@ -83,7 +105,20 @@ impl TcpTransport {
     /// *this engagement*, and building a second transport is how you say the next one
     /// is different. It is never a process-wide toggle.
     pub fn with_tls(tls: TlsConfig) -> Self {
-        Self { tls }
+        Self { tls, http2: false }
+    }
+
+    /// Enables (or disables) HTTP/2 on the buffered [`HttpTransport::send`] path.
+    ///
+    /// When on and the target is `https`, `send` offers `h2` with an HTTP/1.1 fallback
+    /// (unless the transport's TLS settings already pin an ALPN list naming `h2`) and,
+    /// if the server negotiates it, speaks HTTP/2. A server that declines gets the
+    /// ordinary HTTP/1.x exchange over the connection already opened — no second
+    /// handshake. The streaming path is deliberately untouched, so this cannot change
+    /// what the proxy sends.
+    pub fn http2(mut self, enabled: bool) -> Self {
+        self.http2 = enabled;
+        self
     }
 
     /// Sends a request and returns as soon as the response *head* has arrived.
@@ -137,19 +172,61 @@ impl TcpTransport {
         options: SendOptions,
     ) -> Result<StreamingExchange> {
         let started = Instant::now();
-        let limits = &options.limits;
+        let (connection, tls) = self.establish(&request.service, &options.limits).await?;
+        Self::exchange_over(
+            connection,
+            tls,
+            Outgoing {
+                request,
+                wire,
+                method,
+                raw,
+            },
+            &options.limits,
+            started,
+        )
+        .await
+    }
 
-        let tcp = connect(&request.service.host, request.service.port, limits).await?;
+    /// Opens a connection to a service and performs the TLS handshake when it is `https`.
+    ///
+    /// The HTTP/1.x path this transport was built for; the buffered [`HttpTransport::send`]
+    /// does its own connect when it wants to offer HTTP/2, so it can inspect what ALPN
+    /// negotiated before committing to a protocol.
+    async fn establish(
+        &self,
+        service: &hexora_types::http::HttpService,
+        limits: &Limits,
+    ) -> Result<(Box<dyn Connection>, Option<hexora_types::tls::TlsInfo>)> {
+        let tcp = connect(&service.host, service.port, limits).await?;
 
         // Boxed so the body stream can own the connection, whichever kind it is.
-        let (mut connection, tls): (Box<dyn Connection>, _) = if request.service.secure {
-            let (stream, tls) =
-                crate::tls::handshake(tcp, &request.service.host, &self.tls, limits).await?;
-            (Box::new(stream), Some(tls))
+        if service.secure {
+            let (stream, tls) = crate::tls::handshake(tcp, &service.host, &self.tls, limits).await?;
+            Ok((Box::new(stream), Some(tls)))
         } else {
-            (Box::new(tcp), None)
-        };
+            Ok((Box::new(tcp), None))
+        }
+    }
 
+    /// Writes a request over an already-established connection and reads the head.
+    ///
+    /// Split out from [`Self::write_and_read`] so the HTTP/2-capable `send` can reuse a
+    /// connection it opened itself — when a server declined `h2` at ALPN, the ordinary
+    /// HTTP/1.x exchange runs over that same socket rather than opening a second one.
+    async fn exchange_over(
+        mut connection: Box<dyn Connection>,
+        tls: Option<hexora_types::tls::TlsInfo>,
+        outgoing: Outgoing,
+        limits: &Limits,
+        started: Instant,
+    ) -> Result<StreamingExchange> {
+        let Outgoing {
+            request,
+            wire,
+            method,
+            raw,
+        } = outgoing;
         write_all(&mut connection, &wire, limits).await?;
         let (head, prefix) = read_head(&mut connection, &method, limits).await?;
 
@@ -309,6 +386,50 @@ fn report_smuggling_signals(request: &HttpRequest, head: &ResponseHead, body_qui
 #[async_trait]
 impl HttpTransport for TcpTransport {
     async fn send(&self, request: HttpRequest, options: SendOptions) -> Result<Exchange> {
+        // HTTP/2 is negotiated here, on the buffered path only, and only for https —
+        // browsers reach h2 through ALPN, and h2c (cleartext prior knowledge) is rare
+        // enough not to attempt uninvited.
+        if self.http2 && request.service.secure {
+            let started = Instant::now();
+            let limits = options.limits.clone();
+            let tcp = connect(&request.service.host, request.service.port, &limits).await?;
+
+            // Offer h2 with an HTTP/1.1 fallback, unless the caller already pinned an
+            // ALPN list of their own that names it — a deliberate ALPN is a test in its
+            // own right and is not overridden.
+            let mut tls_config = self.tls.clone();
+            if !tls_config.alpn.iter().any(|p| p == b"h2") {
+                tls_config.alpn = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            }
+
+            let (stream, info) =
+                crate::tls::handshake(tcp, &request.service.host, &tls_config, &limits).await?;
+
+            if info.alpn.as_deref() == Some("h2") {
+                return crate::h2::send(stream, info, request, &limits, started).await;
+            }
+
+            // The server declined h2; run the ordinary HTTP/1.x exchange over the
+            // connection already open rather than reconnecting.
+            let wire = serialize_request(&request);
+            let method = request.method.clone();
+            return Self::exchange_over(
+                Box::new(stream),
+                Some(info),
+                Outgoing {
+                    request,
+                    wire,
+                    method,
+                    raw: None,
+                },
+                &limits,
+                started,
+            )
+            .await?
+            .collect()
+            .await;
+        }
+
         self.send_streaming(request, options).await?.collect().await
     }
 
@@ -1218,6 +1339,168 @@ mod tests {
             !tls.peer_authenticated(),
             "accept-any does not authenticate"
         );
+    }
+
+    // ------------------------------------------------------------------- HTTP/2
+
+    /// Serves one HTTP/2 connection over TLS, answering every stream identically.
+    ///
+    /// Uses the `h2` crate on the server side too, so the test exercises a real HPACK +
+    /// framing round trip rather than a mock. `content_encoding` is set on the response
+    /// when non-empty, and `body` is sent as-is — a caller that wants a gzip body
+    /// compresses it and names the coding.
+    async fn serve_h2(
+        status: u16,
+        extra_headers: &'static [(&'static str, &'static str)],
+        content_encoding: &'static str,
+        body: &'static [u8],
+    ) -> u16 {
+        use tokio_rustls::TlsAcceptor;
+
+        let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert = rustls::pki_types::CertificateDer::from(issued.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(issued.key_pair.serialize_der().into());
+
+        let mut config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .unwrap();
+        // Offer only h2, so a client that reaches this server has genuinely negotiated it.
+        config.alpn_protocols = vec![b"h2".to_vec()];
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let acceptor = TlsAcceptor::from(std::sync::Arc::new(config));
+
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let tls = acceptor.accept(socket).await.unwrap();
+            let mut connection = ::h2::server::handshake(tls).await.unwrap();
+            while let Some(accepted) = connection.accept().await {
+                let (request, mut responder) = accepted.unwrap();
+                // Drain the request body so a POST completes cleanly.
+                let mut request_body = request.into_body();
+                while let Some(chunk) = request_body.data().await {
+                    let chunk = chunk.unwrap();
+                    let _ = request_body.flow_control().release_capacity(chunk.len());
+                }
+
+                let mut builder = http::Response::builder().status(status);
+                if !content_encoding.is_empty() {
+                    builder = builder.header("content-encoding", content_encoding);
+                }
+                for (name, value) in extra_headers {
+                    builder = builder.header(*name, *value);
+                }
+                let response = builder.body(()).unwrap();
+                let mut send = responder.send_response(response, false).unwrap();
+                send.send_data(bytes::Bytes::copy_from_slice(body), true).unwrap();
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn an_http2_request_round_trips_and_records_the_protocol() {
+        let port = serve_h2(200, &[("x-proto", "h2")], "", b"served over h2").await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true);
+        let exchange = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(exchange.response.status, 200);
+        assert_eq!(exchange.response.body.as_ref(), b"served over h2");
+        assert_eq!(exchange.response.version, HttpVersion::Http2);
+        assert_eq!(
+            exchange
+                .response
+                .headers
+                .get("x-proto")
+                .map(|h| h.value_lossy().into_owned()),
+            Some("h2".to_string())
+        );
+
+        let tls = exchange.tls.expect("an https exchange records its handshake");
+        assert_eq!(tls.alpn.as_deref(), Some("h2"), "h2 must have negotiated");
+    }
+
+    #[tokio::test]
+    async fn an_http2_capable_client_falls_back_to_http1_when_the_server_declines() {
+        // The server offers only http/1.1; an h2-enabled client must still get an answer,
+        // over the connection it already opened, recorded as HTTP/1.1.
+        let port = serve_tls(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nfallback",
+            "localhost",
+        )
+        .await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true);
+        let exchange = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(exchange.response.status, 200);
+        assert_eq!(exchange.response.body.as_ref(), b"fallback");
+        assert_eq!(exchange.response.version, HttpVersion::Http11);
+        assert_eq!(exchange.tls.unwrap().alpn.as_deref(), Some("http/1.1"));
+    }
+
+    #[tokio::test]
+    async fn an_http2_gzip_body_is_decoded_and_both_forms_are_kept() {
+        let compressed: &'static [u8] = Box::leak(gzip(b"the plain body").into_boxed_slice());
+        let port = serve_h2(200, &[], "gzip", compressed).await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true);
+        let exchange = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+
+        // The decoded body is what a caller reads, the same as for HTTP/1.x.
+        assert_eq!(exchange.response.body.as_ref(), b"the plain body");
+        assert_eq!(exchange.content_encoding.as_deref(), Some("gzip"));
+        assert_eq!(
+            exchange.encoded_body.as_deref(),
+            Some(compressed),
+            "the gzip bytes are kept alongside the decoded form"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_buffered_send_stays_http1_when_http2_is_not_enabled() {
+        // Without .http2(true) an https send must not offer h2, even to a server that
+        // would accept it — the proxy relies on this, since it shares the type.
+        let port = serve_tls(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi",
+            "localhost",
+        )
+        .await;
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
+        let exchange = transport
+            .send(
+                https_request(port),
+                SendOptions::interactive(Origin::Repeater),
+            )
+            .await
+            .unwrap();
+        assert_eq!(exchange.response.version, HttpVersion::Http11);
+        assert_eq!(exchange.tls.unwrap().alpn.as_deref(), Some("http/1.1"));
     }
 
     #[tokio::test]

@@ -1221,7 +1221,7 @@ pub fn scan_active_plan(
     let store = std::sync::Arc::new(project.traffic());
     let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
     let repeater = hexora_repeater::Repeater::new(
-        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new(), scope),
+        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new().http2(true), scope),
         store,
     );
     let lab = hexora_verify::RepeaterLab::scanner(&repeater);
@@ -1294,7 +1294,7 @@ fn active_run_blocking(
     let store = std::sync::Arc::new(project.traffic());
     let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
     let repeater = hexora_repeater::Repeater::new(
-        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new(), scope),
+        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new().http2(true), scope),
         store,
     );
     let lab = hexora_verify::RepeaterLab::scanner(&repeater);
@@ -1891,9 +1891,9 @@ pub async fn authz_run(
     }
 
     let transport = if insecure {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
     // The project's own scope, not an empty one. A matrix is automated traffic, and
     // the guard refuses automated traffic to hosts nobody has declared.
@@ -2218,9 +2218,9 @@ fn build_repeater(
 ) -> CommandResult<Repeater<TcpTransport>> {
     let store = state.traffic().map_err(fail)?;
     let transport = if insecure {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
     Ok(
         Repeater::new(ScopeGuard::new(transport, Arc::new(Scope::new())), store)

@@ -65,9 +65,9 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     }
 
     let transport = if args.insecure {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
     // The project's own scope, not an empty one. An authorization matrix is automated
     // traffic, and the guard refuses automated traffic to undeclared hosts.

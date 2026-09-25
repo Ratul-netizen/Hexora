@@ -70,9 +70,9 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     })?;
 
     let transport = if args.insecure {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
     // The project's own scope. A payload list is automated traffic by volume whatever
     // it is by intent, and the guard refuses automated traffic to undeclared hosts.

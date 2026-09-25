@@ -26,6 +26,12 @@
 //! streaming bodies; gzip, deflate and brotli; per-phase timeouts and incrementally
 //! enforced limits.
 //!
+//! The buffered [`transport::TcpTransport::send`] can also negotiate **HTTP/2** when it
+//! is turned on with [`transport::TcpTransport::http2`] and the target offers `h2` at
+//! ALPN (M5.1a). That path is *conforming* — it wraps the `h2` crate to reach modern
+//! targets; the adversarial, frame-level h2 that sends deliberately-malformed frames is a
+//! later milestone. The streaming path the proxy uses stays HTTP/1.x for now.
+//!
 //! Not implemented, and failing loudly rather than guessing: connection reuse (M1.4)
 //! and redirects (M1.6).
 
@@ -35,6 +41,7 @@
 pub mod body;
 pub mod chunked;
 pub mod decode;
+pub mod h2;
 pub mod parse;
 pub mod request;
 pub mod tls;

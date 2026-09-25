@@ -56,9 +56,9 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
     let store = Arc::new(project.traffic());
 
     let transport = if args.insecure {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
     // The project's real scope, not an empty one. A repeater send is human-driven, so
     // an out-of-scope target is flagged and still sent — the tester chose to send it —
