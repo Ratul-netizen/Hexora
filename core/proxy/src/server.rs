@@ -30,8 +30,8 @@ use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
 use hexora_http::parse::find_head_end;
 use hexora_http::request::{parse_request_head, RequestHead};
 use hexora_http::{BodyStream, TcpTransport};
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::http::{HttpRequest, HttpResponse, HttpService};
+use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result};
+use hexora_types::http::{HttpRequest, HttpResponse, HttpService, HttpVersion};
 use hexora_types::limits::Limits;
 use hexora_types::scope::Scope;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -228,15 +228,40 @@ async fn handle_connection(mut client: TcpStream, context: ConnectionContext) ->
     forward(&mut client, request, &context).await
 }
 
-/// Forwards one request upstream and writes the response back to the client.
-///
-/// The interceptor is consulted twice: once before the request leaves, once before the
-/// response is returned.
+/// Forwards one request upstream and writes the response back to an HTTP/1.x client.
 async fn forward<S: AsyncWrite + Unpin>(
     client: &mut S,
     request: HttpRequest,
     context: &ConnectionContext,
 ) -> Result<()> {
+    match produce(request, context).await {
+        Ok(Served::Respond(response)) => write_response(client, &response).await,
+        Ok(Served::Nothing) => Ok(()),
+        Err(e) => {
+            // The browser is waiting. Telling it what went wrong is far more useful
+            // than dropping the connection and leaving a spinner.
+            let message = format!("Hexora could not reach the target: {e}");
+            write_simple(client, 502, "Bad Gateway", message.as_bytes()).await?;
+            Err(e)
+        }
+    }
+}
+
+/// What the proxy should return to the client for one request.
+enum Served {
+    /// Send this response.
+    Respond(HttpResponse),
+    /// Send nothing — the request or response was dropped by the interceptor.
+    Nothing,
+}
+
+/// Processes one request: interceptor hooks, scope check, upstream send, and observation.
+///
+/// This is the whole of what the proxy *does* with a request, kept apart from how the
+/// answer is written so the HTTP/1.x and HTTP/2 client paths share one implementation and
+/// cannot drift. The interceptor is consulted twice — once before the request leaves, once
+/// before the response is returned — exactly as it always has been.
+async fn produce(request: HttpRequest, context: &ConnectionContext) -> Result<Served> {
     let request = match context.interceptor.on_request(&request).await {
         RequestVerdict::Forward => request,
 
@@ -250,58 +275,48 @@ async fn forward<S: AsyncWrite + Unpin>(
 
         RequestVerdict::Drop => {
             tracing::debug!(url = %request.url(), "request dropped by the interceptor");
-            return Ok(());
+            return Ok(Served::Nothing);
         }
 
         // Answered without going upstream, which is how a tester sees what a client
         // does with a response the server never sent.
         RequestVerdict::Respond(response) => {
             tracing::debug!(url = %request.url(), "request answered by the interceptor");
-            return write_response(client, &response).await;
+            return Ok(Served::Respond(*response));
         }
     };
 
     let options = SendOptions::interactive(Origin::Proxy);
     let decision = context.transport.decide(&request, &options);
 
-    match context.transport.send(request, options).await {
-        Ok(exchange) => {
-            let verdict = context
-                .interceptor
-                .on_response(&exchange.request, &exchange.response)
-                .await;
+    let exchange = context.transport.send(request, options).await?;
+    let verdict = context
+        .interceptor
+        .on_response(&exchange.request, &exchange.response)
+        .await;
 
-            // The exchange is recorded exactly as the server answered it, whatever the
-            // client is subsequently shown. A tester's substitution is their own
-            // action, not the server's behaviour, and recording it as the latter would
-            // put a fabricated response into the evidence behind a finding.
-            let to_client = match verdict {
-                ResponseVerdict::Forward => Some(exchange.response.clone()),
-                ResponseVerdict::Replace(replacement) => {
-                    tracing::debug!("response replaced by the interceptor");
-                    Some(*replacement)
-                }
-                ResponseVerdict::Drop => {
-                    tracing::debug!("response dropped by the interceptor");
-                    None
-                }
-            };
-
-            context.observer.observe(&exchange, decision);
-
-            if let Some(response) = to_client {
-                write_response(client, &response).await?;
-            }
-            Ok(())
+    // The exchange is recorded exactly as the server answered it, whatever the client is
+    // subsequently shown. A tester's substitution is their own action, not the server's
+    // behaviour, and recording it as the latter would put a fabricated response into the
+    // evidence behind a finding.
+    let to_client = match verdict {
+        ResponseVerdict::Forward => Some(exchange.response.clone()),
+        ResponseVerdict::Replace(replacement) => {
+            tracing::debug!("response replaced by the interceptor");
+            Some(*replacement)
         }
-        Err(e) => {
-            // The browser is waiting. Telling it what went wrong is far more useful
-            // than dropping the connection and leaving a spinner.
-            let message = format!("Hexora could not reach the target: {e}");
-            write_simple(client, 502, "Bad Gateway", message.as_bytes()).await?;
-            Err(e)
+        ResponseVerdict::Drop => {
+            tracing::debug!("response dropped by the interceptor");
+            None
         }
-    }
+    };
+
+    context.observer.observe(&exchange, decision);
+
+    Ok(match to_client {
+        Some(response) => Served::Respond(response),
+        None => Served::Nothing,
+    })
 }
 
 /// Handles a `CONNECT`: either decrypt the tunnel or copy it blind.
@@ -324,7 +339,13 @@ async fn handle_connect(
         return Ok(TunnelOutcome::Tunnelled);
     }
 
-    let config = intercept::server_config_for(&context.ca, &service.host, &[b"http/1.1".to_vec()])?;
+    // Offer h2 as well as HTTP/1.1: the proxy can now be an HTTP/2 server to the browser
+    // (M5.1c). Which one runs is decided by what the client negotiates.
+    let config = intercept::server_config_for(
+        &context.ca,
+        &service.host,
+        &[b"h2".to_vec(), b"http/1.1".to_vec()],
+    )?;
     let acceptor = tokio_rustls::TlsAcceptor::from(config);
     let mut tls = acceptor.accept(client).await.map_err(|e| {
         // Usually the CA not being trusted yet, or certificate pinning. Both are
@@ -337,6 +358,18 @@ async fn handle_connect(
             ),
         })
     })?;
+
+    let negotiated_h2 = tls
+        .get_ref()
+        .1
+        .alpn_protocol()
+        .map(|p| p == b"h2")
+        .unwrap_or(false);
+
+    if negotiated_h2 {
+        serve_h2_tunnel(tls, service, context).await?;
+        return Ok(TunnelOutcome::Intercepted);
+    }
 
     // Inside the tunnel the client speaks ordinary HTTP with origin-form targets, so
     // the authority comes from the CONNECT line rather than from the request.
@@ -353,6 +386,199 @@ async fn handle_connect(
     forward(&mut tls, request, &context).await?;
     let _ = tls.shutdown().await;
     Ok(TunnelOutcome::Intercepted)
+}
+
+/// Serves an intercepted HTTP/2 tunnel: the proxy is the h2 server to the browser.
+///
+/// The browser multiplexes many requests as concurrent streams over this one connection,
+/// so each accepted stream is handled on its own task — that is the whole difference from
+/// the HTTP/1.x path, which sees one request per tunnel. The shared [`ConnectionContext`]
+/// is behind an `Arc` so every stream sees the same scope, interceptor and capture. The
+/// exchanges those streams produce are recorded through the observer, whose write path is
+/// already concurrency-safe.
+async fn serve_h2_tunnel<S>(
+    tls: S,
+    service: HttpService,
+    context: ConnectionContext,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let mut connection = ::h2::server::handshake(tls)
+        .await
+        .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 handshake: {e}"))))?;
+
+    let context = Arc::new(context);
+    let service = Arc::new(service);
+
+    while let Some(accepted) = connection.accept().await {
+        let (request, responder) = match accepted {
+            Ok(pair) => pair,
+            Err(e) => {
+                // A connection-level error ends the tunnel; a client that goes away is
+                // ordinary and not worth more than a debug line.
+                tracing::debug!(error = %e, "http/2 tunnel ended");
+                break;
+            }
+        };
+
+        let context = context.clone();
+        let service = service.clone();
+        tokio::spawn(async move {
+            if let Err(e) = serve_h2_stream(request, responder, &service, &context).await {
+                tracing::debug!(error = %e, "http/2 stream failed");
+            }
+        });
+    }
+
+    Ok(())
+}
+
+/// Handles one HTTP/2 stream from the browser: build the request, process it exactly as
+/// the HTTP/1.x path does, and send the answer back on the stream.
+async fn serve_h2_stream(
+    request: http::Request<::h2::RecvStream>,
+    mut responder: ::h2::server::SendResponse<bytes::Bytes>,
+    service: &HttpService,
+    context: &ConnectionContext,
+) -> Result<()> {
+    let request = build_h2_upstream_request(request, service, &context.limits).await?;
+
+    match produce(request, context).await {
+        Ok(Served::Respond(response)) => send_h2_response(&mut responder, &response),
+        // A dropped request or response resets the stream — the browser sees nothing was
+        // returned, which is what "drop" means.
+        Ok(Served::Nothing) => {
+            responder.send_reset(::h2::Reason::CANCEL);
+            Ok(())
+        }
+        Err(e) => {
+            let message = format!("Hexora could not reach the target: {e}");
+            let response = HttpResponse {
+                status: 502,
+                reason: None,
+                version: HttpVersion::Http2,
+                headers: {
+                    let mut headers = hexora_types::http::Headers::new();
+                    headers.set("Content-Type", "text/plain; charset=utf-8");
+                    headers
+                },
+                body: bytes::Bytes::from(message.into_bytes()),
+                truncated: false,
+            };
+            send_h2_response(&mut responder, &response)
+        }
+    }
+}
+
+/// Builds the upstream request from an HTTP/2 stream's head and body.
+///
+/// The connection target comes from the `CONNECT` authority, not the request, for the same
+/// reason as the HTTP/1.x path: an origin-form target carries no scheme and trusting the
+/// request to say where the socket goes is how an interceptor gets talked into sending
+/// somewhere it should not. The version is recorded as HTTP/2 — that is how it arrived.
+async fn build_h2_upstream_request(
+    request: http::Request<::h2::RecvStream>,
+    service: &HttpService,
+    limits: &Limits,
+) -> Result<HttpRequest> {
+    let (parts, mut body) = request.into_parts();
+
+    let path = parts
+        .uri
+        .path_and_query()
+        .map(|pq| pq.as_str().to_string())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| "/".to_string());
+
+    let mut headers = hexora_types::http::Headers::new();
+    for (name, value) in parts.headers.iter() {
+        if HOP_BY_HOP.iter().any(|h| name.as_str().eq_ignore_ascii_case(h)) {
+            continue;
+        }
+        headers.append(hexora_types::http::Header {
+            name: name.as_str().to_string(),
+            value: bytes::Bytes::copy_from_slice(value.as_bytes()),
+        });
+    }
+    // HTTP/2 carries the authority as a pseudo-header, not a `Host`. The upstream request
+    // may go out over HTTP/1.1, which needs one, so it is reconstructed here.
+    if headers.count("Host") == 0 {
+        headers.set("Host", service.authority());
+    }
+
+    // Read the request body, bounded the same way every other body is.
+    let mut buf = BytesMut::new();
+    let mut truncated = false;
+    while let Some(chunk) = body.data().await {
+        let chunk = chunk
+            .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 request body: {e}"))))?;
+        let _ = body.flow_control().release_capacity(chunk.len());
+        let remaining = limits.max_body_bytes.saturating_sub(buf.len() as u64);
+        if (chunk.len() as u64) > remaining {
+            buf.extend_from_slice(&chunk[..remaining as usize]);
+            truncated = true;
+            break;
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    if truncated {
+        tracing::warn!("an HTTP/2 request body exceeded the size limit and was truncated");
+    }
+
+    Ok(HttpRequest {
+        service: HttpService::new(&service.host, service.port, true),
+        method: parts.method.as_str().to_string(),
+        path,
+        version: HttpVersion::Http2,
+        headers,
+        body: buf.freeze(),
+    })
+}
+
+/// Sends a response back to the browser on an HTTP/2 stream.
+///
+/// The body handed back has already been transfer- and content-decoded, so the original
+/// framing headers would now be lies — `Content-Length`, `Content-Encoding` and the
+/// hop-by-hop set are dropped, exactly as the HTTP/1.x writer drops them, and h2 frames the
+/// body itself.
+fn send_h2_response(
+    responder: &mut ::h2::server::SendResponse<bytes::Bytes>,
+    response: &HttpResponse,
+) -> Result<()> {
+    let mut builder = http::Response::builder().status(response.status);
+    for header in response.headers.iter() {
+        let name = &header.name;
+        if HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
+            || name.eq_ignore_ascii_case("Content-Length")
+            || name.eq_ignore_ascii_case("Content-Encoding")
+        {
+            continue;
+        }
+        let lower = name.to_ascii_lowercase();
+        if let (Ok(n), Ok(v)) = (
+            http::header::HeaderName::from_bytes(lower.as_bytes()),
+            http::header::HeaderValue::from_bytes(&header.value),
+        ) {
+            builder = builder.header(n, v);
+        }
+    }
+
+    let http_response = builder
+        .body(())
+        .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 response head: {e}"))))?;
+
+    let has_body = !response.body.is_empty();
+    let mut stream = responder
+        .send_response(http_response, !has_body)
+        .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 send response: {e}"))))?;
+
+    if has_body {
+        stream
+            .send_data(response.body.clone(), true)
+            .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 send body: {e}"))))?;
+    }
+    Ok(())
 }
 
 /// Warns when a proxied request's framing shows a smuggling primitive.
@@ -732,6 +958,116 @@ mod tests {
         let mut out = Vec::new();
         let _ = tls.read_to_end(&mut out).await;
         Ok(String::from_utf8_lossy(&out).into_owned())
+    }
+
+    /// Speaks CONNECT, negotiates HTTP/2 in the tunnel, and sends every path as a
+    /// concurrent stream over the one connection — a browser opening h2 to the proxy.
+    ///
+    /// Returns each stream's status and body, and asserts h2 was actually negotiated so a
+    /// silent fall back to HTTP/1.1 cannot make the test pass for the wrong reason.
+    async fn through_tunnel_h2(
+        proxy_port: u16,
+        ca: &CertificateAuthority,
+        target_host: &str,
+        target_port: u16,
+        paths: &[&str],
+    ) -> Vec<(u16, String)> {
+        let mut socket = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
+        let connect = format!(
+            "CONNECT {target_host}:{target_port} HTTP/1.1\r\nHost: {target_host}:{target_port}\r\n\r\n"
+        );
+        socket.write_all(connect.as_bytes()).await.unwrap();
+        let mut established = [0u8; 128];
+        let n = socket.read(&mut established).await.unwrap();
+        assert!(String::from_utf8_lossy(&established[..n]).starts_with("HTTP/1.1 200"));
+
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ca.certificate_der().clone()).unwrap();
+        let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        config.alpn_protocols = vec![b"h2".to_vec()];
+
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+        let name = rustls::pki_types::ServerName::try_from(target_host.to_string()).unwrap();
+        let tls = connector.connect(name, socket).await.unwrap();
+        assert_eq!(
+            tls.get_ref().1.alpn_protocol(),
+            Some(b"h2".as_ref()),
+            "the proxy must negotiate h2 with a client that offers it"
+        );
+
+        let (send_request, connection) = ::h2::client::handshake(tls).await.unwrap();
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+
+        // Open every stream first, then read them, so they are genuinely concurrent.
+        let mut futures = Vec::new();
+        for path in paths {
+            let sr = send_request.clone();
+            let mut sr = sr.ready().await.unwrap();
+            let request = http::Request::builder()
+                .method("GET")
+                .uri(format!("https://{target_host}{path}"))
+                .body(())
+                .unwrap();
+            let (response, _) = sr.send_request(request, true).unwrap();
+            futures.push(response);
+        }
+
+        let mut out = Vec::new();
+        for response in futures {
+            let response = response.await.unwrap();
+            let status = response.status().as_u16();
+            let mut body = response.into_body();
+            let mut buf = Vec::new();
+            while let Some(chunk) = body.data().await {
+                let chunk = chunk.unwrap();
+                let _ = body.flow_control().release_capacity(chunk.len());
+                buf.extend_from_slice(&chunk);
+            }
+            out.push((status, String::from_utf8_lossy(&buf).into_owned()));
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn the_proxy_serves_http2_to_the_browser_and_captures_every_stream() {
+        let target =
+            https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello").await;
+
+        // The upstream authority is what the proxy connects to; the CONNECT names a host
+        // whose leaf the CA can mint and whose name the upstream cert carries.
+        let interception = InterceptionPolicy::intercept_all();
+        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any());
+        let (port, recorder, ca) =
+            proxy_with(Scope::new(), interception, Some(transport)).await;
+
+        // The CONNECT authority (localhost:<upstream port>) is where the proxy forwards;
+        // the upstream cert is for "localhost", accepted because the transport is accept-any.
+        let responses = through_tunnel_h2(port, &ca, "localhost", target, &["/a", "/b", "/c"]).await;
+
+        // Every stream got an answer over one h2 connection.
+        assert_eq!(responses.len(), 3);
+        for (status, body) in &responses {
+            assert_eq!(*status, 200, "each h2 stream must be answered");
+            assert_eq!(body, "hello");
+        }
+
+        // Each stream was demultiplexed into its own captured exchange, recorded as https.
+        let seen = recorder.seen.lock().unwrap();
+        assert_eq!(seen.len(), 3, "each h2 stream must be captured separately");
+        assert!(seen.iter().all(|(url, status, _)| url.starts_with("https://") && *status == 200));
+        let paths: std::collections::HashSet<_> =
+            seen.iter().map(|(url, _, _)| url.clone()).collect();
+        assert_eq!(paths.len(), 3, "the three streams are three distinct requests");
+
+        let _ = target; // upstream handle kept alive for the duration of the test
     }
 
     /// Sends a raw request to the proxy and returns the raw response.

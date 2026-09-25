@@ -256,14 +256,16 @@ mod tests {
     }
 
     #[test]
-    fn only_protocols_hexora_can_speak_are_advertised() {
-        // Offering h2 would have the browser send frames the engine cannot parse,
-        // which the user would experience as a broken site.
+    fn the_advertised_protocols_are_exactly_those_requested_in_order() {
+        // The proxy can now be an HTTP/2 server to the browser (M5.1c), so h2 is offered
+        // when asked for — but the config advertises exactly what the caller passed, in
+        // the order given, and never invents a protocol the caller did not request.
         let ca = CertificateAuthority::generate().unwrap();
-        let config = server_config_for(&ca, "example.com", &[b"http/1.1".to_vec()]).unwrap();
-        assert!(
-            !config.alpn_protocols.iter().any(|p| p == b"h2"),
-            "HTTP/2 is not implemented, so it must not be advertised"
+        let config =
+            server_config_for(&ca, "example.com", &[b"h2".to_vec(), b"http/1.1".to_vec()]).unwrap();
+        assert_eq!(
+            config.alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
         );
     }
 

@@ -14,6 +14,10 @@ hexora-http.workspace = true
 hexora-storage.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
+# HTTP/2 server side (M5.1c): the proxy accepts h2 from the browser and demultiplexes
+# its streams. `http` supplies the request/response types the `h2` API speaks.
+h2.workspace = true
+http.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 rustls.workspace = true

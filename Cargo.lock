@@ -1684,10 +1684,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "h2",
  "hexora-engine",
  "hexora-http",
  "hexora-storage",
  "hexora-types",
+ "http",
  "rcgen",
  "rustls",
  "rustls-pemfile",
