@@ -188,10 +188,51 @@ platform — see STATUS.md.
 
 **M5.1 — Protocol and target breadth** · PLANNED
 
-HTTP/2 (proxying, not just client), invisible proxying, upstream proxy chaining, mTLS,
-site map / target tree.
+Invisible proxying, upstream proxy chaining, mTLS and a site map / target tree live here
+alongside HTTP/2. HTTP/2 is table stakes for modern targets and is the single hardest
+item in this phase, so it is broken out below.
 
-HTTP/2 is table stakes for modern targets and is the single hardest item in this phase.
+### HTTP/2
+
+The seams are already in place: `HttpVersion::Http2` and `HttpVersion::is_text_framed`
+exist, ALPN is configurable on both the client and the interception seam, the
+`HttpTransport` trait is per-request (one request maps to one h2 stream), and
+`intercept.rs` *asserts* that `h2` must not be advertised until the engine can parse it —
+so turning it on is a deliberate act, not an accident.
+
+**The tension that shapes the whole design.** Hexora's identity is wire preservation:
+send deliberately-malformed messages, keep casing, duplicates and bad framing exactly as
+written. HTTP/2 fights this — it is binary, HPACK-compressed, lowercases every header
+name, and a *conforming* library will not let a caller emit a protocol violation. But
+protocol violations are the point of a security tool (HPACK bombs, CONTINUATION floods,
+pseudo-header abuse, h2→h1 downgrade smuggling). So h2 needs **two paths**: a conforming
+one (wrapping the `h2` crate — MIT, mature, already tokio + rustls compatible) to reach
+h2-only targets at all, and a **frame-level** one (a thin custom codec) for the
+adversarial sends. The milestones stage the conforming path first, because it unblocks
+real targets quickly, and defer the frame codec, which is the deepest and depends on
+everything else being solid — the same "HTTP/2 fuzzing not before parity" rule this
+roadmap already states.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **M5.1a** — h2 client transport, conforming | ALPN negotiates `h2`; `HttpTransport::send` speaks HTTP/2 to an origin via the `h2` crate; one request → one stream → one `Exchange`. h2 facts recorded (negotiated protocol, stream id, pseudo-headers). Header-casing preservation is **explicitly dropped for h2 and that fact recorded** — a protocol truth, and a server that treats casing as significant is itself a finding. `send_raw` stays `NotImplemented` for h2. The repeater, authorization matrix and scanner reach h2-only endpoints for free, because they go through the trait the scope guard wraps. | existing TLS/ALPN |
+| **M5.1b** — client connection management & multiplexing | Per-host h2 connection, concurrent streams, flow control, SETTINGS / GOAWAY, and **limits enforced per-stream and per-connection** — the HPACK / CONTINUATION analogue of the decompression-bomb guard, refused while arriving rather than after. | M5.1a; dovetails with M1.4 (pooling) |
+| **M5.1c** — proxy accepts h2 from the browser | Remove the "do not advertise h2" guard; interception offers `h2`; the proxy becomes an **h2 server to the browser**, demultiplexes concurrent streams to exchanges, and forwards each over the origin's negotiated protocol. The capture and storage model is made concurrency-safe with stream association. **This is the table-stakes deliverable — "HTTP/2 proxy" as the market means it.** | M5.1b |
+| **M5.1d** — faithful h2↔h1 translation & the downgrade surface | When an origin speaks only h1, translate — and **record the translation as an explicit, testable event**. h2→h1 downgrade is a real request-smuggling class, treated as a bug-finding surface rather than plumbing to hide. | M5.1c |
+| **M5.1e** — frame-level h2 (`send_raw` + repeater editor) | A low-level frame codec for **non-conforming** h2: HPACK edge cases, pseudo-header ordering, CONTINUATION, stream-state abuse. The security differentiator, and the reason not to wrap the `h2` crate and stop. The repeater gains an h2 view. Last, because it is deepest and rests on a–c being solid. | M5.1c |
+| **M5.1f** — storage / report / UI polish, hostile-peer suite, fuzz | `--wire` returns the reconstruction with its caveat, history carries stream association, reports name the h2 facts, and `cargo-fuzz` targets cover the frame codec and the HPACK decoder (mirroring M1.7 for HTTP/1.x). Hardening pass. | M5.1a–e |
+
+**Sequencing.** a→b→c is the shortest path to the headline "HTTP/2 proxy" line, and
+M5.1a is already useful on its own — it reaches h2-only APIs that are otherwise
+unreachable. d–f make it trustworthy and adversarial. Rough effort: a and b are medium
+each, **c is the largest single piece** (a dual-role proxy plus capture concurrency), d
+and e are medium-large, f is medium.
+
+**Risks to lock first.** The `h2`-crate-vs-hand-roll decision (recommended: the crate for
+conforming, hand-roll only the M5.1e frame codec); capture concurrency, which the current
+roughly-sequential observer assumes away and which M5.1c must address head-on rather than
+patch later; and surfacing the casing/preservation caveat in the UI and reports at M5.1a,
+so h2 never silently breaks the tool's core promise.
 
 ---
 
@@ -209,8 +250,13 @@ look for alternatives.
 **M7 — Editing and rules** · PLANNED
 
 Match & Replace (parameter- and header-aware, following Caido's redesign rather than
-Burp's regex-only model), Decoder, WebSocket interception and replay, request pipelines
-for race-condition testing.
+Burp's regex-only model), WebSocket interception and replay, and request pipelines for
+race-condition testing.
+
+The **Decoder** was taken early and ships now: a local transform bench (base64, URL, HTML
+entities, hex, JWT claims decode) in the desktop window, chainable and sending nothing —
+built in rather than left to an online decoder, because the values a tester decodes are
+live session tokens.
 
 **M8 — Traffic query language** · PLANNED
 
