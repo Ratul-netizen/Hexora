@@ -9,11 +9,13 @@
 //! interception hooks that can rewrite, replace, drop or answer a message; and
 //! [`ProjectCapture`], which persists every exchange into a project.
 //!
-//! An intercepted tunnel now negotiates **HTTP/2** with the browser (M5.1c): when the
-//! client selects `h2` at ALPN the proxy is an h2 server, demultiplexing each of the
-//! browser's concurrent streams into its own exchange, processed exactly as an HTTP/1.x
-//! request is. The upstream send is unchanged, so an h2 browser request is currently
-//! forwarded over HTTP/1.x — the faithful recording of that translation is M5.1d.
+//! An intercepted tunnel negotiates **HTTP/2** with the browser (M5.1c): when the client
+//! selects `h2` at ALPN the proxy is an h2 server, demultiplexing each of the browser's
+//! concurrent streams into its own exchange, processed exactly as an HTTP/1.x request is.
+//! Upstream, the request is forwarded over the origin's **negotiated** protocol — h2 when
+//! offered, HTTP/1.1 otherwise (M5.1d). A browser's h2 request reaching an h1 origin is a
+//! **downgrade**, which the proxy records as an explicit event and, because h2→h1 is a
+//! request-smuggling class, names the primitives such a downgrade would carry.
 //!
 //! [`trust`] installs and removes the CA from the platform trust store, and asks the
 //! platform whether it is trusted rather than assuming.

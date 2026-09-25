@@ -311,12 +311,97 @@ async fn produce(request: HttpRequest, context: &ConnectionContext) -> Result<Se
         }
     };
 
+    note_protocol_translation(&exchange);
+
     context.observer.observe(&exchange, decision);
 
     Ok(match to_client {
         Some(response) => Served::Respond(response),
         None => Served::Nothing,
     })
+}
+
+/// Records, explicitly, when the client and the origin spoke different HTTP versions.
+///
+/// The proxy forwards a request over whatever the origin negotiates, so a browser's HTTP/2
+/// request can reach an HTTP/1.x origin — a **downgrade**. That is not a mere plumbing
+/// detail: h2→h1 downgrade is a request-smuggling class, because constructs HTTP/2's binary
+/// framing carries safely (a header value with an embedded CR/LF, a `Content-Length` that
+/// disagrees with the framed body) become a second request, or a desync, once serialised
+/// onto an HTTP/1.x wire. The exchange already preserves both versions and the exact
+/// request bytes, so the evidence is there; this makes the translation loud and names the
+/// primitives a downgrade would carry, so it reads as a lead rather than a log line nobody
+/// looks at.
+fn note_protocol_translation(exchange: &Exchange) {
+    let from = exchange.request.version;
+    let to = exchange.response.version;
+    if from == to {
+        return;
+    }
+
+    tracing::info!(
+        url = %exchange.request.url(),
+        %from,
+        %to,
+        "the client and the origin spoke different HTTP versions"
+    );
+
+    if from == HttpVersion::Http2 && to == HttpVersion::Http11 {
+        let signals = downgrade_smuggling_signals(&exchange.request);
+        if !signals.is_empty() {
+            // At warn, because this is a finding waiting to be raised: an h2 request that
+            // an h1 back-end may frame differently is the whole of an h2->h1 desync.
+            tracing::warn!(
+                url = %exchange.request.url(),
+                ?signals,
+                "an HTTP/2 request downgraded to HTTP/1.1 carries a request-smuggling primitive"
+            );
+        }
+    }
+}
+
+/// The request-smuggling primitives that survive an h2→h1 downgrade.
+///
+/// A conforming HTTP/2 client cannot usually produce these — the `h2` crate and `http`
+/// types reject a header value with a CR/LF — so today this fires mainly for a request the
+/// tester crafted at the frame level (M5.1e). It is written now so the surface exists and
+/// is tested: the moment a downgrade can carry one of these, the proxy already names it.
+fn downgrade_smuggling_signals(request: &HttpRequest) -> Vec<String> {
+    let mut signals = Vec::new();
+
+    for header in request.headers.iter() {
+        let name_bad = header
+            .name
+            .bytes()
+            .any(|b| b == b'\r' || b == b'\n' || b == 0);
+        let value_bad = header
+            .value
+            .iter()
+            .any(|&b| b == b'\r' || b == b'\n' || b == 0);
+        if name_bad || value_bad {
+            signals.push(format!(
+                "header `{}` carries a CR, LF or NUL that becomes a request boundary once \
+                 serialised to HTTP/1.1",
+                header.name
+            ));
+        }
+    }
+
+    // A Content-Length that disagrees with the framed body is the h2.CL desync: HTTP/2
+    // frames the body itself, so the header is advisory, but an h1 back-end believes it.
+    if let Some(header) = request.headers.get("Content-Length") {
+        if let Ok(declared) = header.value_lossy().trim().parse::<usize>() {
+            if declared != request.body.len() {
+                signals.push(format!(
+                    "Content-Length {declared} disagrees with the {}-byte body; an HTTP/1.1 \
+                     back-end may frame the request differently (h2.CL desync)",
+                    request.body.len()
+                ));
+            }
+        }
+    }
+
+    signals
 }
 
 /// Handles a `CONNECT`: either decrypt the tunnel or copy it blind.
@@ -792,10 +877,11 @@ mod tests {
 
     use super::*;
 
-    /// Records what the proxy observed, so tests can assert on capture.
+    /// Records what the proxy observed, so tests can assert on capture. The client and
+    /// origin protocol versions are kept too, so a downgrade can be asserted on.
     #[derive(Default)]
     struct Recorder {
-        seen: Mutex<Vec<(String, u16, ScopeDecision)>>,
+        seen: Mutex<Vec<(String, u16, ScopeDecision, HttpVersion, HttpVersion)>>,
     }
 
     impl ExchangeObserver for Arc<Recorder> {
@@ -804,6 +890,8 @@ mod tests {
                 exchange.request.url(),
                 exchange.response.status,
                 decision,
+                exchange.request.version,
+                exchange.response.version,
             ));
         }
     }
@@ -1062,12 +1150,134 @@ mod tests {
         // Each stream was demultiplexed into its own captured exchange, recorded as https.
         let seen = recorder.seen.lock().unwrap();
         assert_eq!(seen.len(), 3, "each h2 stream must be captured separately");
-        assert!(seen.iter().all(|(url, status, _)| url.starts_with("https://") && *status == 200));
+        assert!(seen
+            .iter()
+            .all(|(url, status, ..)| url.starts_with("https://") && *status == 200));
         let paths: std::collections::HashSet<_> =
-            seen.iter().map(|(url, _, _)| url.clone()).collect();
+            seen.iter().map(|(url, ..)| url.clone()).collect();
         assert_eq!(paths.len(), 3, "the three streams are three distinct requests");
 
         let _ = target; // upstream handle kept alive for the duration of the test
+    }
+
+    /// An HTTP/2 upstream over TLS that answers every stream with `200` and `body`.
+    async fn h2_upstream(body: &'static [u8]) -> u16 {
+        let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert = rustls::pki_types::CertificateDer::from(issued.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(issued.key_pair.serialize_der().into());
+
+        let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .unwrap();
+        config.alpn_protocols = vec![b"h2".to_vec()];
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        tokio::spawn(async move {
+            loop {
+                let Ok((socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(tls) = acceptor.accept(socket).await else {
+                        return;
+                    };
+                    let Ok(mut connection) = ::h2::server::handshake(tls).await else {
+                        return;
+                    };
+                    while let Some(Ok((request, mut responder))) = connection.accept().await {
+                        let mut request_body = request.into_body();
+                        while let Some(chunk) = request_body.data().await {
+                            if let Ok(chunk) = chunk {
+                                let _ = request_body.flow_control().release_capacity(chunk.len());
+                            }
+                        }
+                        let response = http::Response::builder().status(200).body(()).unwrap();
+                        if let Ok(mut send) = responder.send_response(response, false) {
+                            let _ = send.send_data(bytes::Bytes::copy_from_slice(body), true);
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn a_downgrade_names_the_smuggling_primitives_it_would_carry() {
+        // A clean request carries nothing.
+        let clean = HttpRequest::get(HttpService::new("localhost", 443, true), "/");
+        assert!(downgrade_smuggling_signals(&clean).is_empty());
+
+        // A header value with an embedded CR/LF is a request-splitting primitive.
+        let mut splitting = HttpRequest::get(HttpService::new("localhost", 443, true), "/");
+        splitting.headers.append(hexora_types::http::Header {
+            name: "X-Note".to_string(),
+            value: bytes::Bytes::from_static(b"a\r\nInjected: 1"),
+        });
+        let signals = downgrade_smuggling_signals(&splitting);
+        assert_eq!(signals.len(), 1);
+        assert!(signals[0].contains("X-Note"), "{signals:?}");
+
+        // A Content-Length that disagrees with the body is the h2.CL desync.
+        let mut desync = HttpRequest {
+            body: bytes::Bytes::from_static(b"hello"),
+            ..HttpRequest::get(HttpService::new("localhost", 443, true), "/")
+        };
+        desync.headers.set("Content-Length", "9999");
+        let signals = downgrade_smuggling_signals(&desync);
+        assert!(
+            signals.iter().any(|s| s.contains("h2.CL desync")),
+            "{signals:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_h2_request_to_an_h2_origin_is_forwarded_over_h2_not_downgraded() {
+        let target = h2_upstream(b"hello").await;
+
+        // Upstream h2 is enabled, as it is for the real proxy since M5.1d.
+        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any()).http2(true);
+        let (port, recorder, ca) =
+            proxy_with(Scope::new(), InterceptionPolicy::intercept_all(), Some(transport)).await;
+
+        let responses = through_tunnel_h2(port, &ca, "localhost", target, &["/a"]).await;
+        assert_eq!(responses, vec![(200, "hello".to_string())]);
+
+        let seen = recorder.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].3, HttpVersion::Http2, "the browser spoke h2");
+        assert_eq!(
+            seen[0].4,
+            HttpVersion::Http2,
+            "an h2 origin must be reached over h2, not downgraded"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_h2_request_to_an_h1_origin_is_recorded_as_a_downgrade() {
+        let target = https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello").await;
+
+        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any()).http2(true);
+        let (port, recorder, ca) =
+            proxy_with(Scope::new(), InterceptionPolicy::intercept_all(), Some(transport)).await;
+
+        let responses = through_tunnel_h2(port, &ca, "localhost", target, &["/a"]).await;
+        assert_eq!(responses, vec![(200, "hello".to_string())]);
+
+        // The evidence shows both halves of the translation: the browser spoke h2, the
+        // origin answered h1. That difference is the downgrade.
+        let seen = recorder.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].3, HttpVersion::Http2);
+        assert_eq!(seen[0].4, HttpVersion::Http11);
     }
 
     /// Sends a raw request to the proxy and returns the raw response.

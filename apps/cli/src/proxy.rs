@@ -82,10 +82,13 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         InterceptionPolicy::exempting(args.exempt.to_vec())
     };
 
+    // Upstream now forwards over the origin's negotiated protocol (M5.1d): HTTP/2 when the
+    // origin offers it, HTTP/1.1 otherwise. A browser's h2 request reaching an h1 origin is
+    // a downgrade, which the proxy records as an explicit, smuggling-aware event.
     let transport = if args.insecure_upstream {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
 
     let config = ProxyConfig {

@@ -180,10 +180,13 @@ pub async fn proxy_start(
         InterceptionPolicy::only(intercept_only)
     };
 
+    // Upstream forwards over the origin's negotiated protocol (M5.1d): HTTP/2 when offered,
+    // HTTP/1.1 otherwise. An h2 request reaching an h1 origin is a downgrade the proxy
+    // records as an explicit, smuggling-aware event.
     let transport = if insecure_upstream {
-        TcpTransport::with_tls(TlsConfig::accept_any())
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
     } else {
-        TcpTransport::new()
+        TcpTransport::new().http2(true)
     };
 
     // Capture first, notify second. If the notification observer ever fails, the
