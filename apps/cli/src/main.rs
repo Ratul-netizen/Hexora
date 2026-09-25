@@ -1070,6 +1070,25 @@ enum ProjectCommand {
 }
 
 fn main() -> ExitCode {
+    // Run everything — argument parsing included — on a thread with a generous stack.
+    //
+    // The `Command` enum is large (dozens of subcommands, each with its own fields), and
+    // an unoptimized build lays a value of it out on the stack during `Cli::parse`. On
+    // Windows the default main-thread stack is 1 MiB, which a debug build overflows
+    // before `main` does anything at all — `hexora version` and `hexora --help` both
+    // crash with "overflowed its stack". Release builds shrink the frames and are fine,
+    // which is why this only ever bit a developer running a debug binary. An 8 MiB worker
+    // stack removes the cliff without changing anything about how the program runs.
+    std::thread::Builder::new()
+        .name("hexora-main".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(real_main)
+        .expect("spawn main worker thread")
+        .join()
+        .unwrap_or(ExitCode::FAILURE)
+}
+
+fn real_main() -> ExitCode {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
