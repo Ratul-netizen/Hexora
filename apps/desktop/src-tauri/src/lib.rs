@@ -54,6 +54,7 @@ pub fn run() {
             commands::history_list,
             commands::history_detail,
             commands::repeater_draft,
+            commands::repeater_new,
             commands::repeater_send,
             commands::repeater_tree,
             commands::ca_status,

@@ -264,6 +264,108 @@ impl HttpService {
     pub fn origin(&self) -> String {
         format!("{}://{}", self.scheme(), self.authority())
     }
+
+    /// Parses an absolute URL into a connection target and an origin-form request path.
+    ///
+    /// For crafting a request the tester did not capture: they type a URL, and this
+    /// answers *where to connect* (host, port, TLS) and *what the request line's target
+    /// should be* (path plus query), which are the two things a fresh draft needs.
+    ///
+    /// It is deliberately forgiving in one place and strict everywhere else. A URL with
+    /// no scheme is read as `https`, because that is what a tester pasting a bare host
+    /// means and defaulting to cleartext would silently downgrade the request. Beyond
+    /// that it refuses what it cannot make an unambiguous target from — an empty host, a
+    /// port that is not a number, a scheme that is not HTTP — rather than guess, because
+    /// the whole point of a connection target is that it is not inferred from the bytes.
+    /// Any userinfo (`user:pass@`) is dropped: it belongs in an `Authorization` header,
+    /// not in where the socket goes.
+    pub fn parse_url(url: &str) -> crate::Result<(Self, String)> {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
+            return Err(crate::HexoraError::invalid_input("url", "a URL is required"));
+        }
+
+        let (secure, rest) = match trimmed.split_once("://") {
+            Some((scheme, rest)) => match scheme.to_ascii_lowercase().as_str() {
+                "https" => (true, rest),
+                "http" => (false, rest),
+                other => {
+                    return Err(crate::HexoraError::invalid_input(
+                        "url",
+                        format!("scheme {other:?} is not http or https"),
+                    ))
+                }
+            },
+            // No scheme: assume HTTPS rather than downgrade to cleartext.
+            None => (true, trimmed),
+        };
+
+        // Authority runs to the first '/', '?' or '#'; the rest is the request target.
+        let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let (authority, tail) = rest.split_at(authority_end);
+
+        // Drop any userinfo — it is a credential, not a routing decision.
+        let host_port = authority.rsplit_once('@').map_or(authority, |(_, hp)| hp);
+        let default_port = if secure { 443 } else { 80 };
+
+        let parse_port = |p: &str| -> crate::Result<u16> {
+            p.parse::<u16>().map_err(|_| {
+                crate::HexoraError::invalid_input("url", format!("port {p:?} is not a number"))
+            })
+        };
+
+        let (host, port): (String, u16) = if let Some(rest) = host_port.strip_prefix('[') {
+            // A bracketed IPv6 literal: `[addr]`, optionally followed by `:port`. The
+            // colons inside are the address, so the port is only ever what follows `]`.
+            let close = rest.find(']').ok_or_else(|| {
+                crate::HexoraError::invalid_input("url", "the IPv6 host is not closed with ']'")
+            })?;
+            let addr = &rest[..close];
+            let after = &rest[close + 1..];
+            let port = if let Some(p) = after.strip_prefix(':') {
+                parse_port(p)?
+            } else if after.is_empty() {
+                default_port
+            } else {
+                return Err(crate::HexoraError::invalid_input(
+                    "url",
+                    "unexpected characters after the IPv6 host",
+                ));
+            };
+            (format!("[{addr}]"), port)
+        } else {
+            match host_port.rsplit_once(':') {
+                // A single colon is host:port. More than one and no brackets is a bare
+                // IPv6 address, which is its own host and takes the default port.
+                Some((h, p)) if !h.contains(':') => (h.to_string(), parse_port(p)?),
+                _ => (host_port.to_string(), default_port),
+            }
+        };
+
+        if host.is_empty() {
+            return Err(crate::HexoraError::invalid_input(
+                "url",
+                "the URL has no host",
+            ));
+        }
+        if host.chars().any(char::is_whitespace) {
+            return Err(crate::HexoraError::invalid_input(
+                "url",
+                "the host contains whitespace",
+            ));
+        }
+
+        // A request line is never empty; the target defaults to "/".
+        let path = if tail.is_empty() || tail.starts_with(['?', '#']) {
+            format!("/{tail}")
+        } else {
+            tail.to_string()
+        };
+        // A fragment is a client-side concept and never goes on the wire.
+        let path = path.split('#').next().unwrap_or("/").to_string();
+
+        Ok((Self::new(host, port, secure), path))
+    }
 }
 
 impl fmt::Display for HttpService {
@@ -422,6 +524,56 @@ mod tests {
 
     fn svc() -> HttpService {
         HttpService::new("example.com", 443, true)
+    }
+
+    #[test]
+    fn parse_url_reads_scheme_host_port_and_path() {
+        let (service, path) = HttpService::parse_url("https://api.example.com/v1/users?q=1").unwrap();
+        assert_eq!(service, HttpService::new("api.example.com", 443, true));
+        assert_eq!(path, "/v1/users?q=1");
+
+        let (service, path) = HttpService::parse_url("http://localhost:8080/app").unwrap();
+        assert_eq!(service, HttpService::new("localhost", 8080, false));
+        assert_eq!(path, "/app");
+    }
+
+    #[test]
+    fn parse_url_defaults_a_bare_host_to_https_and_root() {
+        let (service, path) = HttpService::parse_url("example.com").unwrap();
+        assert_eq!(service, HttpService::new("example.com", 443, true));
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn parse_url_keeps_the_query_when_the_path_is_only_a_query() {
+        let (service, path) = HttpService::parse_url("https://example.com?a=b").unwrap();
+        assert_eq!(service.host, "example.com");
+        assert_eq!(path, "/?a=b");
+    }
+
+    #[test]
+    fn parse_url_drops_userinfo_and_fragment() {
+        // The credential belongs in a header, not in where the socket goes; the
+        // fragment is a client-side concept and never reaches the wire.
+        let (service, path) =
+            HttpService::parse_url("https://user:pass@example.com/p#section").unwrap();
+        assert_eq!(service.host, "example.com");
+        assert_eq!(path, "/p");
+    }
+
+    #[test]
+    fn parse_url_keeps_an_ipv6_host_intact() {
+        let (service, path) = HttpService::parse_url("http://[::1]:9000/health").unwrap();
+        assert_eq!(service, HttpService::new("[::1]", 9000, false));
+        assert_eq!(path, "/health");
+    }
+
+    #[test]
+    fn parse_url_refuses_what_it_cannot_target() {
+        assert!(HttpService::parse_url("").is_err());
+        assert!(HttpService::parse_url("ftp://example.com").is_err());
+        assert!(HttpService::parse_url("https://example.com:notaport/").is_err());
+        assert!(HttpService::parse_url("https:///path").is_err());
     }
 
     #[test]

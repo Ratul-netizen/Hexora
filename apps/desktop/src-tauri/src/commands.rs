@@ -29,7 +29,7 @@ use hexora_proxy::{
     trust, CertificateAuthority, Fanout, InterceptionPolicy, ProjectCapture, ProxyConfig,
     ProxyServer, TrustState,
 };
-use hexora_repeater::{Repeater, Warning};
+use hexora_repeater::{Draft, Repeater, Warning};
 use hexora_report::{Format, Report, ReportOptions};
 use hexora_storage::repository::{Cursor, Limit};
 use hexora_storage::{FindingFilter, Project, Recorded};
@@ -398,6 +398,34 @@ pub fn repeater_draft(state: State<'_, AppState>, id: String) -> CommandResult<D
     })
 }
 
+/// Seeds an editable draft from a URL, for a request the tester never captured.
+///
+/// The repeater has always been able to edit any byte of a *captured* request; this is
+/// the door to the request nobody captured — a tester types a URL and gets a minimal,
+/// well-formed `GET` to edit. The URL decides the connection target (host, port, TLS)
+/// and the request line; from there every other byte is the tester's, exactly as it is
+/// for a captured request. Nothing is sent here — this only prepares the editor.
+#[tauri::command]
+pub fn repeater_new(url: String, method: Option<String>) -> CommandResult<DraftView> {
+    let (service, path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let mut request = hexora_types::http::HttpRequest::get(service, path);
+    if let Some(method) = method {
+        let method = method.trim();
+        if !method.is_empty() {
+            request.method = method.to_ascii_uppercase();
+        }
+    }
+
+    let draft = Draft::new(request);
+    Ok(DraftView {
+        raw: String::from_utf8_lossy(&draft.to_raw()).into_owned(),
+        url: draft.request.url(),
+        parent: None,
+        warnings: warnings(&draft.warnings()),
+        mode: draft.mode().as_str().to_string(),
+    })
+}
+
 /// What came back from a repeater send.
 #[derive(Debug, Clone, Serialize)]
 pub struct SendResult {
@@ -435,6 +463,7 @@ pub async fn repeater_send(
     state: State<'_, AppState>,
     raw: String,
     parent: Option<String>,
+    target: Option<String>,
     insecure: bool,
     request_mode: Option<String>,
 ) -> CommandResult<SendResult> {
@@ -446,9 +475,22 @@ pub async fn repeater_send(
         Some(id) => Some(id.parse().map_err(fail)?),
         None => None,
     };
-    let mut draft = match parent_id {
-        Some(id) => repeater.draft_from(id).map_err(fail)?,
-        None => return Err("a repeater send needs a request to start from".to_string()),
+    // Three ways to reach a draft, in priority order: derived from a captured request
+    // (the usual case, which also carries lineage for the diff), built fresh against a
+    // target URL (a request nobody captured), or neither — which is an error rather than
+    // a guess, because a request with no connection target must not be sent.
+    let mut draft = match (parent_id, target.as_deref()) {
+        (Some(id), _) => repeater.draft_from(id).map_err(fail)?,
+        (None, Some(url)) => {
+            let (service, path) =
+                hexora_types::http::HttpService::parse_url(url).map_err(fail)?;
+            Draft::new(hexora_types::http::HttpRequest::get(service, path))
+        }
+        (None, None) => {
+            return Err(
+                "a repeater send needs a request to start from or a target URL".to_string(),
+            )
+        }
     };
     // The window asks for a mode explicitly. A request captured raw is already raw
     // when it loads, and asking for raw on a structured draft converts it — which is

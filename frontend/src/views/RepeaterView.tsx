@@ -5,6 +5,7 @@ import {
   branchesOf,
   describeError,
   loadDraft,
+  newDraft,
   sendDraft,
   type DiffView,
   type HistoryRow,
@@ -51,12 +52,25 @@ export function RepeaterView({
   const [mode, setMode] = useState<RequestMode>("structured");
   const [busy, setBusy] = useState(false);
 
+  // What a send derives from. `parent` is a stored request — a captured one, or the
+  // first send of a request crafted from scratch, adopted so resends chain off it and
+  // the diff has something to compare against. `target` is the URL a from-scratch draft
+  // connects to until it has been sent once. Exactly one of them drives any given send.
+  const [parent, setParent] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
+  // Whether an editor is open. False shows the "new request" form.
+  const [ready, setReady] = useState(false);
+  const [newUrl, setNewUrl] = useState("");
+  const [newMethod, setNewMethod] = useState("GET");
+
   useEffect(() => {
     if (requestId === null) return;
     let cancelled = false;
 
     setResult(null);
     setError(null);
+    setTarget(null);
+    setParent(requestId);
     loadDraft(requestId)
       .then((draft) => {
         if (cancelled) return;
@@ -66,6 +80,7 @@ export function RepeaterView({
         // A request that was captured raw comes back raw. Loading it as structured
         // would offer to send something else under the same name.
         setMode(draft.mode);
+        setReady(true);
       })
       .catch((e) => {
         if (!cancelled) setError(describeError(e));
@@ -82,15 +97,39 @@ export function RepeaterView({
     };
   }, [requestId]);
 
+  async function create() {
+    setError(null);
+    try {
+      const draft = await newDraft(newUrl, newMethod);
+      setRaw(draft.raw);
+      setUrl(draft.url);
+      setWarnings(draft.warnings);
+      setMode(draft.mode);
+      // No stored request yet: the first send connects to the typed URL, and adopts
+      // the request it produces as the parent for everything after.
+      setParent(null);
+      setTarget(newUrl);
+      setResult(null);
+      setBranches([]);
+      setReady(true);
+    } catch (e) {
+      setError(describeError(e));
+    }
+  }
+
   async function send() {
-    if (requestId === null) return;
+    if (!ready) return;
     setBusy(true);
     setError(null);
     try {
-      const sent = await sendDraft(raw, requestId, insecure, mode);
+      const sent = await sendDraft(raw, parent, target, insecure, mode);
       setResult(sent);
       setWarnings(sent.warnings);
-      setBranches(await branchesOf(requestId));
+      // The request to hang variants and the diff off: the existing parent, or — on the
+      // first send of a from-scratch draft — the request that send just created.
+      const root = parent ?? sent.id;
+      if (parent === null) setParent(sent.id);
+      setBranches(await branchesOf(root));
       onCaptured();
     } catch (e) {
       setError(describeError(e));
@@ -99,11 +138,43 @@ export function RepeaterView({
     }
   }
 
-  if (requestId === null) {
+  if (!ready) {
     return (
-      <p className="placeholder">
-        Select an exchange in History and choose “Send to repeater”.
-      </p>
+      <div className="new-request">
+        <h2>New request</h2>
+        <p className="muted small">
+          Craft a request to an endpoint you have not captured. The URL sets where it
+          connects and the request line; every other byte is yours to edit before it is
+          sent. Or select an exchange in History and choose “Send to repeater”.
+        </p>
+        <form
+          className="new-request-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+        >
+          <select value={newMethod} onChange={(e) => setNewMethod(e.target.value)}>
+            {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <input
+            className="url-input"
+            type="text"
+            value={newUrl}
+            placeholder="https://api.example.com/v1/users?id=1"
+            onChange={(e) => setNewUrl(e.target.value)}
+            autoFocus
+          />
+          <button type="submit" disabled={newUrl.trim() === ""}>
+            Create
+          </button>
+        </form>
+        {error && <p className="error-text">{error}</p>}
+      </div>
     );
   }
 
@@ -112,6 +183,17 @@ export function RepeaterView({
       <div className="repeater-editor">
         <header className="detail-header">
           <span className="mono">{url}</span>
+          <button
+            className="tab"
+            onClick={() => {
+              setReady(false);
+              setResult(null);
+              setError(null);
+            }}
+            title="Start a request from scratch"
+          >
+            New
+          </button>
           <div className="modes">
             {(["structured", "raw"] as const).map((option) => (
               <button

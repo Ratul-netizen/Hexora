@@ -1170,3 +1170,46 @@ input.narrow {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* New request — the from-scratch form the repeater shows when nothing is loaded. */
+.new-request {
+  max-width: 720px;
+  padding: 24px;
+}
+
+.new-request h2 {
+  margin: 0 0 6px;
+}
+
+.new-request-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  align-items: stretch;
+}
+
+.new-request-form select {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+}
+
+.new-request-form .url-input {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.new-request-form .url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}

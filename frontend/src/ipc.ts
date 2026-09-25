@@ -199,13 +199,24 @@ export const exchangeDetail = (id: string): Promise<ExchangeDetail> =>
 export const loadDraft = (id: string): Promise<DraftView> =>
   invoke<DraftView>("repeater_draft", { id });
 
+/** Seeds an editable draft from a URL, for a request that was never captured. */
+export const newDraft = (url: string, method?: string): Promise<DraftView> =>
+  invoke<DraftView>("repeater_new", { url, method: method ?? null });
+
 export const sendDraft = (
   raw: string,
   parent: string | null,
+  target: string | null,
   insecure: boolean,
   requestMode: RequestMode,
 ): Promise<SendResult> =>
-  invoke<SendResult>("repeater_send", { raw, parent, insecure, requestMode });
+  invoke<SendResult>("repeater_send", {
+    raw,
+    parent,
+    target,
+    insecure,
+    requestMode,
+  });
 
 export const branchesOf = (id: string): Promise<HistoryRow[]> =>
   invoke<HistoryRow[]>("repeater_tree", { id });
