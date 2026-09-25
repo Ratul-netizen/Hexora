@@ -131,7 +131,11 @@ export function RepeaterView({
             />
             <span>Ignore certificate errors</span>
           </label>
-          <button onClick={() => void send()} disabled={busy}>
+          <button
+            onClick={() => void send()}
+            disabled={busy}
+            title="Ctrl+Enter (⌘+Enter on macOS)"
+          >
             {busy ? "Sending…" : "Send"}
           </button>
         </header>
@@ -149,6 +153,15 @@ export function RepeaterView({
           value={raw}
           spellCheck={false}
           onChange={(e) => setRaw(e.target.value)}
+          // Ctrl+Enter (⌘+Enter on macOS) sends, the way every repeater a tester has
+          // used already works. A plain Enter still inserts a newline, because editing
+          // the request is most of what happens in this box.
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+              e.preventDefault();
+              if (!busy) void send();
+            }
+          }}
         />
 
         {warnings.length > 0 && (

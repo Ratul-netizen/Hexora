@@ -1134,3 +1134,39 @@ tr.violation td {
 input.narrow {
   width: 5.5em;
 }
+
+/* Decoder — the local transform bench. A column layout so the transform picker and the
+   direction switch sit above two panes that share the width the way the repeater does. */
+.decoder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.decoder-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.decoder-panes section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.decoder-panes section > label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.decoder-panes textarea.editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

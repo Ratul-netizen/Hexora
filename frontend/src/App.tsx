@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AuthzView } from "./views/AuthzView";
+import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
 import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
@@ -31,6 +32,7 @@ type Tab =
   | "setup"
   | "history"
   | "repeater"
+  | "decoder"
   | "identifiers"
   | "scan"
   | "authz"
@@ -43,6 +45,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "setup", label: "Setup" },
   { id: "history", label: "History" },
   { id: "repeater", label: "Repeater" },
+  { id: "decoder", label: "Decoder" },
   { id: "identifiers", label: "Identifiers" },
   { id: "scan", label: "Scan" },
   { id: "authz", label: "Authorization" },
@@ -174,6 +177,7 @@ export default function App() {
             onCaptured={() => setCaptureCount((n) => n + 1)}
           />
         )}
+        {tab === "decoder" && <DecoderView />}
         {tab === "identifiers" && (
           <IdentifiersView hasProject={project !== null} />
         )}
