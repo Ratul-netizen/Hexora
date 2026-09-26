@@ -809,6 +809,45 @@ STATUS.md as a decision rather than an omission.
 Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
 not an object and an object is not an ownership claim.
 
+**M13.8 — Crawler and coverage** · PLANNED
+
+The scanner is only as good as what was captured, and today that is exactly what a tester
+proxied — the single largest gap against Burp. A crawler discovers endpoints on its own and
+feeds them into the same project the scanner reads, so "clean scan" stops meaning "nobody
+looked here".
+
+**A crawler sends traffic — that is the tension.** Everything else in Phase 4 either observes
+captured traffic (passive) or sends only what an experiment needs behind a plan you approve
+(active). A crawler generates requests nobody typed, so it is not exempt from the discipline
+that keeps this a tool a tester trusts: it produces requests through the **active scheduler**
+(M13.3) — one host at a time, a request ceiling, a plan shown before anything is sent — and
+every request passes the **scope guard**, so an out-of-scope link is recorded as *found*,
+never fetched. The tester asks for the crawl by starting a bounded one and seeing its plan;
+that is how "nothing is sent that a tester did not ask for" survives a crawler.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **CR.a** — the link extractor | Reads the URLs a captured response references — anchors, form actions, `script`/`img`/`link` sources, and URL-shaped strings — each resolved against the response's base the way M13.5 resolves a `Location`. Sends nothing; it operates over traffic already captured and *offers* endpoints, the way the identifier analyzer offers identifiers. | passive-scan model, M13.5 resolver |
+| **CR.b** — the frontier and the fetch | A bounded, scope-checked crawl: a frontier seeded from captured traffic, fetched through the active scheduler, each response fed back to CR.a to discover more, until the frontier empties or the ceiling is hit. Out-of-scope links are recorded, not followed; depth and count are bounded. | CR.a, M13.3 scheduler |
+| **CR.c** — what a crawler must never click | A crawler that follows every link logs itself out, deletes records, fires webhooks. So: **GET-only** auto-follow; a link that looks state-changing or destructive (`logout`, `delete`, `remove`…) is recorded, not followed; a **form is discovered, never auto-submitted** — submitting is a deliberate act, like the intruder; `robots.txt` and `nofollow` are respected by default and the default is overridable, loudly. | CR.b |
+| **CR.d** — authenticated crawling | Crawl as a declared identity, reusing the session model (M15.1–15.2), so the crawler reaches behind the login; each fetched exchange records which identity saw it, so coverage is attributable and a crawl as User A versus User B is two maps — feeding the cross-identity work. | CR.b, M15 |
+| **CR.e** — the site map | The coverage answer, made visible: a host → path tree in the CLI and the window showing what was fetched, what is out of scope, what forms were found but not submitted, and which identity reached each. And the scanner now has more to scan, because the crawl fed the project — the "empty scan" gap closed. | CR.b |
+| **CR.f** — hardening and JS-rendered discovery | The HTML/URL extractor fuzzed on hostile bytes (the panic surface, like the HPACK and WebSocket parsers), a per-host budget the scheduler enforces, and the decision on **JS-rendered endpoints**: a static extractor misses SPA routes and XHR that only exist after JavaScript runs, so this **merges with browser integration (M18)** — driving a real browser over CDP, the approach ZAP's Client Spider adopted in 2026 — rather than being built twice. A static crawl reports honestly that a JS app needs the browser. | CR.a–e, M18 |
+
+**Decisions to lock first.** The crawler is a *producer* for the scheduler, not a second sender
+beside it, so it never opens its own connections — it enqueues requests the scheduler sends
+under scope and the ceiling. Safety beats completeness: a smaller map is better than one that
+logged the tester out or deleted a record, so GET-only and never-auto-submit are defaults,
+not options a hurried run skips. And the static/JS split is stated, not hidden: a static
+crawl says what it could not reach, and the browser-driven crawl (M18) is where a SPA's real
+surface is found.
+
+**Sequencing.** a→b is the crawl; c makes it safe to point at a real target; d reaches behind
+a login; e is the visible payoff and the gap actually closing; f hardens and hands the JS
+case to the browser. **CR.b is the largest piece** (the frontier plus the scheduler
+integration); the rest are medium, and CR.f is deliberately not a place to hand-roll a
+browser — it defers to M18.
+
 **M15 — Session handling** · IN PROGRESS
 
 ```text
