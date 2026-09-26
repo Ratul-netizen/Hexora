@@ -239,6 +239,34 @@ pub async fn discover_ws_url(host: &str, port: u16) -> Result<String> {
         .ok_or_else(|| malformed("/json/version had no webSocketDebuggerUrl"))
 }
 
+/// Discovers a **page** target's DevTools WebSocket URL from `/json/list`.
+///
+/// The browser-level socket ([`discover_ws_url`]) speaks `Browser.*`; driving a page —
+/// `Page.navigate`, `Page.captureScreenshot` — needs the socket of a page target, which this
+/// returns (the first one `/json/list` reports).
+pub async fn discover_page_ws_url(host: &str, port: u16) -> Result<String> {
+    let service = HttpService::new(host, port, false);
+    let request = HttpRequest::get(service, "/json/list");
+    let transport = TcpTransport::new();
+    let exchange = transport
+        .send(request, SendOptions::interactive(Origin::Repeater))
+        .await?;
+
+    let value: Value = serde_json::from_slice(&exchange.response.body)
+        .map_err(|e| malformed(format!("/json/list was not JSON: {e}")))?;
+    value
+        .as_array()
+        .and_then(|targets| {
+            targets
+                .iter()
+                .find(|t| t.get("type").and_then(Value::as_str) == Some("page"))
+                .or_else(|| targets.first())
+        })
+        .and_then(|t| t.get("webSocketDebuggerUrl").and_then(Value::as_str))
+        .map(str::to_string)
+        .ok_or_else(|| malformed("/json/list had no page target with a webSocketDebuggerUrl"))
+}
+
 /// Discovers, connects, and returns the browser's product string (e.g. `HeadlessChrome/…`).
 ///
 /// The smallest end-to-end use of this layer, and the shape M18.b's launcher will call.
