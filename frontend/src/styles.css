@@ -1213,3 +1213,67 @@ input.narrow {
   outline: none;
   border-color: var(--accent);
 }
+
+/* WebSocket sessions and their message timeline: sessions on the left, frames on the right,
+   the direction arrow making client vs server scannable at a glance. */
+.websockets {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 2fr;
+  gap: 12px;
+  height: 100%;
+}
+
+.ws-sessions,
+.ws-timeline {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow: auto;
+}
+
+.ws-sessions ul,
+.ws-timeline ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ws-sessions li {
+  margin: 4px 0;
+}
+
+.ws-sessions li button {
+  width: 100%;
+  text-align: left;
+}
+
+.ws-timeline li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.ws-arrow {
+  font-weight: 700;
+  width: 1em;
+}
+
+.ws-out .ws-arrow {
+  color: var(--accent);
+}
+
+.ws-op {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 4rem;
+}
+
+.ws-preview {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

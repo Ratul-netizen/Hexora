@@ -36,6 +36,7 @@ mod scope;
 mod send;
 mod setup;
 mod snapshot;
+mod ws;
 
 /// Hexora — the modern offensive security workbench.
 #[derive(Debug, Parser)]
@@ -609,6 +610,14 @@ enum Command {
         no_poc: bool,
     },
 
+    /// List captured WebSocket sessions, or show one's message timeline.
+    Ws {
+        /// Project directory.
+        path: PathBuf,
+        /// A session id to show its timeline; omit to list sessions.
+        id: Option<String>,
+    },
+
     /// Show the active licence, or activate one.
     #[command(subcommand)]
     License(LicenseCommand),
@@ -1132,6 +1141,7 @@ fn real_main() -> ExitCode {
 
 fn run(cli: &Cli) -> hexora_types::Result<()> {
     match &cli.command {
+        Command::Ws { path, id } => ws::run(path, id.as_deref(), cli.json),
         Command::License(LicenseCommand::Show) => license::show(cli.json),
         Command::License(LicenseCommand::Activate { file }) => license::activate(file, cli.json),
         Command::License(LicenseCommand::Trial) => license::trial(cli.json),

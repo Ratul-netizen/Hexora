@@ -54,6 +54,8 @@ pub fn run() {
             commands::history_list,
             commands::history_detail,
             commands::license_status,
+            commands::websocket_sessions,
+            commands::websocket_messages,
             commands::repeater_draft,
             commands::repeater_new,
             commands::repeater_send,

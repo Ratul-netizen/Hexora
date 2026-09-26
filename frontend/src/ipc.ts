@@ -208,6 +208,30 @@ export interface LicenseStatus {
 export const licenseStatus = (): Promise<LicenseStatus> =>
   invoke<LicenseStatus>("license_status");
 
+/** A captured WebSocket session, for the sessions list. */
+export interface WsSessionView {
+  id: string;
+  url: string;
+  messages: number;
+  started_at: string;
+}
+
+/** One WebSocket message in a session's timeline. */
+export interface WsMessageView {
+  id: string;
+  direction: string;
+  opcode: number;
+  size: number;
+  preview: string;
+  sent_at: string;
+}
+
+export const websocketSessions = (): Promise<WsSessionView[]> =>
+  invoke<WsSessionView[]>("websocket_sessions");
+
+export const websocketMessages = (id: string): Promise<WsMessageView[]> =>
+  invoke<WsMessageView[]>("websocket_messages", { id });
+
 export const loadDraft = (id: string): Promise<DraftView> =>
   invoke<DraftView>("repeater_draft", { id });
 

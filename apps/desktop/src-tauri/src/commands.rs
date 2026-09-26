@@ -78,6 +78,76 @@ pub struct LicenseStatus {
     pub days_until_expiry: Option<i64>,
 }
 
+/// One captured WebSocket session, for the sessions list.
+#[derive(Debug, Clone, Serialize)]
+pub struct WsSessionView {
+    pub id: String,
+    pub url: String,
+    pub messages: u64,
+    pub started_at: String,
+}
+
+/// One WebSocket message, for a session's timeline.
+#[derive(Debug, Clone, Serialize)]
+pub struct WsMessageView {
+    pub id: String,
+    /// `client_to_server` or `server_to_client`.
+    pub direction: String,
+    pub opcode: u8,
+    pub size: usize,
+    /// A short, printable preview of the payload.
+    pub preview: String,
+    pub sent_at: String,
+}
+
+/// Lists the captured WebSocket sessions.
+#[tauri::command]
+pub fn websocket_sessions(state: State<'_, AppState>) -> CommandResult<Vec<WsSessionView>> {
+    let store = state.traffic().map_err(fail)?;
+    Ok(store
+        .ws_sessions()
+        .map_err(fail)?
+        .into_iter()
+        .map(|s| WsSessionView {
+            id: s.request_id.to_string(),
+            url: s.url,
+            messages: s.messages,
+            started_at: s.started_at,
+        })
+        .collect())
+}
+
+/// Shows one WebSocket session's message timeline.
+#[tauri::command]
+pub fn websocket_messages(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<Vec<WsMessageView>> {
+    let store = state.traffic().map_err(fail)?;
+    let request_id = id.parse().map_err(fail)?;
+    Ok(store
+        .ws_messages(request_id)
+        .map_err(fail)?
+        .into_iter()
+        .map(|m| WsMessageView {
+            id: m.id.to_string(),
+            direction: m.direction.as_str().to_string(),
+            opcode: m.opcode,
+            size: m.payload.len(),
+            preview: ws_preview(&m.payload),
+            sent_at: m.sent_at,
+        })
+        .collect())
+}
+
+/// A short, printable preview of a WebSocket payload.
+fn ws_preview(payload: &[u8]) -> String {
+    match std::str::from_utf8(payload) {
+        Ok(text) => text.chars().take(200).collect::<String>().replace(['\n', '\r'], " "),
+        Err(_) => format!("<{} binary bytes>", payload.len()),
+    }
+}
+
 /// Reports the licence tier this install is running at.
 #[tauri::command]
 pub fn license_status() -> LicenseStatus {

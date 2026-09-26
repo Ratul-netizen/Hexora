@@ -172,6 +172,19 @@ struct RequestRow {
     raw_size: i64,
 }
 
+/// A summary of one captured WebSocket session, for a session list.
+#[derive(Debug, Clone)]
+pub struct WsSession {
+    /// The Upgrade request that opened the session; its id addresses the message timeline.
+    pub request_id: RequestId,
+    /// The session URL, `ws://` or `wss://`.
+    pub url: String,
+    /// How many messages were captured.
+    pub messages: u64,
+    /// When the first message was recorded, RFC 3339.
+    pub started_at: String,
+}
+
 /// One captured WebSocket message, read back from a session.
 #[derive(Debug, Clone)]
 pub struct WsMessage {
@@ -692,6 +705,56 @@ impl TrafficStore {
         Ok(id)
     }
 
+    /// Lists the captured WebSocket sessions, oldest first.
+    ///
+    /// A session is an Upgrade request that carried at least one frame; the join gives each
+    /// its URL and message count in one pass, so a session list does not read every frame.
+    pub fn ws_sessions(&self) -> Result<Vec<WsSession>> {
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT w.request_id, COUNT(*), MIN(w.sent_at), t.host, t.port, t.secure, r.path
+             FROM websocket_messages w
+             JOIN requests r ON r.id = w.request_id
+             JOIN targets t ON t.id = r.target_id
+             GROUP BY w.request_id
+             ORDER BY MIN(w.sent_at), w.request_id",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut sessions = Vec::with_capacity(rows.len());
+        for (id, count, started_at, host, port, secure, path) in rows {
+            let scheme = if secure != 0 { "wss" } else { "ws" };
+            let authority = if (secure != 0 && port == 443) || (secure == 0 && port == 80) {
+                host
+            } else {
+                format!("{host}:{port}")
+            };
+            sessions.push(WsSession {
+                request_id: id.parse().map_err(|_| StorageError::Decode {
+                    entity: "RequestId",
+                    reason: id,
+                })?,
+                url: format!("{scheme}://{authority}{path}"),
+                messages: count as u64,
+                started_at,
+            });
+        }
+        Ok(sessions)
+    }
+
     /// Reads a session's messages, oldest first, resolving each payload.
     pub fn ws_messages(&self, request_id: RequestId) -> Result<Vec<WsMessage>> {
         let conn = self.db.connection()?;
@@ -844,6 +907,13 @@ mod tests {
         store
             .record_ws_message(request_id, WsDirection::ServerToClient, 0x2, &large)
             .unwrap();
+
+        // The session appears in the session list with its URL and count.
+        let sessions = store.ws_sessions().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].request_id, request_id);
+        assert_eq!(sessions[0].messages, 2);
+        assert_eq!(sessions[0].url, "wss://example.com/chat");
 
         let messages = store.ws_messages(request_id).unwrap();
         assert_eq!(messages.len(), 2);

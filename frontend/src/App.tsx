@@ -10,6 +10,7 @@ import { ReportView } from "./views/ReportView";
 import { ScanView } from "./views/ScanView";
 import { SetupView } from "./views/SetupView";
 import { SnapshotsView } from "./views/SnapshotsView";
+import { WebSocketsView } from "./views/WebSocketsView";
 import {
   currentProject,
   describeError,
@@ -35,6 +36,7 @@ type Tab =
   | "history"
   | "repeater"
   | "decoder"
+  | "websockets"
   | "identifiers"
   | "scan"
   | "authz"
@@ -48,6 +50,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "history", label: "History" },
   { id: "repeater", label: "Repeater" },
   { id: "decoder", label: "Decoder" },
+  { id: "websockets", label: "WebSocket" },
   { id: "identifiers", label: "Identifiers" },
   { id: "scan", label: "Scan" },
   { id: "authz", label: "Authorization" },
@@ -202,6 +205,7 @@ export default function App() {
           />
         )}
         {tab === "decoder" && <DecoderView />}
+        {tab === "websockets" && <WebSocketsView hasProject={project !== null} />}
         {tab === "identifiers" && (
           <IdentifiersView hasProject={project !== null} />
         )}
