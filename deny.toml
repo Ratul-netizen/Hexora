@@ -1,0 +1,70 @@
+# cargo-deny — the supply-chain gate (LIC.e).
+#
+# cargo-audit already fails CI on a security advisory. cargo-deny covers the other three
+# questions procurement asks of a dependency tree: are the licences compatible with shipping
+# under AGPL-3.0, is anything pulled from a source we did not choose, and is the graph free of
+# surprises. Licences are the sharp one for an open-core product — a copyleft dependency we
+# missed would contradict the commercial licence the paid tier is sold under.
+
+[advisories]
+# The RustSec database. cargo-audit is the primary advisory gate; this is kept so a single
+# `cargo deny check` covers everything, and yanked crates are surfaced here.
+yanked = "warn"
+
+[licenses]
+# Anything a dependency is under must be on this list, or carry an explicit exception below.
+# These are the permissive and weak-copyleft licences that can be redistributed inside an
+# AGPL-3.0 work and under a commercial licence alongside it. A strong-copyleft dependency
+# (GPL, AGPL) is deliberately absent: pulling one in is a licensing decision, not a silent
+# dependency bump, and it should fail here until it is made deliberately.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.8
+
+# Hexora's own crates are AGPL-3.0 — that is the point. They get a per-crate exception so
+# the project licenses itself as it means to, while AGPL-3.0-or-later stays *out* of the
+# general allow list, so a copyleft *dependency* (which the commercial tier could not ship)
+# still fails here and is a decision someone has to make on purpose.
+exceptions = [
+    { name = "hexora-types", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-storage", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-engine", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-http", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-proxy", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-repeater", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-verify", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-scan", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-active", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-fuzz", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-authz", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-report", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-cli", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-desktop", allow = ["AGPL-3.0-or-later"] },
+]
+
+[bans]
+# A duplicate version is a warning, not a failure: they arrive through transitive
+# dependencies we do not control, and a permanently red job is one nobody reads. A crate we
+# never want is added to `deny` deliberately.
+multiple-versions = "warn"
+wildcards = "warn"
+deny = []
+
+[sources]
+# Everything comes from crates.io. An unexpected git or alternative-registry source is how a
+# dependency-confusion or typosquat attack reaches the build, so it fails.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -136,6 +136,36 @@ jobs:
       - name: Audit
         run: cargo audit
 
+  deny:
+    name: Licence and supply-chain policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      # Licences (a copyleft dependency the commercial tier could not ship), bans and
+      # sources (a dependency pulled from somewhere we did not choose), plus advisories.
+      # Policy lives in deny.toml.
+      - name: cargo-deny
+        run: cargo deny check
+
+      # A software bill of materials — the dependency inventory procurement asks for. Not a
+      # gate; it is generated and kept as a build artifact.
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+      - name: Generate SBOM (CycloneDX)
+        run: cargo cyclonedx --format json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: "**/*.cdx.json"
+          if-no-files-found: warn
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
