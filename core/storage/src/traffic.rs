@@ -23,9 +23,11 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
 use hexora_types::http::{HttpRequest, HttpResponse};
-use hexora_types::ids::{RequestId, ResponseId, TargetId};
+use hexora_types::ids::{RequestId, ResponseId, WsMessageId, TargetId};
 use hexora_types::tls::TlsInfo;
+use hexora_types::ws::WsDirection;
 use rusqlite::{params, OptionalExtension};
 
 use crate::blob::{BlobRef, BlobStore};
@@ -168,6 +170,21 @@ struct RequestRow {
     body_size: i64,
     raw_hash: Option<String>,
     raw_size: i64,
+}
+
+/// One captured WebSocket message, read back from a session.
+#[derive(Debug, Clone)]
+pub struct WsMessage {
+    /// Stable identifier.
+    pub id: WsMessageId,
+    /// Which way it travelled.
+    pub direction: WsDirection,
+    /// The WebSocket opcode (1 text, 2 binary, 8 close, 9 ping, 10 pong, …).
+    pub opcode: u8,
+    /// The payload, resolved from the inline column or the blob store.
+    pub payload: Bytes,
+    /// When it was recorded, RFC 3339.
+    pub sent_at: String,
 }
 
 /// Reads and writes captured traffic.
@@ -631,6 +648,100 @@ impl TrafficStore {
         Ok(count as u64)
     }
 
+    /// Records one WebSocket message against the Upgrade request that opened its session.
+    ///
+    /// A small payload is stored inline; a large one goes to the content-addressed blob
+    /// store like a body, so a chatty session does not bloat the metadata database. The
+    /// message is anchored to `request_id` — the stored Upgrade request — which is why that
+    /// exchange is recorded first, synchronously, before any frame it carries.
+    pub fn record_ws_message(
+        &self,
+        request_id: RequestId,
+        direction: WsDirection,
+        opcode: u8,
+        payload: &[u8],
+    ) -> Result<WsMessageId> {
+        /// Payloads at or below this size stay inline; larger ones go to the blob store.
+        const INLINE_MAX: usize = 8 * 1024;
+
+        let (inline, hash): (Option<&[u8]>, Option<String>) = if payload.is_empty() {
+            (None, None)
+        } else if payload.len() <= INLINE_MAX {
+            (Some(payload), None)
+        } else {
+            (None, self.put_body(payload)?.map(|r| r.hash().to_string()))
+        };
+
+        let id = WsMessageId::new();
+        let conn = self.db.connection()?;
+        conn.execute(
+            "INSERT INTO websocket_messages
+                (id, request_id, direction, opcode, payload, payload_hash, payload_size, sent_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id.to_string(),
+                request_id.to_string(),
+                direction.as_str(),
+                opcode as i64,
+                inline,
+                hash,
+                payload.len() as i64,
+                now(),
+            ],
+        )?;
+        Ok(id)
+    }
+
+    /// Reads a session's messages, oldest first, resolving each payload.
+    pub fn ws_messages(&self, request_id: RequestId) -> Result<Vec<WsMessage>> {
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, direction, opcode, payload, payload_hash, payload_size, sent_at
+             FROM websocket_messages WHERE request_id = ?1 ORDER BY sent_at, id",
+        )?;
+
+        let rows = stmt
+            .query_map([request_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<Vec<u8>>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut messages = Vec::with_capacity(rows.len());
+        for (id, direction, opcode, inline, hash, size, sent_at) in rows {
+            let payload = match (inline, hash) {
+                (Some(bytes), _) => Bytes::from(bytes),
+                (None, Some(hash)) => {
+                    let reference = BlobRef::from_parts(hash, size as u64)?;
+                    Bytes::from(self.blobs.get(&reference)?)
+                }
+                (None, None) => Bytes::new(),
+            };
+            let direction = match direction.as_str() {
+                "client_to_server" => WsDirection::ClientToServer,
+                _ => WsDirection::ServerToClient,
+            };
+            messages.push(WsMessage {
+                id: id.parse().map_err(|_| StorageError::Decode {
+                    entity: "WsMessageId",
+                    reason: id,
+                })?,
+                direction,
+                opcode: opcode as u8,
+                payload,
+                sent_at,
+            });
+        }
+        Ok(messages)
+    }
+
     /// Stores a body, returning `None` for an empty one.
     ///
     /// Empty bodies are extremely common, and a reference to zero bytes is pure
@@ -717,6 +828,34 @@ mod tests {
             tls: None,
             duration_ms: 42,
         }
+    }
+
+    #[test]
+    fn websocket_messages_round_trip_inline_and_via_the_blob_store() {
+        let (store, _project) = store();
+        // The Upgrade request the session hangs off.
+        let request_id = store.record(&exchange("/chat", 101, b"")).unwrap();
+
+        let small = b"hello from the client".to_vec();
+        let large = vec![0x7eu8; 32 * 1024]; // past the inline threshold, so it hits the blob store
+        store
+            .record_ws_message(request_id, WsDirection::ClientToServer, 0x1, &small)
+            .unwrap();
+        store
+            .record_ws_message(request_id, WsDirection::ServerToClient, 0x2, &large)
+            .unwrap();
+
+        let messages = store.ws_messages(request_id).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].direction, WsDirection::ClientToServer);
+        assert_eq!(messages[0].opcode, 0x1);
+        assert_eq!(messages[0].payload.as_ref(), small.as_slice());
+        assert_eq!(messages[1].direction, WsDirection::ServerToClient);
+        assert_eq!(
+            messages[1].payload.len(),
+            large.len(),
+            "a large payload survives the blob round trip"
+        );
     }
 
     #[test]

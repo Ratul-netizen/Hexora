@@ -57,6 +57,7 @@ pub mod snapshot;
 pub mod structure;
 pub mod tls;
 pub mod verify;
+pub mod ws;
 
 pub use candidate::{CandidateStatus, IdentifierCandidate, Signal, SignalKind, Strength};
 pub use error::{HexoraError, Result};
