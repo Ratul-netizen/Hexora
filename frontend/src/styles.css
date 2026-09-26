@@ -96,7 +96,10 @@ body {
 .top nav {
   display: flex;
   gap: 2px;
-  flex: 1 1 auto;
+  /* `1 1 0` (not auto) so the strip claims only leftover space and scrolls its tabs,
+     keeping the status chips on the first row at every width rather than wrapping them
+     off once the tab list grew long. */
+  flex: 1 1 0;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -1734,4 +1737,92 @@ table.tree td.methods {
   min-width: 24px;
   color: var(--text-bright);
   font-weight: 600;
+}
+
+/* ============================================================ UI.2 — polish pass */
+
+/* Themed, thin scrollbars everywhere — the default chunky ones break the dark surface. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: padding-box;
+}
+
+/* Row lists: a buttery hover, and a sticky header that reads as glass and lifts a
+   shadow once the list scrolls under it. */
+tbody tr {
+  transition: background var(--dur-fast) var(--ease);
+}
+tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+thead th {
+  background: var(--glass-strong);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  border-bottom-color: var(--hairline);
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--hairline);
+}
+
+/* Section headings: a touch more presence and consistent rhythm. */
+.card h2,
+.panel h2 {
+  letter-spacing: 0.01em;
+}
+
+/* Placeholder / empty states: centred, calm, and clearly not an error. */
+.placeholder {
+  color: var(--text-muted);
+  padding: 48px 24px;
+  text-align: center;
+  font-size: 13px;
+}
+
+/* Selects match the input styling under the glass system. */
+select {
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+}
+
+/* A consistent focus-visible ring for keyboard users across controls. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(217, 139, 58, 0.55);
+  outline-offset: 1px;
+}
+
+/* Tab strip: labels never wrap, tighter so more fit before scrolling, and the scroll
+   affordance is the truncation at the edge rather than a visible bar. */
+button.tab {
+  white-space: nowrap;
+  padding: 12px 11px;
+}
+.top nav {
+  scrollbar-width: none;
+}
+.top nav::-webkit-scrollbar {
+  display: none;
 }
