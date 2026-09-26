@@ -23,6 +23,7 @@ mod header;
 mod history;
 mod identifiers;
 mod identity;
+mod license;
 mod object;
 mod poc;
 mod programme;
@@ -608,8 +609,24 @@ enum Command {
         no_poc: bool,
     },
 
+    /// Show the active licence, or activate one.
+    #[command(subcommand)]
+    License(LicenseCommand),
+
     /// Print version and build information.
     Version,
+}
+
+/// `hexora license` subcommands.
+#[derive(Debug, Subcommand)]
+enum LicenseCommand {
+    /// Show the tier this install is running at, and the licence behind it.
+    Show,
+    /// Verify a licence file and install it for later runs.
+    Activate {
+        /// The licence file to activate.
+        file: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1113,6 +1130,8 @@ fn real_main() -> ExitCode {
 
 fn run(cli: &Cli) -> hexora_types::Result<()> {
     match &cli.command {
+        Command::License(LicenseCommand::Show) => license::show(cli.json),
+        Command::License(LicenseCommand::Activate { file }) => license::activate(file, cli.json),
         Command::Version => {
             print_version(cli.json);
             Ok(())
@@ -1256,7 +1275,9 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             insecure,
             no_save,
             refresh,
-        }) => active::active(active::Args {
+        }) => {
+            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            active::active(active::Args {
             project: path,
             host: host.as_deref(),
             detector: detector.as_deref(),
@@ -1269,7 +1290,8 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             no_save: *no_save,
             refresh: *refresh,
             json: cli.json,
-        }),
+            })
+        }
         Command::Fuzz {
             path,
             id,
@@ -1281,19 +1303,22 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             dry_run,
             yes,
             insecure,
-        } => fuzz::fuzz(fuzz::Args {
-            project: path,
-            id,
-            at: at.as_deref(),
-            replacing: replacing.as_deref(),
-            payloads: payloads.as_deref(),
-            delay_ms: *delay,
-            max_requests: *max_requests,
-            dry_run: *dry_run,
-            yes: *yes,
-            insecure: *insecure,
-            json: cli.json,
-        }),
+        } => {
+            license::gate().require(hexora_engine::license::Feature::Intruder)?;
+            fuzz::fuzz(fuzz::Args {
+                project: path,
+                id,
+                at: at.as_deref(),
+                replacing: replacing.as_deref(),
+                payloads: payloads.as_deref(),
+                delay_ms: *delay,
+                max_requests: *max_requests,
+                dry_run: *dry_run,
+                yes: *yes,
+                insecure: *insecure,
+                json: cli.json,
+            })
+        }
         Command::Poc {
             path,
             id,
@@ -1308,6 +1333,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }),
         Command::Detectors => detectors::list(cli.json),
         Command::Snapshot(SnapshotCommand::Take { path, label, note }) => {
+            license::gate().require(hexora_engine::license::Feature::RetestSnapshots)?;
             snapshot::take(path, label.as_deref(), note.as_deref(), cli.json)
         }
         Command::Snapshot(SnapshotCommand::List { path }) => snapshot::list(path, cli.json),
@@ -1316,7 +1342,10 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             path,
             from,
             against,
-        }) => snapshot::diff(path, from, against.as_deref(), cli.json),
+        }) => {
+            license::gate().require(hexora_engine::license::Feature::RetestSnapshots)?;
+            snapshot::diff(path, from, against.as_deref(), cli.json)
+        }
         Command::Snapshot(SnapshotCommand::Remove { path, id }) => {
             snapshot::remove(path, id, cli.json)
         }

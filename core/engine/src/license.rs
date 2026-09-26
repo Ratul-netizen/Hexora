@@ -234,6 +234,15 @@ impl EntitlementGate {
         }
     }
 
+    /// Builds a gate from the licence at the default location, or the free tier if there is
+    /// none. This is what an app calls at startup — one place resolves the path.
+    pub fn from_default_location(now: DateTime<Utc>) -> Self {
+        match default_license_path() {
+            Some(path) => Self::from_license_file(&path, now),
+            None => Self::free(),
+        }
+    }
+
     /// The entitlements in force.
     pub fn entitlements(&self) -> &Entitlements {
         &self.entitlements
@@ -258,6 +267,31 @@ impl EntitlementGate {
             })
         }
     }
+}
+
+/// The default place a licence file lives, or `None` when it cannot be determined.
+///
+/// `HEXORA_LICENSE` overrides everything, so a tester can point at a licence explicitly and a
+/// test can avoid touching the real one. Otherwise it is a `hexora/license.json` under the
+/// platform's per-user config directory — `%APPDATA%` on Windows, `$XDG_CONFIG_HOME` or
+/// `~/.config` elsewhere. A licence is per-user, not per-project, so it never lives in a
+/// project directory a tester might share as evidence.
+pub fn default_license_path() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    if let Some(explicit) = std::env::var_os("HEXORA_LICENSE") {
+        return Some(PathBuf::from(explicit));
+    }
+
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        Some(PathBuf::from(xdg))
+    } else {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
+    };
+
+    base.map(|dir| dir.join("hexora").join("license.json"))
 }
 
 /// Verifies a licence and returns its entitlements, or a short reason it was rejected.

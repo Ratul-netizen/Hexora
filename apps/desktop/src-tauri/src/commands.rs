@@ -56,6 +56,38 @@ fn fail(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+/// The entitlement gate for this run, from the licence at the default location. A paid
+/// command asks it before doing the work, so the window shows "needs Pro" rather than a
+/// feature that quietly does nothing.
+fn gate() -> hexora_engine::license::EntitlementGate {
+    hexora_engine::license::EntitlementGate::from_default_location(chrono::Utc::now())
+}
+
+/// The current licence, for the window's licence panel.
+#[derive(Debug, Clone, Serialize)]
+pub struct LicenseStatus {
+    /// `Free`, `Pro` or `Enterprise`.
+    pub tier: String,
+    /// Who it was issued to, empty on the free tier.
+    pub licensee: String,
+    /// RFC 3339 expiry, if any.
+    pub expires: Option<String>,
+}
+
+/// Reports the licence tier this install is running at.
+#[tauri::command]
+pub fn license_status() -> LicenseStatus {
+    let gate = gate();
+    let entitlements = gate.entitlements();
+    LicenseStatus {
+        tier: entitlements.tier.label().to_string(),
+        licensee: entitlements.licensee.clone(),
+        expires: entitlements
+            .expires
+            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Engine
 // ---------------------------------------------------------------------------
@@ -1297,6 +1329,9 @@ pub async fn scan_active_run(
     host: Option<String>,
     max_requests: Option<usize>,
 ) -> CommandResult<ActiveRunView> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
     // Registered before the work starts and cleared however it ends, so the stop
     // button is live for exactly as long as there is something to stop.
@@ -1564,6 +1599,9 @@ pub fn snapshot_take(
     label: Option<String>,
     note: Option<String>,
 ) -> CommandResult<Vec<SnapshotView>> {
+    gate()
+        .require(hexora_engine::license::Feature::RetestSnapshots)
+        .map_err(fail)?;
     let project = open(&state)?;
     let store = project.snapshots();
     let existing = store.count().map_err(fail)?;
@@ -1607,6 +1645,9 @@ pub fn snapshot_compare(
     from: String,
     to: Option<String>,
 ) -> CommandResult<hexora_types::snapshot::Comparison> {
+    gate()
+        .require(hexora_engine::license::Feature::RetestSnapshots)
+        .map_err(fail)?;
     let project = open(&state)?;
     let store = project.snapshots();
 
@@ -2193,6 +2234,13 @@ pub fn report_render(
 ) -> CommandResult<ReportView> {
     let project = open(&state)?;
     let requested = parse_format(&format)?;
+
+    // SARIF is the CI-export tier; the human-facing formats are free.
+    if requested == hexora_report::Format::Sarif {
+        gate()
+            .require(hexora_engine::license::Feature::SarifExport)
+            .map_err(fail)?;
+    }
 
     let report = Report::build(
         &project,

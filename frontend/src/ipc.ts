@@ -196,6 +196,16 @@ export const listHistory = (
 export const exchangeDetail = (id: string): Promise<ExchangeDetail> =>
   invoke<ExchangeDetail>("history_detail", { id });
 
+/** The licence tier this install is running at, for the header chip. */
+export interface LicenseStatus {
+  tier: string;
+  licensee: string;
+  expires: string | null;
+}
+
+export const licenseStatus = (): Promise<LicenseStatus> =>
+  invoke<LicenseStatus>("license_status");
+
 export const loadDraft = (id: string): Promise<DraftView> =>
   invoke<DraftView>("repeater_draft", { id });
 

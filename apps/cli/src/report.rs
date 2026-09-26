@@ -46,6 +46,12 @@ pub fn run(args: ReportArgs<'_>) -> Result<()> {
         None => Format::Markdown,
     };
 
+    // SARIF is the CI-export tier; the human-facing formats are free. Checked here rather
+    // than at dispatch because the format is decided here.
+    if format == Format::Sarif {
+        crate::license::gate().require(hexora_engine::license::Feature::SarifExport)?;
+    }
+
     let project = crate::open_project(args.project)?;
     let options = ReportOptions {
         title: args.title.map(str::to_owned),

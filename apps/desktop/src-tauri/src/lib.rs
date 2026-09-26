@@ -53,6 +53,7 @@ pub fn run() {
             commands::proxy_status,
             commands::history_list,
             commands::history_detail,
+            commands::license_status,
             commands::repeater_draft,
             commands::repeater_new,
             commands::repeater_send,

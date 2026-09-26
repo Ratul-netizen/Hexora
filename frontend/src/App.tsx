@@ -16,8 +16,10 @@ import {
   EXPECTED_RPC_CONTRACT_VERSION,
   fetchEngineInfo,
   isContractCompatible,
+  licenseStatus,
   onTraffic,
   type EngineInfo,
+  type LicenseStatus,
   type ProjectSummary,
   type ProxyStatus,
 } from "./ipc";
@@ -65,6 +67,7 @@ export default function App() {
   const [repeating, setRepeating] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [openExchange, setOpenExchange] = useState<string | null>(null);
+  const [license, setLicense] = useState<LicenseStatus | null>(null);
 
   // Bumped when a run files something, which is what tells the findings list to
   // re-read. The engine remains the source of truth for what the project holds.
@@ -91,6 +94,10 @@ export default function App() {
 
     currentProject()
       .then(setProject)
+      .catch(() => undefined);
+
+    licenseStatus()
+      .then(setLicense)
       .catch(() => undefined);
   }, []);
 
@@ -146,6 +153,20 @@ export default function App() {
         </nav>
 
         <div className="indicators">
+          {license && (
+            <span
+              className="chip"
+              title={
+                license.tier === "Free"
+                  ? "Free tier — the active scanner, intruder, SARIF export and retest snapshots need Pro"
+                  : license.licensee
+                    ? `Licensed to ${license.licensee}`
+                    : `${license.tier} tier`
+              }
+            >
+              {license.tier}
+            </span>
+          )}
           {project && <span className="chip">{project.name}</span>}
           <span className={proxy.running ? "chip live" : "chip"}>
             {proxy.running ? `proxy ${proxy.address}` : "proxy stopped"}
