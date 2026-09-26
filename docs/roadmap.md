@@ -258,6 +258,47 @@ entities, hex, JWT claims decode) in the desktop window, chainable and sending n
 built in rather than left to an online decoder, because the values a tester decodes are
 live session tokens.
 
+### WebSocket
+
+Some scaffolding is already in place: `WsMessageId` exists, and the `websocket_messages`
+table has stood in the schema since the first migration — a frame is a row anchored to the
+Upgrade request, with a direction, an opcode and a payload kept inline or in the blob store
+like a body. Two things must change to fill it: the proxy currently *strips* `Upgrade` (it
+is in the hop-by-hop set) and closes a tunnel after one exchange, and traffic stops being
+request→response the moment a `101 Switching Protocols` turns the connection into a
+long-lived, bidirectional stream of frames.
+
+**The tension is the one HTTP/2 had.** A conforming WebSocket library normalises and
+validates; a security tool must send the frame a conforming stack refuses — bad masking, a
+reserved bit set, an invalid opcode, a length that lies, a fragmented control frame, a ping
+flood. So two paths again: a **conforming relay** for capture and interception, and a
+**hand-rolled frame codec** for the adversarial half. RFC 6455 framing is far simpler than
+HPACK, so hand-rolling is tractable — and fuzzing that parser on hostile masking and length
+bytes is essential, exactly like the HPACK fuzz that caught a panic in M5.1f.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **WS.a** — pass the upgrade through, capture the session | The proxy detects `Upgrade: websocket`, stops stripping it, completes the `101` to both sides, then relays the bidirectional stream while parsing frames into `websocket_messages` — direction, opcode, payload, and the **observed** masking, because an unmasked client frame or a masked server frame is itself a finding. The Upgrade request and response are captured as an ordinary exchange. This is the headline "WebSocket interception". | proxy tunnel (M2.3), the existing WS table |
+| **WS.b** — the message timeline | History lists WebSocket sessions; opening one shows an ordered, both-directions timeline, and `hexora ws` does the same from the CLI. The storage read side for frames, the write side having landed in WS.a. | WS.a |
+| **WS.c** — intercept and edit in flight | Per-message forward / replace / drop, in either direction — the WebSocket analogue of the HTTP interceptor hooks, on the same seam. This is "intercept" in the sense of modifying live traffic. | WS.a |
+| **WS.d** — compose and send into a live session | Hold the session open and inject a composed or replayed message on demand, through the scope guard and captured like any frame — the WebSocket analogue of the repeater. | WS.a |
+| **WS.e** — frame-level / adversarial WebSocket | A hand-rolled codec that emits exactly what the tester wrote: bad masking, RSV bits, invalid opcodes, a lying length, a fragmented control frame. Plus `permessage-deflate` (RFC 7692) — decompressed to be intelligible, both forms kept, bounded against a decompression bomb. The WebSocket analogue of raw h1 and frame-level h2. | WS.d |
+| **WS.f** — hardening, WS-over-h2, polish | `cargo-fuzz` and proptest over the frame parser (masking, length, fragmentation on hostile bytes — the panic surface), close-code recording, WebSocket sessions in reports, and RFC 8441 WebSocket-over-HTTP/2 (Extended CONNECT) if in scope or explicitly deferred. | WS.a–e |
+
+**Decisions to lock first.** In WS.a, strip `permessage-deflate` from the client's handshake
+offer so every frame is uncompressed and readable — a documented, pragmatic first move —
+and defer real deflate to WS.e; otherwise capture shows compressed noise. The proxy's
+one-request-then-shutdown tunnel must switch to a frame relay after the `101` and hold the
+connection, with the M5.1c h2 stream loop the nearest precedent; both directions relay
+concurrently, and the capture write path is already concurrency-safe. And masking is
+recorded as evidence rather than silently normalised, the same discipline as the h2 casing
+caveat.
+
+**Sequencing.** a→b makes WebSocket traffic observable; c adds live modification; d→e are
+the manual-testing power; f hardens. **WS.a is the largest single piece** — the proxy
+connection-model change plus the frame parser and capture — with the rest medium to
+medium-large, mirroring the HTTP/2 cadence.
+
 **M8 — Traffic query language** · PLANNED
 
 A query language over captured traffic, in the spirit of HTTPQL. Burp's Bambdas require
