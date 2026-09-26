@@ -43,6 +43,15 @@ async fn main() {
         tokio::time::sleep(Duration::from_millis(900)).await;
     }
 
+    // Optional 5th arg: an arbitrary JS expression to run after the tab click (e.g. fill an
+    // input and click a button), then settle before capturing.
+    if let Some(expr) = std::env::args().nth(5) {
+        let _ = cdp
+            .call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))
+            .await;
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+    }
+
     // Probe: what did the app actually render?
     if let Ok(probe) = cdp
         .call(

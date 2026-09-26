@@ -1826,3 +1826,30 @@ button.tab {
 .top nav::-webkit-scrollbar {
   display: none;
 }
+
+/* ---- Repeater / editor panes: token-consistent borders, depth, and stacking ---- */
+.repeater-editor,
+.repeater-result {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-1);
+}
+.repeater {
+  gap: 14px;
+}
+/* Two panes side by side is right on a wide window and cramped on a narrow one. */
+@media (max-width: 960px) {
+  .repeater {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+.warnings,
+.branches,
+.diff,
+textarea.editor {
+  border-bottom-color: var(--hairline);
+}
+.decoder-panes textarea.editor {
+  border-radius: var(--radius-sm);
+}
