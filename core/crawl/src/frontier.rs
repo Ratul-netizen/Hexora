@@ -36,7 +36,41 @@ use hexora_engine::guard::ScopeGuard;
 use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
 use hexora_types::http::{HttpRequest, HttpService};
 
-use crate::extract;
+use crate::robots::Robots;
+use crate::{extract, LinkSource};
+
+/// The product token the crawler identifies itself with — sent as `User-Agent` and
+/// matched against `robots.txt` groups. A site that wants to steer or exclude Hexora's
+/// crawl can name it.
+pub const CRAWLER_USER_AGENT: &str = "Hexora";
+
+/// Substrings in a request target that mark a link as likely state-changing. A crawl that
+/// followed every link would log itself out or delete records; a link whose path or query
+/// contains one of these is recorded, not followed, unless the tester opts in. The list is
+/// deliberately conservative about *following* — over-recording a benign link is a coverage
+/// note, following a destructive one is damage.
+const DESTRUCTIVE_TOKENS: &[&str] = &[
+    "logout",
+    "log-out",
+    "logoff",
+    "signout",
+    "sign-out",
+    "delete",
+    "remove",
+    "destroy",
+    "revoke",
+    "deactivate",
+    "unsubscribe",
+    "purge",
+    "terminate",
+];
+
+/// Whether a request target looks state-changing. Checked against the path and query only,
+/// so a host named `delete.example.com` does not trip it.
+fn looks_destructive(target: &str) -> bool {
+    let lower = target.to_ascii_lowercase();
+    DESTRUCTIVE_TOKENS.iter().any(|t| lower.contains(t))
+}
 
 /// The bounds a crawl runs within. Defaults are deliberately modest: a crawl is a
 /// convenience that widens coverage, not something that should surprise a tester with
@@ -77,6 +111,37 @@ pub enum SkipReason {
     PerHostLimit,
     /// It could not be parsed into a real `http(s)`/`ws(s)` URL.
     Unfetchable,
+    /// A form action. A form is discovered, never auto-submitted — submitting is a
+    /// deliberate act, like the intruder's.
+    Form,
+    /// Its target looks state-changing (`logout`, `delete`, `remove`…). Recorded so a
+    /// tester can decide, never auto-followed.
+    LooksDestructive,
+    /// `robots.txt` asked crawlers to stay out of this path.
+    RobotsDisallowed,
+}
+
+/// The safety controls a crawl runs under. Every default is the cautious one; a tester
+/// relaxes them deliberately, and the report still records what was skipped so the choice
+/// is visible either way.
+#[derive(Debug, Clone)]
+pub struct CrawlPolicy {
+    /// Follow links whose target looks state-changing. Default `false`: record, don't follow.
+    pub follow_destructive: bool,
+    /// Ignore `robots.txt`. Default `false`: respect it.
+    pub ignore_robots: bool,
+}
+
+impl Default for CrawlPolicy {
+    // Spelled out rather than derived: that the default for each control is the *cautious*
+    // one is the point, not an accident of `bool`'s default, and a reader should see it.
+    #[allow(clippy::derivable_impls)]
+    fn default() -> Self {
+        Self {
+            follow_destructive: false,
+            ignore_robots: false,
+        }
+    }
 }
 
 /// A URL the crawl discovered but chose not to follow, and why.
@@ -121,12 +186,18 @@ struct Pending {
 }
 
 /// Crawls from `seeds`, following in-scope links through `guard` until the frontier
-/// empties or `budget` is spent.
+/// empties or `budget` is spent, under the safety controls in `policy`.
 ///
 /// `seeds` are absolute URLs — typically gathered from traffic already captured. Each is
 /// put to the guard like any other candidate, so a seed that is out of scope is recorded,
-/// not fetched.
-pub async fn crawl<T, S, I>(guard: &ScopeGuard<T>, seeds: I, budget: &CrawlBudget) -> CrawlReport
+/// not fetched. Seeds are the tester's explicit choice, so the destructive-link and
+/// form guards apply only to links the crawl *discovers*, not to what it was handed.
+pub async fn crawl<T, S, I>(
+    guard: &ScopeGuard<T>,
+    seeds: I,
+    budget: &CrawlBudget,
+    policy: &CrawlPolicy,
+) -> CrawlReport
 where
     T: HttpTransport,
     S: Into<String>,
@@ -137,19 +208,30 @@ where
     let mut frontier: VecDeque<Pending> = VecDeque::new();
     let mut visited: HashSet<String> = HashSet::new();
     let mut per_host: HashMap<String, usize> = HashMap::new();
+    let mut robots_by_host: HashMap<String, Robots> = HashMap::new();
     let mut fetched: Vec<Exchange> = Vec::new();
     let mut skipped: Vec<Skipped> = Vec::new();
 
-    // Considers one candidate: dedup, parse, scope-check and depth-check it, and either
-    // enqueue it or record why not. Kept as a closure over the mutable crawl state so both
-    // the seeding pass and the per-response discovery pass go through exactly one policy.
+    // Considers one candidate: dedup, then run every check that can be made without
+    // sending — scope, depth, and (for a *discovered* link) the form and destructive-link
+    // guards — and either enqueue it or record why not. Kept as a closure over the crawl
+    // state so the seeding pass and the per-response discovery pass share one policy.
     let consider =
         |url: String,
          depth: usize,
+         source: Option<LinkSource>,
          frontier: &mut VecDeque<Pending>,
          visited: &mut HashSet<String>,
          skipped: &mut Vec<Skipped>| {
             if !visited.insert(url.clone()) {
+                return;
+            }
+            // A form is discovered, never auto-submitted — regardless of its method.
+            if source == Some(LinkSource::FormAction) {
+                skipped.push(Skipped {
+                    url,
+                    reason: SkipReason::Form,
+                });
                 return;
             }
             let Ok((service, path)) = HttpService::parse_url(&url) else {
@@ -159,7 +241,17 @@ where
                 });
                 return;
             };
-            let request = HttpRequest::get(service, path);
+            // Discovered links are auto-followed, so the destructive-link guard applies to
+            // them; a seed (no source) is the tester's own choice and is exempt.
+            if source.is_some() && !policy.follow_destructive && looks_destructive(&path) {
+                skipped.push(Skipped {
+                    url,
+                    reason: SkipReason::LooksDestructive,
+                });
+                return;
+            }
+            let mut request = HttpRequest::get(service, path);
+            request.headers.set("User-Agent", CRAWLER_USER_AGENT);
             if !guard.decide(&request, &options).permits_sending() {
                 skipped.push(Skipped {
                     url,
@@ -181,6 +273,7 @@ where
         consider(
             seed.into(),
             0,
+            None,
             &mut frontier,
             &mut visited,
             &mut skipped,
@@ -195,7 +288,27 @@ where
             break CrawlStop::RequestCeiling;
         }
 
-        let host = item.request.service.host.clone();
+        let service = item.request.service.clone();
+        let host = service.host.clone();
+
+        // Respect robots.txt by default: fetch it once per host (this fetch is overhead, so
+        // it is not counted against the ceiling or the per-host cap), then honour it.
+        if !policy.ignore_robots {
+            if !robots_by_host.contains_key(&host) {
+                let robots = fetch_robots(guard, &service, &options).await;
+                robots_by_host.insert(host.clone(), robots);
+            }
+            if let Some(robots) = robots_by_host.get(&host) {
+                if !robots.allows(&item.request.path) {
+                    skipped.push(Skipped {
+                        url: item.request.url(),
+                        reason: SkipReason::RobotsDisallowed,
+                    });
+                    continue;
+                }
+            }
+        }
+
         let count = per_host.entry(host).or_insert(0);
         if *count >= budget.max_per_host {
             skipped.push(Skipped {
@@ -221,6 +334,7 @@ where
                     consider(
                         link.url,
                         child_depth,
+                        Some(link.source),
                         &mut frontier,
                         &mut visited,
                         &mut skipped,
@@ -244,5 +358,25 @@ where
         fetched,
         skipped,
         stopped,
+    }
+}
+
+/// Fetches and parses a host's `robots.txt`. Any failure — refused by scope, a network
+/// error, a non-2xx — is treated as "no rules": absence is not prohibition.
+async fn fetch_robots<T: HttpTransport>(
+    guard: &ScopeGuard<T>,
+    service: &HttpService,
+    options: &SendOptions,
+) -> Robots {
+    let mut request = HttpRequest::get(service.clone(), "/robots.txt");
+    request.headers.set("User-Agent", CRAWLER_USER_AGENT);
+    if !guard.decide(&request, options).permits_sending() {
+        return Robots::allow_all();
+    }
+    match guard.send(request, options.clone()).await {
+        Ok(exchange) if exchange.response.is_success() => {
+            Robots::parse(&exchange.response.body, CRAWLER_USER_AGENT)
+        }
+        _ => Robots::allow_all(),
     }
 }

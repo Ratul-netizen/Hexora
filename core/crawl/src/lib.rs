@@ -27,7 +27,11 @@
 use hexora_types::http::HttpService;
 
 pub mod frontier;
-pub use frontier::{crawl, CrawlBudget, CrawlReport, CrawlStop, SkipReason, Skipped};
+pub mod robots;
+pub use frontier::{
+    crawl, CrawlBudget, CrawlPolicy, CrawlReport, CrawlStop, SkipReason, Skipped,
+    CRAWLER_USER_AGENT,
+};
 
 /// The largest response body the extractor will scan, and the most links it will return.
 ///
