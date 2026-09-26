@@ -132,6 +132,52 @@ impl TcpTransport {
         self
     }
 
+    /// Sends a **frame-level** HTTP/2 request — the h2 analogue of a raw h1 send.
+    ///
+    /// `service` is the connection target (host, port, SNI); `request` is the header list
+    /// and body, encoded and sent exactly as written, with none of the validation the
+    /// conforming path applies. This is how a tester reaches the requests the `h2` crate
+    /// refuses to emit — an uppercase name, a duplicate pseudo-header, a CR/LF in a value.
+    ///
+    /// A fresh connection is always opened: a hand-driven raw stream shares no state with
+    /// the conforming pool, and a raw send wants to control the whole connection anyway.
+    /// h2 is required — it is offered alone at ALPN and a server that declines is an error,
+    /// because there is no such thing as a frame-level h2 request over HTTP/1.1.
+    pub async fn send_raw_h2(
+        &self,
+        service: &hexora_types::http::HttpService,
+        request: &crate::h2raw::RawH2Request,
+        options: SendOptions,
+    ) -> Result<Exchange> {
+        let started = Instant::now();
+        let limits = &options.limits;
+
+        if !service.secure {
+            return Err(HexoraError::NotImplemented(
+                "frame-level HTTP/2 over cleartext (h2c)",
+            ));
+        }
+
+        let tcp = connect(&service.host, service.port, limits).await?;
+        let mut tls_config = self.tls.clone();
+        tls_config.alpn = vec![b"h2".to_vec()];
+        let (stream, info) =
+            crate::tls::handshake(tcp, &service.host, &tls_config, limits).await?;
+
+        if info.alpn.as_deref() != Some("h2") {
+            return Err(HexoraError::Protocol(
+                hexora_types::error::ProtocolError::Malformed {
+                    protocol: "HTTP/2",
+                    reason: "the server did not negotiate h2, so a frame-level h2 request \
+                             cannot be sent"
+                        .to_string(),
+                },
+            ));
+        }
+
+        crate::h2raw::send(stream, info, request, limits, started).await
+    }
+
     /// Sends a request and returns as soon as the response *head* has arrived.
     ///
     /// The body is still on the wire. This is what the proxy uses: it can begin
@@ -1730,6 +1776,51 @@ mod tests {
             count.load(Ordering::SeqCst),
             2,
             "a closed connection must be replaced, not reused"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_frame_level_h2_request_reads_the_status_and_body() {
+        let port = serve_h2(200, &[("x-proto", "h2")], "", b"raw hello").await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
+        let service = HttpService::new("localhost", port, true);
+        let request = crate::h2raw::RawH2Request::get(&service, "/");
+
+        let exchange = transport
+            .send_raw_h2(&service, &request, SendOptions::interactive(Origin::Repeater))
+            .await
+            .unwrap();
+
+        assert_eq!(exchange.response.status, 200);
+        assert_eq!(exchange.response.body.as_ref(), b"raw hello");
+        assert_eq!(exchange.response.version, HttpVersion::Http2);
+    }
+
+    #[tokio::test]
+    async fn a_frame_level_send_emits_a_header_the_conforming_client_would_refuse() {
+        // An uppercase field name is malformed per RFC 9113 §8.2.1; the `h2` crate would
+        // never let a client send it, and a conforming server rejects it with a stream
+        // reset. That the request reaches the server at all is the capability M5.1e adds.
+        let port = serve_h2(200, &[], "", b"unreachable").await;
+
+        let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
+        let service = HttpService::new("localhost", port, true);
+        let mut request = crate::h2raw::RawH2Request::get(&service, "/");
+        request.headers.push((
+            bytes::Bytes::from_static(b"X-Uppercase-Name"),
+            bytes::Bytes::from_static(b"1"),
+        ));
+
+        let error = transport
+            .send_raw_h2(&service, &request, SendOptions::interactive(Origin::Repeater))
+            .await
+            .expect_err("the server must refuse a malformed header the conforming client could not send");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("reset") || message.contains("GOAWAY"),
+            "the refusal should be reported as what it was: {message}"
         );
     }
 
