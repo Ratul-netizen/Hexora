@@ -364,6 +364,28 @@ impl WsConnection {
         self.send(Opcode::Text, text.as_bytes()).await
     }
 
+    /// Sends a fully controlled frame — the WebSocket analogue of a raw send (WS.e).
+    ///
+    /// Every field is the tester's: FIN, the reserved bits, the opcode (including reserved
+    /// or invalid ones), and whether it is masked. `mask` of `None` sends an *unmasked*
+    /// client frame, which the protocol forbids and a conforming library will not emit — and
+    /// which is exactly the thing a tester wants to send to see what a server does with it.
+    pub async fn send_frame(&mut self, frame: &Frame, mask: Option<[u8; 4]>) -> Result<()> {
+        let bytes = encode(frame, mask);
+        self.send_raw(&bytes).await
+    }
+
+    /// Writes bytes to the connection verbatim — a frame the tester encoded by hand, with a
+    /// length that lies or a shape no encoder would produce.
+    pub async fn send_raw(&mut self, bytes: &[u8]) -> Result<()> {
+        self.stream
+            .write_all(bytes)
+            .await
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        self.stream.flush().await.ok();
+        Ok(())
+    }
+
     /// Reads the next frame, or `None` when the connection closes or `timeout` elapses with
     /// nothing more to read.
     pub async fn recv(&mut self, timeout: Duration) -> Result<Option<Frame>> {
@@ -388,6 +410,60 @@ impl WsConnection {
         let _ = self.send(Opcode::Close, &[]).await;
         Ok(())
     }
+}
+
+/// Inflates a `permessage-deflate` message payload (RFC 7692), bounded against a bomb.
+///
+/// The extension compresses a message with raw DEFLATE and drops the final `00 00 ff ff` of
+/// the last block; the receiver appends them back and inflates, which is what this does. It
+/// is a *per-message* inflate — it does not carry the LZ77 window across messages, so it is
+/// correct for a `no_context_takeover` session and for the first message of any session, and
+/// a caller must not assume more. Output is bounded by [`Limits::check_decompression`], so a
+/// tiny compressed frame cannot expand without limit.
+///
+/// It is exposed as a primitive rather than applied automatically on receipt: whether a
+/// frame is compressed depends on a negotiation the frame itself does not carry, and
+/// silently inflating one that used context takeover would produce wrong bytes. The `rsv1`
+/// bit flags a compressed frame; the caller decides.
+pub fn inflate(compressed: &[u8], limits: &Limits) -> Result<Vec<u8>> {
+    use flate2::{Decompress, FlushDecompress, Status};
+
+    let mut input = compressed.to_vec();
+    input.extend_from_slice(&[0x00, 0x00, 0xff, 0xff]);
+
+    // A raw-DEFLATE decompressor driven by hand rather than the `read` adapter: the block a
+    // permessage-deflate sender emits is not marked final, so a decoder that insists on a
+    // complete stream rejects it. This stops when the input is consumed and no more output
+    // is produced, which is the message boundary the extension defines.
+    let mut decoder = Decompress::new(false);
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let consumed_before = decoder.total_in() as usize;
+        let produced_before = decoder.total_out();
+        let status = decoder
+            .decompress(&input[consumed_before..], &mut buf, FlushDecompress::Sync)
+            .map_err(|e| {
+                HexoraError::Protocol(ProtocolError::DecodeFailed {
+                    encoding: "permessage-deflate".to_string(),
+                    reason: e.to_string(),
+                })
+            })?;
+        let produced = (decoder.total_out() - produced_before) as usize;
+        out.extend_from_slice(&buf[..produced]);
+        // Refuse a decompression bomb as it expands, not after.
+        limits.check_decompression(compressed.len() as u64, out.len() as u64)?;
+
+        if status == Status::StreamEnd {
+            break;
+        }
+        // No progress — all input consumed and nothing more produced — is the end of the
+        // message for a sync-flushed block.
+        if decoder.total_in() as usize == consumed_before && produced == 0 {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 /// Reads a response head (through the blank line), returning it and any bytes past it.
@@ -645,6 +721,73 @@ mod tests {
         assert!(!frame.masked, "a server frame is not masked");
 
         connection.close().await.unwrap();
+    }
+
+    /// Compresses a payload the way a `permessage-deflate` sender does: raw DEFLATE with the
+    /// final `00 00 ff ff` dropped.
+    fn deflate_for_test(data: &[u8]) -> Vec<u8> {
+        use flate2::{Compress, Compression, FlushCompress};
+        let mut compress = Compress::new(Compression::default(), false);
+        let mut out = vec![0u8; data.len() + 64];
+        compress
+            .compress(data, &mut out, FlushCompress::Sync)
+            .unwrap();
+        out.truncate(compress.total_out() as usize);
+        if out.ends_with(&[0x00, 0x00, 0xff, 0xff]) {
+            out.truncate(out.len() - 4);
+        }
+        out
+    }
+
+    #[test]
+    fn permessage_deflate_round_trips() {
+        let payload = b"the quick brown fox jumps over the lazy dog, repeatedly repeatedly";
+        let compressed = deflate_for_test(payload);
+        assert!(compressed.len() < payload.len(), "it actually compressed");
+        let restored = inflate(&compressed, &Limits::default()).unwrap();
+        assert_eq!(restored, payload);
+    }
+
+    #[test]
+    fn an_inflate_bomb_is_refused() {
+        // A megabyte of zeros compresses to almost nothing; inflating it under a small cap
+        // must be refused as it expands rather than exhausting memory.
+        let compressed = deflate_for_test(&vec![0u8; 1024 * 1024]);
+        let mut limits = Limits::default();
+        limits.max_decompressed_bytes = 64 * 1024;
+        assert!(inflate(&compressed, &limits).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_unmasked_client_frame_can_be_sent() {
+        // A client frame must be masked; a conforming library will not send an unmasked one.
+        // The frame-level path can, which is how a tester probes what a server does with it.
+        let port = ws_echo_server().await;
+        let service = HttpService::new("127.0.0.1", port, false);
+        let mut connection = connect(&service, "/", &TlsConfig::verified(), &Limits::default())
+            .await
+            .unwrap();
+
+        connection
+            .send_frame(
+                &Frame {
+                    fin: true,
+                    rsv1: false,
+                    opcode: Opcode::Text,
+                    masked: false,
+                    payload: b"unmasked and forbidden".to_vec(),
+                },
+                None, // no mask key — an unmasked client frame
+            )
+            .await
+            .unwrap();
+
+        let echoed = connection
+            .recv(std::time::Duration::from_secs(2))
+            .await
+            .unwrap()
+            .expect("the echo server read the unmasked frame");
+        assert_eq!(echoed.payload, b"unmasked and forbidden");
     }
 
     #[tokio::test]

@@ -645,6 +645,10 @@ enum WsCommand {
         url: String,
         /// A text message to send; omit to open and just listen.
         message: Option<String>,
+        /// Send these exact frame bytes (hex) instead of a text message — a hand-crafted
+        /// frame with bad masking, reserved bits or a lying length, for adversarial testing.
+        #[arg(long, value_name = "HEX")]
+        raw: Option<String>,
         /// How long to listen for replies, in milliseconds.
         #[arg(long, default_value_t = 2000)]
         listen_ms: u64,
@@ -1175,9 +1179,18 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             path,
             url,
             message,
+            raw,
             listen_ms,
             insecure,
-        }) => ws::send(path, url, message.as_deref(), *listen_ms, *insecure, cli.json),
+        }) => ws::send(
+            path,
+            url,
+            message.as_deref(),
+            raw.as_deref(),
+            *listen_ms,
+            *insecure,
+            cli.json,
+        ),
         Command::License(LicenseCommand::Show) => license::show(cli.json),
         Command::License(LicenseCommand::Activate { file }) => license::activate(file, cli.json),
         Command::License(LicenseCommand::Trial) => license::trial(cli.json),

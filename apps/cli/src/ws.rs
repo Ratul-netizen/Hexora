@@ -109,10 +109,12 @@ fn show_store(store: &hexora_storage::TrafficStore, id: &str, json: bool) -> Res
 /// Connects to a target, sends a message and listens for replies, recording the whole
 /// session into the project like any captured one. Human-driven, so an out-of-scope target
 /// is flagged and sent rather than refused.
+#[allow(clippy::too_many_arguments)]
 pub fn send(
     project: &Path,
     url: &str,
     message: Option<&str>,
+    raw: Option<&str>,
     listen_ms: u64,
     insecure: bool,
     json: bool,
@@ -145,7 +147,18 @@ pub fn send(
         let mut connection = hexora_http::ws::connect(&service, &path, &tls, &Limits::default()).await?;
         let request_id = record_handshake(&store, &service, &path)?;
 
-        if let Some(msg) = message {
+        if let Some(hex) = raw {
+            // A hand-crafted frame, sent byte for byte. Parsed back only to record its
+            // opcode and payload as evidence; if it does not parse — the point of some
+            // adversarial frames — it is recorded as raw bytes.
+            let bytes = decode_hex(hex)?;
+            connection.send_raw(&bytes).await?;
+            let (opcode, payload) = parse_one_frame(&bytes).unwrap_or((0x2, bytes.clone()));
+            store.record_ws_message(request_id, WsDirection::ClientToServer, opcode, &payload)?;
+            if !json {
+                println!("→ raw    {:>6}B  {}", bytes.len(), preview(&payload));
+            }
+        } else if let Some(msg) = message {
             connection.send_text(msg).await?;
             store.record_ws_message(request_id, WsDirection::ClientToServer, 0x1, msg.as_bytes())?;
             if !json {
@@ -249,6 +262,34 @@ fn record_handshake(
     Ok(store.record(&captured)?)
 }
 
+/// Decodes a hex string (optionally with whitespace) into bytes.
+fn decode_hex(hex: &str) -> Result<Vec<u8>> {
+    let clean: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+    if !clean.len().is_multiple_of(2) {
+        return Err(HexoraError::invalid_input(
+            "raw",
+            "the hex string has an odd number of digits",
+        ));
+    }
+    (0..clean.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&clean[i..i + 2], 16)
+                .map_err(|_| HexoraError::invalid_input("raw", "the hex string is not valid hex"))
+        })
+        .collect()
+}
+
+/// Parses the opcode and payload of the first frame in `bytes`, for recording a raw send.
+fn parse_one_frame(bytes: &[u8]) -> Option<(u8, Vec<u8>)> {
+    let mut parser = hexora_http::ws::FrameParser::new(16 * 1024 * 1024);
+    parser.push(bytes);
+    match parser.next_frame() {
+        Ok(Some(frame)) => Some((frame.opcode.as_u8(), frame.payload)),
+        _ => None,
+    }
+}
+
 /// A short, printable preview of a payload — text as text, binary as a byte note.
 fn preview(payload: &[u8]) -> String {
     match std::str::from_utf8(payload) {
@@ -300,6 +341,13 @@ mod tests {
         crate::project::init(&dir.path().join("eng"), Some("Acme"), true).unwrap();
         let error = show(&dir.path().join("eng"), "not-an-id", false).unwrap_err();
         assert_eq!(error.code(), "invalid_input");
+    }
+
+    #[test]
+    fn hex_decoding_round_trips_and_rejects_junk() {
+        assert_eq!(decode_hex("81 04 74 65 73 74").unwrap(), vec![0x81, 0x04, 0x74, 0x65, 0x73, 0x74]);
+        assert!(decode_hex("abc").is_err()); // odd length
+        assert!(decode_hex("zz").is_err()); // not hex
     }
 
     #[test]
