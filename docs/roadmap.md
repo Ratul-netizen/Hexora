@@ -809,7 +809,7 @@ STATUS.md as a decision rather than an omission.
 Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
 not an object and an object is not an ownership claim.
 
-**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.e DONE)
+**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.e DONE; CR.f fuzzing DONE, JS-rendered deferred to M18)
 
 The scanner is only as good as what was captured, and today that is exactly what a tester
 proxied — the single largest gap against Burp. A crawler discovers endpoints on its own and
@@ -855,6 +855,14 @@ deferred to the desktop surface. Note: adding Origin::Crawler required 'crawler'
 requests.origin CHECK (migration 0001) — caught by the crawl→sitemap end-to-end run. -->
 
 | **CR.f** — hardening and JS-rendered discovery | The HTML/URL extractor fuzzed on hostile bytes (the panic surface, like the HPACK and WebSocket parsers), a per-host budget the scheduler enforces, and the decision on **JS-rendered endpoints**: a static extractor misses SPA routes and XHR that only exist after JavaScript runs, so this **merges with browser integration (M18)** — driving a real browser over CDP, the approach ZAP's Client Spider adopted in 2026 — rather than being built twice. A static crawl reports honestly that a JS app needs the browser. | CR.a–e, M18 |
+<!-- CR.f fuzzing landed: `hexora_crawl::fuzz_extract` drives the extractor over arbitrary
+bytes (HTML/form/URL-string paths plus the hand-rolled resolver via a hostile base URL);
+a proptest in core/crawl/src/lib.rs asserts panic-free + bounded (stressed at 20k cases),
+and a `crawl_extract` cargo-fuzz target sits beside hpack_decode/ws_frame/ws_inflate. The
+per-host budget is already enforced (CrawlBudget::max_per_host, CR.b). JS-rendered discovery
+and rel="nofollow" (needs a tag-aware extractor) are the remainder, deferred to M18's browser
+integration rather than hand-rolled here. -->
+
 
 **Decisions to lock first.** The crawler is a *producer* for the scheduler, not a second sender
 beside it, so it never opens its own connections — it enqueues requests the scheduler sends

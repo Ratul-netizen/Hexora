@@ -1609,6 +1609,7 @@ dependencies = [
  "async-trait",
  "hexora-engine",
  "hexora-types",
+ "proptest",
  "tokio",
  "tracing",
 ]

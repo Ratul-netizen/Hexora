@@ -286,9 +286,31 @@ fn scan_url_strings(text: &str) -> Vec<String> {
     out
 }
 
+/// Drives the link extractor over arbitrary input. Public only for the fuzz target and the
+/// property test; the property is that no bytes make it panic, loop or read out of bounds,
+/// and that the result is always bounded by [`MAX_LINKS`].
+///
+/// It exercises every hand-rolled path: the HTML attribute/form reader, the URL-string
+/// scanner on a text body, and — by feeding the bytes as the *base* URL — the resolver and
+/// path normaliser, which parse attacker-influenced input too.
+#[doc(hidden)]
+pub fn fuzz_extract(data: &[u8]) {
+    for content_type in ["text/html", "application/json", ""] {
+        let found = extract("https://host.test/dir/page?q=1", content_type, data);
+        debug_assert!(found.len() <= MAX_LINKS);
+    }
+    let base = String::from_utf8_lossy(data);
+    let _ = extract(
+        &base,
+        "text/html",
+        br##"<a href="a/../../b">x</a><a href="//host/c">y</a><form action="d"></form>"##,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn urls(discovered: &[Discovered]) -> Vec<&str> {
         discovered.iter().map(|d| d.url.as_str()).collect()
@@ -352,5 +374,20 @@ mod tests {
         let body: Vec<u8> = (0..=255u8).cycle().take(50_000).collect();
         let found = extract("https://app.test/", "text/html", &body);
         assert!(found.len() <= MAX_LINKS);
+    }
+
+    proptest! {
+        // The CR.f property (also driven under cargo-fuzz via `fuzz_extract`): no body,
+        // base URL or content type makes the extractor panic, loop or exceed its bound.
+        #[test]
+        fn extracting_arbitrary_input_is_panic_free_and_bounded(
+            body in prop::collection::vec(any::<u8>(), 0..4096),
+            base in prop::string::string_regex("[ -~]{0,64}").unwrap(),
+            html in any::<bool>(),
+        ) {
+            let content_type = if html { "text/html" } else { "application/json" };
+            let found = extract(&base, content_type, &body);
+            prop_assert!(found.len() <= MAX_LINKS);
+        }
     }
 }

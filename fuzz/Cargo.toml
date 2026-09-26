@@ -19,6 +19,9 @@ libfuzzer-sys = "0.4"
 [dependencies.hexora-http]
 path = "../core/http"
 
+[dependencies.hexora-crawl]
+path = "../core/crawl"
+
 [[bin]]
 name = "hpack_decode"
 path = "fuzz_targets/hpack_decode.rs"
@@ -36,6 +39,13 @@ bench = false
 [[bin]]
 name = "ws_inflate"
 path = "fuzz_targets/ws_inflate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crawl_extract"
+path = "fuzz_targets/crawl_extract.rs"
 test = false
 doc = false
 bench = false
