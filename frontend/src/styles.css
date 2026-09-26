@@ -61,16 +61,20 @@ body {
   align-items: center;
   gap: 24px;
   padding: 0 16px;
-  height: 44px;
+  min-height: 44px;
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .brand {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .brand strong {
@@ -78,15 +82,35 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* The version/milestone note truncates rather than wrapping the brand into a tall
+   stack when the window is narrow. */
+.brand span.muted {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34vw;
+}
+
+/* The tab strip takes the middle and scrolls horizontally rather than pushing the
+   right-hand indicators off the edge — the bug a fixed-height, no-shrink row had. */
 .top nav {
   display: flex;
   gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.top nav::-webkit-scrollbar {
+  height: 4px;
 }
 
 .indicators {
   margin-left: auto;
   display: flex;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 main {
@@ -288,7 +312,9 @@ input[type="text"]:focus {
 
 .setup {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  /* `min(340px, 100%)` keeps a single column from overflowing a window narrower than
+     the track's minimum. */
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -1276,4 +1302,216 @@ input.narrow {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ------------------------------------------------------ responsive breakpoints */
+
+/* Below this the tab strip drops to its own full-width, horizontally-scrollable row,
+   so the brand and the status chips stay visible instead of being pushed off-edge. */
+@media (max-width: 880px) {
+  .top {
+    row-gap: 6px;
+    padding: 6px 12px;
+  }
+  .top nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .indicators {
+    order: 2;
+  }
+  main {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .brand span.muted {
+    display: none;
+  }
+}
+
+/* ============================================================================
+   Design system v2 — dark glass, depth, and buttery motion.
+
+   Appended so it layers over the base rules. The aesthetic (2026): translucent
+   panels with a gradient hairline and real elevation, motion only on transform
+   and opacity (the compositor-cheap ones), and a subtle CSS 3D lift for depth
+   without the cost of WebGL on data-dense screens. Honoured under
+   prefers-reduced-motion.
+   ============================================================================ */
+
+:root {
+  --radius: 11px;
+  --radius-sm: 7px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur: 240ms;
+
+  --glass: rgba(28, 31, 38, 0.6);
+  --glass-strong: rgba(30, 34, 42, 0.82);
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-bright: rgba(255, 255, 255, 0.14);
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 6px 20px -6px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.32);
+  --elev-3: 0 20px 50px -14px rgba(0, 0, 0, 0.66), 0 6px 16px rgba(0, 0, 0, 0.4);
+  --accent-glow: 0 0 0 1px rgba(217, 139, 58, 0.35), 0 6px 24px -6px rgba(217, 139, 58, 0.45);
+}
+
+body {
+  background:
+    radial-gradient(1200px 820px at 12% -12%, rgba(217, 139, 58, 0.07), transparent 60%),
+    radial-gradient(1050px 720px at 104% -4%, rgba(95, 139, 217, 0.06), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* ---- top bar: a floating glass rail ---- */
+.top {
+  background: linear-gradient(180deg, rgba(30, 34, 42, 0.9), rgba(22, 24, 29, 0.8));
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  border-bottom: 1px solid var(--hairline);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 30px -18px rgba(0, 0, 0, 0.7);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+/* ---- glass panels with a gradient hairline and elevation ---- */
+.card,
+.panel {
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  position: relative;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+  transform-style: preserve-3d;
+}
+
+/* The catch of light along the top edge — a masked gradient border, glass's tell. */
+.card::before,
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 42%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Depth: a gentle lift and tilt-back on hover, in a perspective container. */
+.setup {
+  perspective: 1400px;
+}
+.setup .card {
+  will-change: transform;
+}
+.setup .card:hover {
+  transform: translateY(-3px) rotateX(2deg);
+  box-shadow: var(--elev-3);
+  border-color: var(--hairline-bright);
+}
+
+/* ---- tabs: an underline that slides in rather than snapping ---- */
+button.tab {
+  transition: color var(--dur-fast) var(--ease);
+}
+button.tab.active {
+  border-bottom-color: transparent;
+}
+button.tab::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform var(--dur) var(--ease);
+}
+button.tab.active::after {
+  transform: scaleX(1);
+}
+
+/* ---- buttons: press feedback, and a glow on the one that sends traffic ---- */
+button {
+  border-radius: var(--radius-sm);
+  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+button:active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+}
+button.primary {
+  box-shadow: var(--accent-glow);
+}
+button.primary:hover:not(:disabled) {
+  box-shadow: 0 0 0 1px rgba(217, 139, 58, 0.55), 0 10px 30px -6px rgba(217, 139, 58, 0.5);
+}
+
+/* ---- chips: pill glass ---- */
+.chip {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: var(--hairline);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* ---- inputs: focus ring in the accent ---- */
+input[type="text"],
+input:not([type]),
+select,
+textarea {
+  border-radius: var(--radius-sm);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+input[type="text"]:focus,
+input:not([type]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(217, 139, 58, 0.6);
+  box-shadow: 0 0 0 3px rgba(217, 139, 58, 0.14);
+}
+
+/* ---- each view fades and rises as it mounts on tab change ---- */
+main > * {
+  animation: viewEnter var(--dur) var(--ease) both;
+}
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  .setup .card:hover {
+    transform: none;
+  }
 }
