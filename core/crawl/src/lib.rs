@@ -26,6 +26,9 @@
 
 use hexora_types::http::HttpService;
 
+pub mod frontier;
+pub use frontier::{crawl, CrawlBudget, CrawlReport, CrawlStop, SkipReason, Skipped};
+
 /// The largest response body the extractor will scan, and the most links it will return.
 ///
 /// A crawl over a hostile or generated page must not turn one response into unbounded work;

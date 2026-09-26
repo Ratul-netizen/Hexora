@@ -809,7 +809,7 @@ STATUS.md as a decision rather than an omission.
 Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
 not an object and an object is not an ownership claim.
 
-**M13.8 — Crawler and coverage** · PLANNED
+**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.b DONE)
 
 The scanner is only as good as what was captured, and today that is exactly what a tester
 proxied — the single largest gap against Burp. A crawler discovers endpoints on its own and

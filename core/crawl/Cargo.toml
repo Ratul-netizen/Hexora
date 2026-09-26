@@ -8,4 +8,10 @@ repository.workspace = true
 
 [dependencies]
 hexora-types.workspace = true
+hexora-engine.workspace = true
+tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -29,6 +29,7 @@ pub enum Origin {
     Proxy,
     Repeater,
     Scanner,
+    Crawler,
     Fuzzer,
     Workflow,
     Extension,
@@ -54,6 +55,7 @@ impl Origin {
             Self::Proxy => "proxy",
             Self::Repeater => "repeater",
             Self::Scanner => "scanner",
+            Self::Crawler => "crawler",
             Self::Fuzzer => "fuzzer",
             Self::Workflow => "workflow",
             Self::Extension => "extension",
@@ -336,6 +338,7 @@ mod tests {
     fn machine_driven_origins_are_automated() {
         for origin in [
             Origin::Scanner,
+            Origin::Crawler,
             Origin::Fuzzer,
             Origin::Workflow,
             Origin::Ai,

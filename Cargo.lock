@@ -1605,7 +1605,10 @@ dependencies = [
 name = "hexora-crawl"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "hexora-engine",
  "hexora-types",
+ "tokio",
  "tracing",
 ]
 
