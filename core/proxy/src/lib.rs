@@ -17,6 +17,12 @@
 //! **downgrade**, which the proxy records as an explicit event and, because h2→h1 is a
 //! request-smuggling class, names the primitives such a downgrade would carry.
 //!
+//! A `101 Switching Protocols` turns the tunnel into a **WebSocket** relay (WS.a): the
+//! upgrade is carried through with `permessage-deflate` stripped so the session stays
+//! legible, and from then on the connection is relayed both ways verbatim while every frame
+//! is parsed and recorded into `websocket_messages` — masking kept as observed, since a
+//! client that does not mask or a server that does is a finding.
+//!
 //! [`trust`] installs and removes the CA from the platform trust store, and asks the
 //! platform whether it is trusted rather than assuming.
 //!

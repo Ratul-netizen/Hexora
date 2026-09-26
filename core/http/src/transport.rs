@@ -132,6 +132,15 @@ impl TcpTransport {
         self
     }
 
+    /// The TLS settings this transport uses upstream.
+    ///
+    /// Exposed so a caller that must open its own connection — the WebSocket relay, which
+    /// forwards a raw byte stream the buffered `send` cannot carry — reaches the origin with
+    /// the same verification the rest of the proxy uses, rather than inventing its own.
+    pub fn tls_config(&self) -> &TlsConfig {
+        &self.tls
+    }
+
     /// Sends a request and returns as soon as the response *head* has arrived.
     ///
     /// The body is still on the wire. This is what the proxy uses: it can begin

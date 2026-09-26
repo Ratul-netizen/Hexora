@@ -29,11 +29,14 @@ use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
 use hexora_http::parse::find_head_end;
 use hexora_http::request::{parse_request_head, RequestHead};
-use hexora_http::{BodyStream, TcpTransport};
+use hexora_http::{BodyStream, TcpTransport, TlsConfig};
 use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result};
-use hexora_types::http::{HttpRequest, HttpResponse, HttpService, HttpVersion};
+use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
 use hexora_types::scope::Scope;
+use hexora_types::ws::WsDirection;
+use hexora_http::ws::FrameParser;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -73,6 +76,33 @@ const HOP_BY_HOP: &[&str] = &[
 pub trait ExchangeObserver: Send + Sync + 'static {
     /// Called once per completed exchange.
     fn observe(&self, exchange: &Exchange, decision: ScopeDecision);
+
+    /// Records the Upgrade exchange that opened a WebSocket, returning the stored request id
+    /// its frames will reference. `None` means the session is not being captured — the relay
+    /// still runs, it just records nothing. Default: not captured.
+    ///
+    /// Returned synchronously, unlike [`Self::observe`], because a frame cannot be recorded
+    /// against a request that does not exist yet: the Upgrade must be stored, and its id
+    /// known, before the first frame it carries.
+    fn observe_websocket_open(
+        &self,
+        exchange: &Exchange,
+        decision: ScopeDecision,
+    ) -> Option<RequestId> {
+        let _ = (exchange, decision);
+        None
+    }
+
+    /// Records one captured WebSocket frame against an open session.
+    fn observe_websocket_message(
+        &self,
+        request_id: RequestId,
+        direction: WsDirection,
+        opcode: u8,
+        payload: &[u8],
+    ) {
+        let _ = (request_id, direction, opcode, payload);
+    }
 }
 
 /// An observer that does nothing.
@@ -115,7 +145,13 @@ pub struct ProxyServer {
     interception: InterceptionPolicy,
     ca: Arc<CertificateAuthority>,
     interceptor: Arc<dyn Interceptor>,
+    /// The TLS settings for an upstream connection the WebSocket relay opens itself.
+    upstream_tls: TlsConfig,
 }
+
+/// A byte stream the relay can own, whatever its concrete type (plain or TLS).
+trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
 
 impl std::fmt::Debug for ProxyServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -148,6 +184,7 @@ impl ProxyServer {
             HexoraError::Internal(format!("cannot bind the proxy to {}: {e}", config.bind))
         })?;
 
+        let upstream_tls = transport.tls_config().clone();
         Ok(Self {
             listener,
             transport: Arc::new(ScopeGuard::new(transport, scope)),
@@ -157,6 +194,7 @@ impl ProxyServer {
             ca,
             // Forwarding everything until a tester turns interception on.
             interceptor: Arc::new(PassThrough),
+            upstream_tls,
         })
     }
 
@@ -193,6 +231,7 @@ impl ProxyServer {
                 interception: self.interception.clone(),
                 ca: self.ca.clone(),
                 interceptor: self.interceptor.clone(),
+                upstream_tls: self.upstream_tls.clone(),
             };
             tokio::spawn(async move {
                 if let Err(e) = handle_connection(socket, context).await {
@@ -212,6 +251,7 @@ struct ConnectionContext {
     interception: InterceptionPolicy,
     ca: Arc<CertificateAuthority>,
     interceptor: Arc<dyn Interceptor>,
+    upstream_tls: TlsConfig,
 }
 
 /// Serves one client connection.
@@ -319,6 +359,334 @@ async fn produce(request: HttpRequest, context: &ConnectionContext) -> Result<Se
         Some(response) => Served::Respond(response),
         None => Served::Nothing,
     })
+}
+
+/// Whether a request head is a WebSocket upgrade.
+fn is_websocket_upgrade(head: &RequestHead) -> bool {
+    head.headers
+        .get("Upgrade")
+        .map(|h| h.value_lossy().eq_ignore_ascii_case("websocket"))
+        .unwrap_or(false)
+}
+
+/// Relays an established WebSocket both ways, recording every frame that passes.
+///
+/// The bytes are forwarded **verbatim** — masked exactly as they arrived, nothing
+/// re-serialised — so the wire is preserved; a copy is fed to a per-direction frame parser
+/// only to observe it. Each direction runs concurrently; when either side closes, the
+/// session ends. `request_id` anchors captured frames to the Upgrade exchange, or is `None`
+/// when the session is not being recorded.
+#[allow(clippy::too_many_arguments)]
+async fn relay_websocket<C, U>(
+    client: C,
+    upstream: U,
+    request_id: Option<RequestId>,
+    observer: Arc<dyn ExchangeObserver>,
+    limits: Limits,
+    // Bytes already read from each side that belong to the WebSocket stream — frames that
+    // arrived in the same segment as the handshake. Forwarded and captured before the relay
+    // reads any more, so nothing is missed.
+    client_seed: Vec<u8>,
+    upstream_seed: Vec<u8>,
+) -> Result<()>
+where
+    C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    U: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (mut client_read, mut client_write) = tokio::io::split(client);
+    let (mut upstream_read, mut upstream_write) = tokio::io::split(upstream);
+    let cap = limits.max_body_bytes.min(usize::MAX as u64) as usize;
+
+    let to_server = pump(
+        &mut client_read,
+        &mut upstream_write,
+        WsDirection::ClientToServer,
+        request_id,
+        observer.clone(),
+        cap,
+        client_seed,
+    );
+    let to_client = pump(
+        &mut upstream_read,
+        &mut client_write,
+        WsDirection::ServerToClient,
+        request_id,
+        observer.clone(),
+        cap,
+        upstream_seed,
+    );
+
+    // Either side closing ends the session — a WebSocket is symmetric, and once one half is
+    // gone there is nothing left to relay.
+    tokio::select! {
+        result = to_server => result,
+        result = to_client => result,
+    }
+}
+
+/// Copies one direction of a WebSocket, forwarding bytes verbatim and recording frames.
+#[allow(clippy::too_many_arguments)]
+async fn pump<R, W>(
+    read: &mut R,
+    write: &mut W,
+    direction: WsDirection,
+    request_id: Option<RequestId>,
+    observer: Arc<dyn ExchangeObserver>,
+    cap: usize,
+    seed: Vec<u8>,
+) -> Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut parser = FrameParser::new(cap);
+    let observe = |parser: &mut FrameParser, observer: &Arc<dyn ExchangeObserver>| {
+        while let Ok(Some(frame)) = parser.next_frame() {
+            if let Some(id) = request_id {
+                observer.observe_websocket_message(
+                    id,
+                    direction,
+                    frame.opcode.as_u8(),
+                    &frame.payload,
+                );
+            }
+        }
+    };
+
+    // The seed — bytes read alongside the handshake — is forwarded and captured first.
+    if !seed.is_empty() {
+        write
+            .write_all(&seed)
+            .await
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        write.flush().await.ok();
+        parser.push(&seed);
+        observe(&mut parser, &observer);
+    }
+
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        let n = read
+            .read(&mut buf)
+            .await
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        if n == 0 {
+            return Ok(()); // the peer closed this half
+        }
+
+        // Forward first, exactly as it arrived; the tester's and the server's bytes are the
+        // evidence, and re-framing them would make the relay the thing under test.
+        write
+            .write_all(&buf[..n])
+            .await
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        write.flush().await.ok();
+
+        // Then observe. A parse error means an over-long declared frame; the bytes have
+        // already been forwarded, so the session continues — Hexora records what it could
+        // read rather than tearing down a connection over a frame it found odd.
+        parser.push(&buf[..n]);
+        observe(&mut parser, &observer);
+    }
+}
+
+/// Carries an intercepted WebSocket upgrade through to the origin and relays the session.
+///
+/// The handshake is forwarded with `permessage-deflate` removed, so every frame is
+/// uncompressed and legible (real deflate support is WS.e); when the origin answers `101`,
+/// the Upgrade exchange is recorded — synchronously, so its id exists before any frame — and
+/// the connection becomes a captured bidirectional relay. A server that declines the upgrade
+/// gets its response passed straight back to the client.
+async fn relay_ws_tunnel<C>(
+    mut client: C,
+    head: &RequestHead,
+    client_prefix: BytesMut,
+    service: &HttpService,
+    context: &ConnectionContext,
+) -> Result<()>
+where
+    C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let handshake = serialize_ws_handshake(head);
+
+    let tcp = TcpStream::connect((service.host.as_str(), service.port))
+        .await
+        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+    let mut upstream: Box<dyn Duplex> = if service.secure {
+        let (stream, _tls) =
+            hexora_http::tls::handshake(tcp, &service.host, &context.upstream_tls, &context.limits)
+                .await?;
+        Box::new(stream)
+    } else {
+        Box::new(tcp)
+    };
+
+    upstream
+        .write_all(&handshake)
+        .await
+        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+    upstream.flush().await.ok();
+
+    let (response_head, upstream_prefix) = read_response_head(&mut upstream, &context.limits).await?;
+    let status = parse_status_code(&response_head);
+
+    // The server's answer goes back to the client either way — it is what the client's
+    // handshake is waiting for.
+    client
+        .write_all(&response_head)
+        .await
+        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+    client.flush().await.ok();
+
+    if status != Some(101) {
+        // The origin refused the upgrade; hand back anything already buffered and stop.
+        if !upstream_prefix.is_empty() {
+            let _ = client.write_all(&upstream_prefix).await;
+        }
+        return Ok(());
+    }
+
+    // Record the Upgrade exchange, and anchor the session's frames to it. Built directly
+    // from the head so the WebSocket headers survive into the evidence rather than being
+    // stripped as hop-by-hop.
+    let mut headers = Headers::new();
+    for header in head.headers.iter() {
+        headers.append(header.clone());
+    }
+    let request = HttpRequest {
+        service: service.clone(),
+        method: head.method.clone(),
+        path: if head.target.path().is_empty() {
+            "/".to_string()
+        } else {
+            head.target.path().to_string()
+        },
+        version: head.version,
+        headers,
+        body: bytes::Bytes::new(),
+    };
+    let response = build_ws_response(&response_head);
+    let options = SendOptions::interactive(Origin::Proxy);
+    let decision = context.transport.decide(&request, &options);
+    let exchange = Exchange {
+        request,
+        response,
+        encoded_body: None,
+        content_encoding: None,
+        raw_request: None,
+        duration: std::time::Duration::ZERO,
+        tls: None,
+    };
+    let request_id = context.observer.observe_websocket_open(&exchange, decision);
+
+    relay_websocket(
+        client,
+        upstream,
+        request_id,
+        context.observer.clone(),
+        context.limits.clone(),
+        client_prefix.to_vec(),
+        upstream_prefix.to_vec(),
+    )
+    .await
+}
+
+/// Serialises a WebSocket handshake request to forward upstream, stripping
+/// `permessage-deflate` so the session stays uncompressed and legible (WS.a).
+///
+/// Unlike an ordinary proxied request, the connection-specific headers are *kept* — a
+/// WebSocket handshake is `Connection: Upgrade` plus `Upgrade: websocket`, and dropping them
+/// as hop-by-hop would turn the upgrade into an ordinary request. Only the compression
+/// extension offer is removed.
+fn serialize_ws_handshake(head: &RequestHead) -> Vec<u8> {
+    let path = if head.target.path().is_empty() { "/" } else { head.target.path() };
+    let mut out = format!("{} {} HTTP/1.1\r\n", head.method, path).into_bytes();
+    for header in head.headers.iter() {
+        if header.is("Sec-WebSocket-Extensions") || header.is("Proxy-Connection") {
+            continue;
+        }
+        out.extend_from_slice(header.name.as_bytes());
+        out.extend_from_slice(b": ");
+        out.extend_from_slice(&header.value);
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(b"\r\n");
+    out
+}
+
+/// Reads an HTTP response head (through the blank line) from a stream, returning the head
+/// bytes and any bytes read past it — early WebSocket frames that arrived in the same read.
+async fn read_response_head<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    limits: &Limits,
+) -> Result<(Vec<u8>, BytesMut)> {
+    let mut buf = BytesMut::with_capacity(READ_CHUNK);
+    let deadline = tokio::time::Instant::now() + limits.read_head_timeout;
+    loop {
+        if let Some(end) = find_head_end(&buf) {
+            let rest = buf.split_off(end);
+            return Ok((buf.to_vec(), rest));
+        }
+        limits.check_header_size(buf.len())?;
+        let before = buf.len();
+        buf.resize(before + READ_CHUNK, 0);
+        let read = tokio::time::timeout_at(deadline, stream.read(&mut buf[before..]))
+            .await
+            .map_err(|_| {
+                HexoraError::Network(hexora_types::error::NetworkError::Timeout {
+                    phase: hexora_types::error::TimeoutPhase::ReadResponseHead,
+                    elapsed: limits.read_head_timeout,
+                })
+            })?
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        buf.truncate(before + read);
+        if read == 0 {
+            return Err(HexoraError::Protocol(ProtocolError::Malformed {
+                protocol: "HTTP/1.1",
+                reason: "the origin closed the connection during the WebSocket handshake"
+                    .to_string(),
+            }));
+        }
+    }
+}
+
+/// Reads the status code from a response head's first line.
+fn parse_status_code(head: &[u8]) -> Option<u16> {
+    let text = std::str::from_utf8(head).ok()?;
+    let first = text.lines().next()?;
+    first.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Builds the response model for a recorded WebSocket upgrade from the `101` head.
+fn build_ws_response(head: &[u8]) -> HttpResponse {
+    let text = String::from_utf8_lossy(head);
+    let mut lines = text.split("\r\n");
+    let status_line = lines.next().unwrap_or_default();
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(101);
+    let reason = status_line.splitn(3, ' ').nth(2).map(|r| r.to_string());
+
+    let mut headers = Headers::new();
+    for line in lines {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(": ") {
+            headers.append(Header::new(name, value));
+        }
+    }
+
+    HttpResponse {
+        status,
+        reason,
+        version: HttpVersion::Http11,
+        headers,
+        body: bytes::Bytes::new(),
+        truncated: false,
+    }
 }
 
 /// Records, explicitly, when the client and the origin spoke different HTTP versions.
@@ -460,6 +828,11 @@ async fn handle_connect(
     // the authority comes from the CONNECT line rather than from the request.
     let (inner_head, body_prefix) = read_request_head(&mut tls, &context.limits).await?;
     report_request_signals(&inner_head);
+
+    if is_websocket_upgrade(&inner_head) {
+        relay_ws_tunnel(tls, &inner_head, body_prefix, &service, &context).await?;
+        return Ok(TunnelOutcome::Intercepted);
+    }
 
     let mut request =
         build_upstream_request(&inner_head, &mut tls, body_prefix, &context.limits).await?;
@@ -894,6 +1267,97 @@ mod tests {
                 exchange.response.version,
             ));
         }
+    }
+
+    /// Records the WebSocket frames the relay observed.
+    #[derive(Default)]
+    struct WsRecorder {
+        messages: Mutex<Vec<(WsDirection, u8, Vec<u8>)>>,
+    }
+
+    impl ExchangeObserver for Arc<WsRecorder> {
+        fn observe(&self, _exchange: &Exchange, _decision: ScopeDecision) {}
+        fn observe_websocket_message(
+            &self,
+            _request_id: RequestId,
+            direction: WsDirection,
+            opcode: u8,
+            payload: &[u8],
+        ) {
+            self.messages
+                .lock()
+                .unwrap()
+                .push((direction, opcode, payload.to_vec()));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_relay_forwards_both_ways_verbatim_and_captures_each_frame() {
+        use hexora_http::ws::{encode, Frame, Opcode};
+
+        let (mut client_test, client_relay) = tokio::io::duplex(8192);
+        let (upstream_relay, mut upstream_test) = tokio::io::duplex(8192);
+
+        let recorder = Arc::new(WsRecorder::default());
+        let observer: Arc<dyn ExchangeObserver> = Arc::new(recorder.clone());
+        let request_id = RequestId::new();
+
+        tokio::spawn(relay_websocket(
+            client_relay,
+            upstream_relay,
+            Some(request_id),
+            observer,
+            Limits::default(),
+            Vec::new(),
+            Vec::new(),
+        ));
+
+        // Client → server: a masked text frame, as a browser sends.
+        let client_frame = encode(
+            &Frame {
+                fin: true,
+                rsv1: false,
+                opcode: Opcode::Text,
+                masked: true,
+                payload: b"hi server".to_vec(),
+            },
+            Some([0x11, 0x22, 0x33, 0x44]),
+        );
+        client_test.write_all(&client_frame).await.unwrap();
+
+        // The relay forwards the client's bytes to the upstream verbatim, mask and all.
+        let mut forwarded = vec![0u8; client_frame.len()];
+        upstream_test.read_exact(&mut forwarded).await.unwrap();
+        assert_eq!(forwarded, client_frame, "client frame relayed byte for byte");
+
+        // Server → client: an unmasked text frame back.
+        let server_frame = encode(
+            &Frame {
+                fin: true,
+                rsv1: false,
+                opcode: Opcode::Text,
+                masked: false,
+                payload: b"hi client".to_vec(),
+            },
+            None,
+        );
+        upstream_test.write_all(&server_frame).await.unwrap();
+        let mut back = vec![0u8; server_frame.len()];
+        client_test.read_exact(&mut back).await.unwrap();
+        assert_eq!(back, server_frame, "server frame relayed byte for byte");
+
+        // Both frames were captured, with the payload unmasked and the direction right.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if recorder.messages.lock().unwrap().len() >= 2 {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "frames were not captured");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let messages = recorder.messages.lock().unwrap();
+        assert_eq!(messages[0], (WsDirection::ClientToServer, 0x1, b"hi server".to_vec()));
+        assert_eq!(messages[1], (WsDirection::ServerToClient, 0x1, b"hi client".to_vec()));
     }
 
     /// An upstream server that answers every request with `response`.

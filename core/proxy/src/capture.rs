@@ -138,6 +138,51 @@ impl ExchangeObserver for ProjectCapture {
             }
         });
     }
+
+    fn observe_websocket_open(
+        &self,
+        exchange: &Exchange,
+        decision: ScopeDecision,
+    ) -> Option<hexora_types::ids::RequestId> {
+        if !self.should_capture(decision) {
+            return None;
+        }
+        // Recorded synchronously, not on the blocking pool: the relay needs this id before
+        // it can anchor a single frame, so there is nothing to defer.
+        match self.store.record(&to_captured(exchange)) {
+            Ok(id) => {
+                self.recorded.fetch_add(1, Ordering::Relaxed);
+                Some(id)
+            }
+            Err(e) => {
+                let count = self.failed.fetch_add(1, Ordering::Relaxed) + 1;
+                tracing::warn!(
+                    url = %exchange.request.url(),
+                    total_failures = count,
+                    "failed to record a WebSocket upgrade: {e}"
+                );
+                None
+            }
+        }
+    }
+
+    fn observe_websocket_message(
+        &self,
+        request_id: hexora_types::ids::RequestId,
+        direction: hexora_types::ws::WsDirection,
+        opcode: u8,
+        payload: &[u8],
+    ) {
+        let store = self.store.clone();
+        let payload = payload.to_vec();
+        // The Upgrade row already exists (observe_websocket_open ran first), so the write can
+        // go to the blocking pool without a foreign-key race.
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = store.record_ws_message(request_id, direction, opcode, &payload) {
+                tracing::warn!("failed to record a WebSocket message: {e}");
+            }
+        });
+    }
 }
 
 #[cfg(test)]
