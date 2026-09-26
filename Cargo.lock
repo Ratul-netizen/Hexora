@@ -1633,8 +1633,11 @@ name = "hexora-engine"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.21.7",
  "bytes",
+ "chrono",
  "hexora-types",
+ "ring",
  "serde",
  "serde_json",
  "tokio",

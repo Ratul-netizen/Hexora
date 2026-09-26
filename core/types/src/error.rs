@@ -52,6 +52,17 @@ pub enum HexoraError {
         capability: String,
     },
 
+    /// A feature the current licence tier does not include was invoked.
+    ///
+    /// Not a failure of the tool — an explicit, honest boundary: the message names the
+    /// feature and the tier it needs, so the caller can say "this needs Pro" rather than
+    /// failing mysteriously. See `hexora_engine::license`.
+    #[error("{feature} needs the {tier} tier")]
+    NotLicensed {
+        feature: &'static str,
+        tier: &'static str,
+    },
+
     /// The operation was cancelled by the user or a supervising task.
     #[error("operation cancelled")]
     Cancelled,
@@ -113,6 +124,7 @@ impl HexoraError {
             Self::NotFound { .. } => "not_found",
             Self::InvalidInput { .. } => "invalid_input",
             Self::PermissionDenied { .. } => "permission_denied",
+            Self::NotLicensed { .. } => "not_licensed",
             Self::Cancelled => "cancelled",
             Self::OutOfScope(_) => "out_of_scope",
             Self::NotImplemented(_) => "not_implemented",

@@ -33,10 +33,12 @@
 
 pub mod ai;
 pub mod guard;
+pub mod license;
 pub mod permission;
 pub mod transport;
 
 pub use ai::{Approval, ToolCall, ToolGate};
 pub use guard::{ScopeDecision, ScopeGuard};
+pub use license::{EntitlementGate, Entitlements, Feature, Tier};
 pub use permission::{Capability, GrantSet, PermissionRequest};
 pub use transport::{Exchange, HttpTransport, Origin, SendOptions};

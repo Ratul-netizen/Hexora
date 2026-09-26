@@ -97,6 +97,12 @@ brotli = "7.0"
 h2 = "0.4"
 http = "1"
 
+# Offline licence verification (LIC.a): Ed25519 signatures checked against an embedded
+# public key, no phone-home. `ring` is already in the tree via rustls; base64 carries the
+# signature and key in the licence file.
+ring = "0.17"
+base64 = "0.21"
+
 # Hashing (content-addressed blob store)
 sha2 = "0.10"
 # Only ever a lookup key for the Windows certificate store, never a security
