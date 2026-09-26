@@ -41,6 +41,8 @@ pub struct Args {
     pub project: PathBuf,
     /// Explicit seed URLs. When present, captured traffic is not used for seeds.
     pub seeds: Vec<String>,
+    /// Crawl as this identity (label or id), reaching behind the login.
+    pub identity: Option<String>,
     pub max_requests: Option<usize>,
     pub max_depth: Option<usize>,
     pub max_per_host: Option<usize>,
@@ -66,6 +68,12 @@ pub fn run(args: Args) -> Result<()> {
     let scope = project.settings().scope()?;
     let attached = project.settings().attached_headers()?;
 
+    // Resolve the identity to crawl as, if one was named, before anything is sent.
+    let identity = match &args.identity {
+        Some(who) => Some(crate::identity::resolve(&project.identities(), who)?),
+        None => None,
+    };
+
     let seeds = if args.seeds.is_empty() {
         gather_seeds(&project, &scope)?
     } else {
@@ -81,11 +89,13 @@ pub fn run(args: Args) -> Result<()> {
         follow_destructive: args.follow_destructive,
         ignore_robots: args.ignore_robots,
     };
+    let identity_label = identity.as_ref().map(|i| i.label.clone());
+    let identity_id = identity.as_ref().map(|i| i.id);
 
     if args.json {
-        print_plan_json(&seeds, &budget, &policy);
+        print_plan_json(&seeds, &budget, &policy, identity_label.as_deref());
     } else {
-        print_plan(&seeds, &budget, &policy);
+        print_plan(&seeds, &budget, &policy, identity_label.as_deref());
     }
 
     if args.dry_run {
@@ -120,10 +130,13 @@ pub fn run(args: Args) -> Result<()> {
     // The crawler is automated traffic by definition, so the guard refuses out-of-scope
     // targets rather than flagging them the way it would a request a person typed.
     let guard = ScopeGuard::new(transport, Arc::new(scope));
-    let crawler = Crawler::new(&guard)
+    let mut crawler = Crawler::new(&guard)
         .budget(budget)
         .policy(policy)
         .attaching(attached);
+    if let Some(identity) = identity {
+        crawler = crawler.crawling_as(identity);
+    }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -135,7 +148,7 @@ pub fn run(args: Args) -> Result<()> {
     let recorded = if args.no_save {
         0
     } else {
-        record_fetched(&store, &report)?
+        record_fetched(&store, &report, identity_id)?
     };
 
     if args.json {
@@ -174,7 +187,11 @@ async fn stoppable<T: HttpTransport>(crawler: &Crawler<'_, T>, seeds: Vec<String
 }
 
 /// Records every fetched page as crawler-origin traffic, so the scanner can work over it.
-fn record_fetched(store: &TrafficStore, report: &CrawlReport) -> Result<usize> {
+fn record_fetched(
+    store: &TrafficStore,
+    report: &CrawlReport,
+    identity: Option<hexora_types::ids::IdentityId>,
+) -> Result<usize> {
     let mut recorded = 0;
     for exchange in &report.fetched {
         let captured = CapturedExchange {
@@ -184,7 +201,7 @@ fn record_fetched(store: &TrafficStore, report: &CrawlReport) -> Result<usize> {
             encoded_body: exchange.encoded_body.clone(),
             content_encoding: exchange.content_encoding.clone(),
             origin: Origin::Crawler.as_str(),
-            identity: None,
+            identity,
             parent: None,
             quirks: Vec::new(),
             tls: exchange.tls.clone(),
@@ -269,8 +286,17 @@ fn nothing_to_crawl(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_plan(seeds: &[String], budget: &CrawlBudget, policy: &CrawlPolicy) {
+fn print_plan(
+    seeds: &[String],
+    budget: &CrawlBudget,
+    policy: &CrawlPolicy,
+    identity: Option<&str>,
+) {
     println!("Crawl plan");
+    println!(
+        "  as:           {}",
+        identity.unwrap_or("unauthenticated")
+    );
     println!("  seeds:        {}", seeds.len());
     for seed in seeds.iter().take(5) {
         println!("    {seed}");
@@ -302,11 +328,17 @@ fn print_plan(seeds: &[String], budget: &CrawlBudget, policy: &CrawlPolicy) {
     println!("Forms are discovered but never submitted. Out-of-scope links are recorded, not fetched.");
 }
 
-fn print_plan_json(seeds: &[String], budget: &CrawlBudget, policy: &CrawlPolicy) {
+fn print_plan_json(
+    seeds: &[String],
+    budget: &CrawlBudget,
+    policy: &CrawlPolicy,
+    identity: Option<&str>,
+) {
     println!(
         "{}",
         serde_json::json!({
             "plan": {
+                "identity": identity,
                 "seeds": seeds,
                 "max_requests": budget.max_requests,
                 "max_depth": budget.max_depth,

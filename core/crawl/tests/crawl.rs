@@ -15,6 +15,7 @@ use hexora_engine::guard::ScopeGuard;
 use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
 use hexora_types::error::Result;
 use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpVersion};
+use hexora_types::identity::Identity;
 use hexora_types::raw::{RawH2Request, RawRequest};
 use hexora_types::scope::{Scope, ScopeRule};
 
@@ -317,4 +318,23 @@ async fn robots_can_be_overridden_loudly() {
         .await;
 
     assert!(fetched_paths(&report).contains(&"/private/x".to_string()));
+}
+
+#[tokio::test]
+async fn crawls_as_a_declared_identity() {
+    let guard = guard_over(MockSite::new().page("/", "text/html", "<p>behind the login</p>"));
+
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .crawling_as(Identity::bearer("User A", "tok123"))
+        .run(["https://site.test/"])
+        .await;
+
+    // The fetched request carried the identity's credential.
+    let request = &report.fetched[0].request;
+    let auth = request
+        .headers
+        .get("authorization")
+        .map(|h| h.value_lossy().into_owned());
+    assert_eq!(auth.as_deref(), Some("Bearer tok123"));
 }

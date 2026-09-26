@@ -809,7 +809,7 @@ STATUS.md as a decision rather than an omission.
 Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
 not an object and an object is not an ownership claim.
 
-**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.c, CR.e DONE)
+**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.e DONE)
 
 The scanner is only as good as what was captured, and today that is exactly what a tester
 proxied — the single largest gap against Burp. A crawler discovers endpoints on its own and
@@ -838,6 +838,13 @@ current attribute-scanning CR.a does not do — it folds into the tag-aware extr
 CR.f rather than being half-built here. -->
 
 | **CR.d** — authenticated crawling | Crawl as a declared identity, reusing the session model (M15.1–15.2), so the crawler reaches behind the login; each fetched exchange records which identity saw it, so coverage is attributable and a crawl as User A versus User B is two maps — feeding the cross-identity work. | CR.b, M15 |
+<!-- CR.d landed: `Crawler::crawling_as(identity)` authenticates every in-scope request
+with the identity's credential (after the programme headers, so the credential wins), and
+`hexora crawl --as <identity>` records each fetched page under that identity. The site map
+already renders the `as: <identity>` column per path, so a crawl as User A and one as User B
+are two attributable maps. Verified end to end: an authenticated crawl's pages show up in
+`hexora sitemap` attributed to the identity. -->
+
 | **CR.e** — the site map | The coverage answer, made visible: a host → path tree in the CLI and the window showing what was fetched, what is out of scope, what forms were found but not submitted, and which identity reached each. And the scanner now has more to scan, because the crawl fed the project — the "empty scan" gap closed. | CR.b |
 <!-- CR.e landed (CLI): `hexora sitemap <project>` prints the host→path tree with methods,
 statuses and the identity that reached each path, lists out-of-scope URLs seen, and with

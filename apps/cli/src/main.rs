@@ -625,6 +625,11 @@ enum Command {
         #[arg(long = "url", value_name = "URL")]
         url: Vec<String>,
 
+        /// Crawl as this identity (label or id), reaching behind the login. Its fetched
+        /// pages are attributed to it, so a crawl as User A and one as User B are two maps.
+        #[arg(long = "as", value_name = "IDENTITY")]
+        identity: Option<String>,
+
         /// The whole crawl's request ceiling.
         #[arg(long, value_name = "N")]
         max_requests: Option<usize>,
@@ -1251,6 +1256,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         Command::Crawl {
             path,
             url,
+            identity,
             max_requests,
             max_depth,
             max_per_host,
@@ -1268,6 +1274,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             crawl::run(crawl::Args {
                 project: path.clone(),
                 seeds: url.clone(),
+                identity: identity.clone(),
                 max_requests: *max_requests,
                 max_depth: *max_depth,
                 max_per_host: *max_per_host,

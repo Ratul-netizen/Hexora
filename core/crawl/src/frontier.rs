@@ -37,6 +37,7 @@ use std::time::Duration;
 use hexora_engine::guard::ScopeGuard;
 use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
 use hexora_types::http::{Header, HttpRequest, HttpService};
+use hexora_types::identity::Identity;
 
 use crate::robots::Robots;
 use crate::{extract, LinkSource};
@@ -234,17 +235,19 @@ pub struct Crawler<'a, T: HttpTransport> {
     budget: CrawlBudget,
     policy: CrawlPolicy,
     attached: Vec<Header>,
+    identity: Option<Identity>,
     cancel: CrawlCancel,
 }
 
 impl<'a, T: HttpTransport> Crawler<'a, T> {
-    /// A crawler over `guard`, with the default budget and cautious policy.
+    /// A crawler over `guard`, with the default budget and cautious policy, unauthenticated.
     pub fn new(guard: &'a ScopeGuard<T>) -> Self {
         Self {
             guard,
             budget: CrawlBudget::default(),
             policy: CrawlPolicy::default(),
             attached: Vec::new(),
+            identity: None,
             cancel: CrawlCancel::new(),
         }
     }
@@ -269,6 +272,15 @@ impl<'a, T: HttpTransport> Crawler<'a, T> {
         self
     }
 
+    /// Crawls as a declared identity: its credential authenticates every in-scope request,
+    /// so the crawl reaches behind the login. The caller records each fetched page under
+    /// this identity, which is what makes a crawl as User A and a crawl as User B two
+    /// attributable maps rather than one.
+    pub fn crawling_as(mut self, identity: Identity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
     /// A handle that stops this crawl. Clone it before [`Self::run`] and set it from a
     /// signal handler to stop cleanly with what has been fetched so far.
     pub fn cancel_handle(&self) -> CrawlCancel {
@@ -290,6 +302,7 @@ impl<'a, T: HttpTransport> Crawler<'a, T> {
         let budget = &self.budget;
         let policy = &self.policy;
         let attached = &self.attached[..];
+        let identity = self.identity.as_ref();
         let guard = self.guard;
         let options = SendOptions::automated(Origin::Crawler);
 
@@ -355,6 +368,11 @@ impl<'a, T: HttpTransport> Crawler<'a, T> {
                     .headers
                     .set(&header.name, header.value_lossy().into_owned());
             }
+            // The identity's credential last, so it wins any collision with a programme
+            // header — the credential decides who the request is from.
+            if let Some(identity) = identity {
+                identity.authenticate(&mut request.headers);
+            }
             if depth > budget.max_depth {
                 skipped.push(Skipped {
                     url,
@@ -396,7 +414,7 @@ impl<'a, T: HttpTransport> Crawler<'a, T> {
         // it is not counted against the ceiling or the per-host cap), then honour it.
         if !policy.ignore_robots {
             if !robots_by_host.contains_key(&host) {
-                let robots = fetch_robots(guard, &service, &options, attached).await;
+                let robots = fetch_robots(guard, &service, &options, attached, identity).await;
                 robots_by_host.insert(host.clone(), robots);
             }
             if let Some(robots) = robots_by_host.get(&host) {
@@ -470,6 +488,7 @@ async fn fetch_robots<T: HttpTransport>(
     service: &HttpService,
     options: &SendOptions,
     attached: &[Header],
+    identity: Option<&Identity>,
 ) -> Robots {
     let mut request = HttpRequest::get(service.clone(), "/robots.txt");
     request.headers.set("User-Agent", CRAWLER_USER_AGENT);
@@ -480,6 +499,9 @@ async fn fetch_robots<T: HttpTransport>(
         request
             .headers
             .set(&header.name, header.value_lossy().into_owned());
+    }
+    if let Some(identity) = identity {
+        identity.authenticate(&mut request.headers);
     }
     match guard.send(request, options.clone()).await {
         Ok(exchange) if exchange.response.is_success() => {
