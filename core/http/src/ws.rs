@@ -21,9 +21,18 @@
 //! records what it *observed* rather than normalising it, because a client that does not
 //! mask, or a server that does, is a finding — not a detail to smooth over.
 
-use bytes::BytesMut;
+use std::time::Duration;
 
-use hexora_types::error::{HexoraError, ProtocolError, Result};
+use base64::Engine as _;
+use bytes::BytesMut;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpStream;
+
+use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result};
+use hexora_types::http::HttpService;
+use hexora_types::limits::Limits;
+
+use crate::tls::TlsConfig;
 
 /// A WebSocket opcode (the low nibble of the first byte).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +267,199 @@ pub fn encode(frame: &Frame, mask_key: Option<[u8; 4]>) -> Vec<u8> {
     out
 }
 
+/// A byte stream a WebSocket connection can own, plain or TLS.
+trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
+
+/// A live WebSocket connection Hexora opened as a client — the engine behind the WebSocket
+/// repeater (WS.d).
+///
+/// It performs the `101` handshake, then holds the connection open so a tester can send a
+/// message on demand and read what comes back, rather than the request/response of the rest
+/// of the tool. Frames it sends are masked, as a client's must be.
+pub struct WsConnection {
+    stream: Box<dyn Duplex>,
+    parser: FrameParser,
+}
+
+impl std::fmt::Debug for WsConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WsConnection").finish_non_exhaustive()
+    }
+}
+
+/// Opens a WebSocket to `service` at `path`, returning the live connection.
+///
+/// The handshake is a real `GET` with the WebSocket headers and a fresh key; a server that
+/// answers anything but `101 Switching Protocols` is an error. The response's
+/// `Sec-WebSocket-Accept` is not recomputed and checked — a deliberate first cut: the `101`
+/// and the upgrade are the signal a tester is sending into, and strict verification is not
+/// needed to send. Nothing here is a scope decision; the caller checks scope before opening.
+pub async fn connect(
+    service: &HttpService,
+    path: &str,
+    tls: &TlsConfig,
+    limits: &Limits,
+) -> Result<WsConnection> {
+    let key = base64::engine::general_purpose::STANDARD.encode(fresh_key());
+    let target = if path.is_empty() { "/" } else { path };
+    let handshake = format!(
+        "GET {target} HTTP/1.1\r\nHost: {}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        service.authority()
+    );
+
+    let tcp = TcpStream::connect((service.host.as_str(), service.port))
+        .await
+        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+    let mut stream: Box<dyn Duplex> = if service.secure {
+        let (tls_stream, _info) = crate::tls::handshake(tcp, &service.host, tls, limits).await?;
+        Box::new(tls_stream)
+    } else {
+        Box::new(tcp)
+    };
+
+    stream
+        .write_all(handshake.as_bytes())
+        .await
+        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+    stream.flush().await.ok();
+
+    let (head, rest) = read_response_head(&mut stream, limits).await?;
+    if parse_status(&head) != Some(101) {
+        return Err(HexoraError::Protocol(ProtocolError::Malformed {
+            protocol: "WebSocket",
+            reason: "the server did not accept the WebSocket upgrade (no 101)".to_string(),
+        }));
+    }
+
+    let mut parser = FrameParser::new(limits.max_body_bytes.min(usize::MAX as u64) as usize);
+    parser.push(&rest); // frames the server sent alongside the 101
+    Ok(WsConnection { stream, parser })
+}
+
+impl WsConnection {
+    /// Sends one message frame, masked as a client frame must be.
+    pub async fn send(&mut self, opcode: Opcode, payload: &[u8]) -> Result<()> {
+        let bytes = encode(
+            &Frame {
+                fin: true,
+                rsv1: false,
+                opcode,
+                masked: true,
+                payload: payload.to_vec(),
+            },
+            Some(fresh_mask()),
+        );
+        self.stream
+            .write_all(&bytes)
+            .await
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        self.stream.flush().await.ok();
+        Ok(())
+    }
+
+    /// Sends a text message.
+    pub async fn send_text(&mut self, text: &str) -> Result<()> {
+        self.send(Opcode::Text, text.as_bytes()).await
+    }
+
+    /// Reads the next frame, or `None` when the connection closes or `timeout` elapses with
+    /// nothing more to read.
+    pub async fn recv(&mut self, timeout: Duration) -> Result<Option<Frame>> {
+        loop {
+            if let Some(frame) = self.parser.next_frame()? {
+                return Ok(Some(frame));
+            }
+            let mut buf = [0u8; 8192];
+            let read = tokio::time::timeout(timeout, self.stream.read(&mut buf)).await;
+            let n = match read {
+                Ok(Ok(0)) => return Ok(None),        // closed
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => return Err(HexoraError::Network(NetworkError::Io(e.to_string()))),
+                Err(_) => return Ok(None),           // timed out: nothing more for now
+            };
+            self.parser.push(&buf[..n]);
+        }
+    }
+
+    /// Sends a close frame.
+    pub async fn close(&mut self) -> Result<()> {
+        let _ = self.send(Opcode::Close, &[]).await;
+        Ok(())
+    }
+}
+
+/// Reads a response head (through the blank line), returning it and any bytes past it.
+async fn read_response_head<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    limits: &Limits,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let mut buf = BytesMut::new();
+    let deadline = tokio::time::Instant::now() + limits.read_head_timeout;
+    loop {
+        if let Some(end) = crate::parse::find_head_end(&buf) {
+            let rest = buf.split_off(end);
+            return Ok((buf.to_vec(), rest.to_vec()));
+        }
+        limits.check_header_size(buf.len())?;
+        let before = buf.len();
+        buf.resize(before + 4096, 0);
+        let n = tokio::time::timeout_at(deadline, stream.read(&mut buf[before..]))
+            .await
+            .map_err(|_| {
+                HexoraError::Network(NetworkError::Timeout {
+                    phase: hexora_types::error::TimeoutPhase::ReadResponseHead,
+                    elapsed: limits.read_head_timeout,
+                })
+            })?
+            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        buf.truncate(before + n);
+        if n == 0 {
+            return Err(HexoraError::Protocol(ProtocolError::Malformed {
+                protocol: "WebSocket",
+                reason: "the server closed the connection during the handshake".to_string(),
+            }));
+        }
+    }
+}
+
+/// Reads the status code from a response head's first line.
+fn parse_status(head: &[u8]) -> Option<u16> {
+    std::str::from_utf8(head)
+        .ok()?
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+/// A 16-byte handshake key. Time-derived rather than crypto-random: a client key need only
+/// be present and distinct, and the server echoes it via `Sec-WebSocket-Accept`.
+fn fresh_key() -> [u8; 16] {
+    let seed = seed();
+    let mut key = [0u8; 16];
+    for (i, byte) in key.iter_mut().enumerate() {
+        *byte = (seed.rotate_left((i as u32) * 8) as u8) ^ (i as u8).wrapping_mul(31);
+    }
+    key
+}
+
+/// A 4-byte masking key, likewise time-derived.
+fn fresh_mask() -> [u8; 4] {
+    (seed() as u32 ^ (seed() as u32).rotate_left(13)).to_ne_bytes()
+}
+
+fn seed() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +564,108 @@ mod tests {
         header.extend_from_slice(&(1u64 << 40).to_be_bytes());
         parser.push(&header);
         assert!(parser.next_frame().is_err(), "a huge declared length is refused");
+    }
+
+    /// A local WebSocket echo server: accepts one connection, answers 101, and echoes each
+    /// text frame back as an unmasked server frame.
+    async fn ws_echo_server() -> u16 {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+
+            // Read the handshake head, then accept.
+            let mut buf = BytesMut::new();
+            let mut scratch = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut scratch).await.unwrap();
+                buf.extend_from_slice(&scratch[..n]);
+                if crate::parse::find_head_end(&buf).is_some() || n == 0 {
+                    break;
+                }
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\
+                      Connection: Upgrade\r\nSec-WebSocket-Accept: test\r\n\r\n",
+                )
+                .await
+                .unwrap();
+
+            // Echo frames.
+            let mut parser = FrameParser::new(1 << 20);
+            loop {
+                if let Ok(Some(frame)) = parser.next_frame() {
+                    if frame.opcode == Opcode::Text {
+                        let reply = encode(
+                            &Frame {
+                                fin: true,
+                                rsv1: false,
+                                opcode: Opcode::Text,
+                                masked: false,
+                                payload: frame.payload,
+                            },
+                            None,
+                        );
+                        let _ = socket.write_all(&reply).await;
+                        let _ = socket.flush().await;
+                    }
+                    continue;
+                }
+                let n = match socket.read(&mut scratch).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                parser.push(&scratch[..n]);
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn the_client_connects_sends_and_receives() {
+        let port = ws_echo_server().await;
+        let service = HttpService::new("127.0.0.1", port, false);
+
+        let mut connection = connect(&service, "/echo", &TlsConfig::verified(), &Limits::default())
+            .await
+            .expect("the client completes the handshake");
+
+        connection.send_text("hello over websocket").await.unwrap();
+
+        let frame = connection
+            .recv(std::time::Duration::from_secs(2))
+            .await
+            .unwrap()
+            .expect("the echo comes back");
+        assert_eq!(frame.opcode, Opcode::Text);
+        assert_eq!(frame.payload, b"hello over websocket");
+        assert!(!frame.masked, "a server frame is not masked");
+
+        connection.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_server_that_does_not_upgrade_is_an_error() {
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut scratch = [0u8; 4096];
+            let _ = socket.read(&mut scratch).await;
+            let _ = socket
+                .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+                .await;
+        });
+
+        let service = HttpService::new("127.0.0.1", port, false);
+        let error = connect(&service, "/", &TlsConfig::verified(), &Limits::default())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "protocol");
     }
 
     proptest! {

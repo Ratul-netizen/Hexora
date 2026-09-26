@@ -1664,6 +1664,7 @@ name = "hexora-http"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.21.7",
  "brotli 7.0.0",
  "bytes",
  "flate2",

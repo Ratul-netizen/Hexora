@@ -610,13 +610,9 @@ enum Command {
         no_poc: bool,
     },
 
-    /// List captured WebSocket sessions, or show one's message timeline.
-    Ws {
-        /// Project directory.
-        path: PathBuf,
-        /// A session id to show its timeline; omit to list sessions.
-        id: Option<String>,
-    },
+    /// Captured WebSocket sessions, and the WebSocket repeater.
+    #[command(subcommand)]
+    Ws(WsCommand),
 
     /// Show the active licence, or activate one.
     #[command(subcommand)]
@@ -624,6 +620,38 @@ enum Command {
 
     /// Print version and build information.
     Version,
+}
+
+/// `hexora ws` subcommands.
+#[derive(Debug, Subcommand)]
+enum WsCommand {
+    /// List the captured WebSocket sessions.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Show a session's message timeline.
+    Show {
+        /// Project directory.
+        path: PathBuf,
+        /// The session id.
+        id: String,
+    },
+    /// Connect to a target and send a message (the WebSocket repeater).
+    Send {
+        /// Project directory.
+        path: PathBuf,
+        /// The target `wss://` or `ws://` URL.
+        url: String,
+        /// A text message to send; omit to open and just listen.
+        message: Option<String>,
+        /// How long to listen for replies, in milliseconds.
+        #[arg(long, default_value_t = 2000)]
+        listen_ms: u64,
+        /// Accept invalid TLS certificates for the target.
+        #[arg(long)]
+        insecure: bool,
+    },
 }
 
 /// `hexora license` subcommands.
@@ -1141,7 +1169,15 @@ fn real_main() -> ExitCode {
 
 fn run(cli: &Cli) -> hexora_types::Result<()> {
     match &cli.command {
-        Command::Ws { path, id } => ws::run(path, id.as_deref(), cli.json),
+        Command::Ws(WsCommand::List { path }) => ws::list(path, cli.json),
+        Command::Ws(WsCommand::Show { path, id }) => ws::show(path, id, cli.json),
+        Command::Ws(WsCommand::Send {
+            path,
+            url,
+            message,
+            listen_ms,
+            insecure,
+        }) => ws::send(path, url, message.as_deref(), *listen_ms, *insecure, cli.json),
         Command::License(LicenseCommand::Show) => license::show(cli.json),
         Command::License(LicenseCommand::Activate { file }) => license::activate(file, cli.json),
         Command::License(LicenseCommand::Trial) => license::trial(cli.json),

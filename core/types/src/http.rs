@@ -287,12 +287,14 @@ impl HttpService {
 
         let (secure, rest) = match trimmed.split_once("://") {
             Some((scheme, rest)) => match scheme.to_ascii_lowercase().as_str() {
-                "https" => (true, rest),
-                "http" => (false, rest),
+                // `wss`/`ws` are the WebSocket schemes; they ride on TLS / plaintext exactly
+                // as `https`/`http` do, and the connection target is the same.
+                "https" | "wss" => (true, rest),
+                "http" | "ws" => (false, rest),
                 other => {
                     return Err(crate::HexoraError::invalid_input(
                         "url",
-                        format!("scheme {other:?} is not http or https"),
+                        format!("scheme {other:?} is not http(s) or ws(s)"),
                     ))
                 }
             },
@@ -535,6 +537,16 @@ mod tests {
         let (service, path) = HttpService::parse_url("http://localhost:8080/app").unwrap();
         assert_eq!(service, HttpService::new("localhost", 8080, false));
         assert_eq!(path, "/app");
+    }
+
+    #[test]
+    fn parse_url_accepts_the_websocket_schemes() {
+        let (service, path) = HttpService::parse_url("wss://chat.example.com/socket").unwrap();
+        assert_eq!(service, HttpService::new("chat.example.com", 443, true));
+        assert_eq!(path, "/socket");
+
+        let (service, _) = HttpService::parse_url("ws://localhost:8080/ws").unwrap();
+        assert_eq!(service, HttpService::new("localhost", 8080, false));
     }
 
     #[test]
