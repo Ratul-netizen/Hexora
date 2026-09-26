@@ -627,6 +627,8 @@ enum LicenseCommand {
         /// The licence file to activate.
         file: PathBuf,
     },
+    /// Start a time-limited Pro trial on this machine.
+    Trial,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1132,6 +1134,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
     match &cli.command {
         Command::License(LicenseCommand::Show) => license::show(cli.json),
         Command::License(LicenseCommand::Activate { file }) => license::activate(file, cli.json),
+        Command::License(LicenseCommand::Trial) => license::trial(cli.json),
         Command::Version => {
             print_version(cli.json);
             Ok(())

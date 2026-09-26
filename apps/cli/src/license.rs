@@ -35,20 +35,35 @@ pub fn show(json: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("Tier: {}", entitlements.tier.label());
+    println!(
+        "Tier: {}{}",
+        entitlements.tier.label(),
+        if entitlements.trial { " (trial)" } else { "" }
+    );
     if !entitlements.licensee.is_empty() {
         println!("Licensed to: {}", entitlements.licensee);
     }
-    match &expires {
-        Some(at) => println!("Expires: {at}"),
-        None if entitlements.tier == Tier::Free => {}
-        None => println!("Expires: never"),
+    match (&expires, entitlements.days_until_expiry(chrono::Utc::now())) {
+        (Some(at), Some(days)) => {
+            println!("Expires: {at} ({days} days)");
+            // Loud before it lapses, not only after — a tester mid-engagement should have
+            // warning, and the fall to free afterwards never locks their evidence.
+            if days <= 7 {
+                let what = if entitlements.trial { "trial" } else { "licence" };
+                println!("  warning: this {what} expires in {days} days; it will fall back to the free tier");
+            }
+        }
+        (Some(at), None) => println!("Expires: {at}"),
+        (None, _) if entitlements.tier == Tier::Free => {}
+        (None, _) => println!("Expires: never"),
     }
     match path {
         Some(path) if path.exists() => println!("Licence file: {}", path.display()),
+        // A trial grants a tier without a signed file; say so rather than claiming free.
+        _ if entitlements.trial => println!("No signed licence — this tier is from a trial."),
         Some(path) => println!(
             "No licence file at {} — running at the free tier. Activate one with \
-             `hexora license activate <file>`.",
+             `hexora license activate <file>`, or start a trial with `hexora license trial`.",
             path.display()
         ),
         None => println!("Running at the free tier."),
@@ -104,6 +119,31 @@ pub fn activate(file: &Path, json: bool) -> Result<()> {
                 format!(" for {}", entitlements.licensee)
             },
             path.display()
+        );
+    }
+    Ok(())
+}
+
+/// `hexora license trial` — start a time-limited Pro trial.
+pub fn trial(json: bool) -> Result<()> {
+    let entitlements = hexora_engine::license::start_trial(chrono::Utc::now())?;
+    let expires = entitlements
+        .expires
+        .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+
+    if json {
+        let payload = serde_json::json!({
+            "trial": true,
+            "tier": entitlements.tier.label(),
+            "expires": expires,
+        });
+        println!("{payload}");
+    } else {
+        println!(
+            "Started a {}-day {} trial{}.",
+            hexora_engine::license::TRIAL_DAYS,
+            entitlements.tier.label(),
+            expires.map(|at| format!(", through {at}")).unwrap_or_default()
         );
     }
     Ok(())

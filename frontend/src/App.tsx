@@ -159,12 +159,15 @@ export default function App() {
               title={
                 license.tier === "Free"
                   ? "Free tier — the active scanner, intruder, SARIF export and retest snapshots need Pro"
-                  : license.licensee
-                    ? `Licensed to ${license.licensee}`
-                    : `${license.tier} tier`
+                  : license.days_until_expiry !== null && license.days_until_expiry <= 7
+                    ? `Expires in ${license.days_until_expiry} days — falls back to the free tier`
+                    : license.licensee
+                      ? `Licensed to ${license.licensee}`
+                      : `${license.tier} tier`
               }
             >
               {license.tier}
+              {license.trial ? " · trial" : ""}
             </span>
           )}
           {project && <span className="chip">{project.name}</span>}

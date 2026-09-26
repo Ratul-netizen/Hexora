@@ -201,6 +201,8 @@ export interface LicenseStatus {
   tier: string;
   licensee: string;
   expires: string | null;
+  trial: boolean;
+  days_until_expiry: number | null;
 }
 
 export const licenseStatus = (): Promise<LicenseStatus> =>

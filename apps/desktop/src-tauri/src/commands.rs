@@ -63,7 +63,7 @@ fn gate() -> hexora_engine::license::EntitlementGate {
     hexora_engine::license::EntitlementGate::from_default_location(chrono::Utc::now())
 }
 
-/// The current licence, for the window's licence panel.
+/// The current licence, for the window's licence chip.
 #[derive(Debug, Clone, Serialize)]
 pub struct LicenseStatus {
     /// `Free`, `Pro` or `Enterprise`.
@@ -72,12 +72,17 @@ pub struct LicenseStatus {
     pub licensee: String,
     /// RFC 3339 expiry, if any.
     pub expires: Option<String>,
+    /// Whether the tier comes from a trial rather than a paid licence.
+    pub trial: bool,
+    /// Whole days until expiry, for a "renew soon" warning; `None` when perpetual.
+    pub days_until_expiry: Option<i64>,
 }
 
 /// Reports the licence tier this install is running at.
 #[tauri::command]
 pub fn license_status() -> LicenseStatus {
     let gate = gate();
+    let now = chrono::Utc::now();
     let entitlements = gate.entitlements();
     LicenseStatus {
         tier: entitlements.tier.label().to_string(),
@@ -85,6 +90,8 @@ pub fn license_status() -> LicenseStatus {
         expires: entitlements
             .expires
             .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+        trial: entitlements.trial,
+        days_until_expiry: entitlements.days_until_expiry(now),
     }
 }
 

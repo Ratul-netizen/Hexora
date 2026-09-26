@@ -146,6 +146,8 @@ pub struct Entitlements {
     pub licensee: String,
     /// When the licence expires, if it does. `None` is a perpetual licence.
     pub expires: Option<DateTime<Utc>>,
+    /// Whether this tier comes from a time-limited trial rather than a paid licence.
+    pub trial: bool,
 }
 
 impl Entitlements {
@@ -155,12 +157,21 @@ impl Entitlements {
             tier: Tier::Free,
             licensee: String::new(),
             expires: None,
+            trial: false,
         }
     }
 
     /// Whether this entitlement includes `feature`.
     pub fn allows(&self, feature: Feature) -> bool {
         self.tier.rank() >= feature.min_tier().rank()
+    }
+
+    /// Whole days until the entitlement expires, or `None` for a perpetual one.
+    ///
+    /// Negative once expired, though the gate degrades to free before that shows. Used to
+    /// warn a tester *before* a licence or trial lapses rather than only after.
+    pub fn days_until_expiry(&self, now: DateTime<Utc>) -> Option<i64> {
+        self.expires.map(|at| (at - now).num_days())
     }
 }
 
@@ -234,13 +245,29 @@ impl EntitlementGate {
         }
     }
 
-    /// Builds a gate from the licence at the default location, or the free tier if there is
-    /// none. This is what an app calls at startup — one place resolves the path.
+    /// Builds a gate from the licence at the default location, then an active trial, else
+    /// the free tier. This is what an app calls at startup — one place resolves it all.
+    ///
+    /// A signed paid licence wins; if there is none, an unexpired trial grants Pro; otherwise
+    /// free. An expired trial simply stops granting — the marker stays, which is what stops a
+    /// second trial being started.
     pub fn from_default_location(now: DateTime<Utc>) -> Self {
-        match default_license_path() {
-            Some(path) => Self::from_license_file(&path, now),
-            None => Self::free(),
+        if let Some(path) = default_license_path() {
+            if path.exists() {
+                let gate = Self::from_license_file(&path, now);
+                if gate.entitlements.tier != Tier::Free {
+                    return gate;
+                }
+            }
         }
+
+        if let Some(trial) = active_trial(now) {
+            return Self {
+                entitlements: trial,
+            };
+        }
+
+        Self::free()
     }
 
     /// The entitlements in force.
@@ -294,6 +321,88 @@ pub fn default_license_path() -> Option<std::path::PathBuf> {
     base.map(|dir| dir.join("hexora").join("license.json"))
 }
 
+/// How long a trial lasts.
+pub const TRIAL_DAYS: i64 = 14;
+
+/// Where the trial marker lives — beside the licence, so both are per-user.
+pub fn default_trial_path() -> Option<std::path::PathBuf> {
+    default_license_path().and_then(|p| p.parent().map(|dir| dir.join("trial.json")))
+}
+
+/// The trial marker: when it started and when it ends.
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+struct TrialMarker {
+    started: DateTime<Utc>,
+    expires: DateTime<Utc>,
+}
+
+/// The Pro entitlement a trial grants, expiring at `expires`.
+fn trial_entitlements(expires: DateTime<Utc>) -> Entitlements {
+    Entitlements {
+        tier: Tier::Pro,
+        licensee: "Trial".to_string(),
+        expires: Some(expires),
+        trial: true,
+    }
+}
+
+/// The active trial at the default location, if any.
+///
+/// A trial grants Pro. It is a local, unsigned marker — trivially removable, which is fine:
+/// a trial deters, it does not enforce, and the honest anti-abuse is that starting a second
+/// one is refused while the marker is there, not that the marker cannot be deleted.
+fn active_trial(now: DateTime<Utc>) -> Option<Entitlements> {
+    active_trial_at(&default_trial_path()?, now)
+}
+
+/// The active trial recorded at `path`, if the marker exists and has not expired.
+fn active_trial_at(path: &Path, now: DateTime<Utc>) -> Option<Entitlements> {
+    let bytes = std::fs::read(path).ok()?;
+    let marker: TrialMarker = serde_json::from_slice(&bytes).ok()?;
+    if now > marker.expires {
+        return None;
+    }
+    Some(trial_entitlements(marker.expires))
+}
+
+/// Starts a [`TRIAL_DAYS`]-day Pro trial at the default location.
+pub fn start_trial(now: DateTime<Utc>) -> Result<Entitlements> {
+    let path = default_trial_path().ok_or_else(|| {
+        HexoraError::Internal("could not determine where to store the trial".into())
+    })?;
+    start_trial_at(&path, now)
+}
+
+/// Writes a trial marker at `path`, refusing if one is already there.
+///
+/// The marker's presence is the record, so an expired trial cannot be restarted without
+/// deleting the file — the deterrent a trial is entitled to, and no more.
+fn start_trial_at(path: &Path, now: DateTime<Utc>) -> Result<Entitlements> {
+    if path.exists() {
+        return Err(HexoraError::invalid_input(
+            "trial",
+            "a trial has already been started on this machine",
+        ));
+    }
+
+    let expires = now + chrono::Duration::days(TRIAL_DAYS);
+    let marker = TrialMarker {
+        started: now,
+        expires,
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            HexoraError::invalid_input("trial", format!("{}: {e}", parent.display()))
+        })?;
+    }
+    let json = serde_json::to_vec_pretty(&marker)
+        .map_err(|e| HexoraError::Internal(format!("serialising the trial marker: {e}")))?;
+    std::fs::write(path, json)
+        .map_err(|e| HexoraError::invalid_input("trial", format!("{}: {e}", path.display())))?;
+
+    Ok(trial_entitlements(expires))
+}
+
 /// Verifies a licence and returns its entitlements, or a short reason it was rejected.
 fn verify(license: &[u8], verifying_key: &[u8], now: DateTime<Utc>) -> std::result::Result<Entitlements, &'static str> {
     let file: LicenceFile = serde_json::from_slice(license).map_err(|_| "the licence file is not valid JSON")?;
@@ -329,6 +438,7 @@ fn verify(license: &[u8], verifying_key: &[u8], now: DateTime<Utc>) -> std::resu
         tier,
         licensee: claims.licensee,
         expires,
+        trial: false,
     })
 }
 
@@ -444,6 +554,48 @@ mod tests {
         let licence = issuer.issue(r#"{"tier":"enterprise"}"#);
         let gate = EntitlementGate::from_license(&licence, &EMBEDDED_LICENSE_KEY, now());
         assert_eq!(gate.entitlements().tier, Tier::Free);
+    }
+
+    #[test]
+    fn a_trial_grants_pro_until_it_expires() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("trial.json");
+
+        let started = start_trial_at(&marker, now()).unwrap();
+        assert_eq!(started.tier, Tier::Pro);
+        assert!(started.trial);
+        assert!(started.allows(Feature::ActiveScanner));
+
+        // Active while inside the window, gone once past it.
+        assert!(active_trial_at(&marker, now()).is_some());
+        let after = now() + chrono::Duration::days(TRIAL_DAYS + 1);
+        assert!(active_trial_at(&marker, after).is_none());
+    }
+
+    #[test]
+    fn a_second_trial_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("trial.json");
+
+        start_trial_at(&marker, now()).unwrap();
+        // Even after it expires, the marker's presence refuses a fresh trial.
+        let later = now() + chrono::Duration::days(TRIAL_DAYS + 30);
+        let error = start_trial_at(&marker, later).unwrap_err();
+        assert_eq!(error.code(), "invalid_input");
+    }
+
+    #[test]
+    fn days_until_expiry_counts_down() {
+        let expires = now() + chrono::Duration::days(3);
+        let ent = Entitlements {
+            tier: Tier::Pro,
+            licensee: String::new(),
+            expires: Some(expires),
+            trial: false,
+        };
+        assert_eq!(ent.days_until_expiry(now()), Some(3));
+        // A perpetual entitlement has no countdown.
+        assert_eq!(Entitlements::free().days_until_expiry(now()), None);
     }
 
     #[test]
