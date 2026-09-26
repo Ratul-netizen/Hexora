@@ -36,6 +36,7 @@ mod scan;
 mod scope;
 mod send;
 mod setup;
+mod sitemap;
 mod snapshot;
 mod ws;
 
@@ -665,6 +666,25 @@ enum Command {
         no_save: bool,
     },
 
+    /// Show a host → path coverage tree of what the project has reached.
+    ///
+    /// Read-only: it maps the traffic already captured — what was fetched, under which
+    /// methods and statuses, which identity reached each path, and what is out of scope.
+    /// With --forms it also lists forms that were discovered but never submitted. This is
+    /// the payoff of a crawl: the pages it fetched show up here.
+    Sitemap {
+        /// Project directory.
+        path: PathBuf,
+
+        /// Show only this host (bare host or host:port).
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+
+        /// Read HTML bodies to list discovered forms. Off by default.
+        #[arg(long)]
+        forms: bool,
+    },
+
     /// Captured WebSocket sessions, and the WebSocket repeater.
     #[command(subcommand)]
     Ws(WsCommand),
@@ -1261,6 +1281,12 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 json: cli.json,
             })
         }
+        Command::Sitemap { path, host, forms } => sitemap::run(sitemap::Args {
+            project: path.clone(),
+            host: host.clone(),
+            forms: *forms,
+            json: cli.json,
+        }),
         Command::Ws(WsCommand::List { path }) => ws::list(path, cli.json),
         Command::Ws(WsCommand::Show { path, id }) => ws::show(path, id, cli.json),
         Command::Ws(WsCommand::Send {

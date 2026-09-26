@@ -809,7 +809,7 @@ STATUS.md as a decision rather than an omission.
 Deliberately not built: inferring ownership. Invariant 10 still holds — a suggestion is
 not an object and an object is not an ownership claim.
 
-**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.c DONE)
+**M13.8 — Crawler and coverage** · IN PROGRESS (CR.a–CR.c, CR.e DONE)
 
 The scanner is only as good as what was captured, and today that is exactly what a tester
 proxied — the single largest gap against Burp. A crawler discovers endpoints on its own and
@@ -839,6 +839,14 @@ CR.f rather than being half-built here. -->
 
 | **CR.d** — authenticated crawling | Crawl as a declared identity, reusing the session model (M15.1–15.2), so the crawler reaches behind the login; each fetched exchange records which identity saw it, so coverage is attributable and a crawl as User A versus User B is two maps — feeding the cross-identity work. | CR.b, M15 |
 | **CR.e** — the site map | The coverage answer, made visible: a host → path tree in the CLI and the window showing what was fetched, what is out of scope, what forms were found but not submitted, and which identity reached each. And the scanner now has more to scan, because the crawl fed the project — the "empty scan" gap closed. | CR.b |
+<!-- CR.e landed (CLI): `hexora sitemap <project>` prints the host→path tree with methods,
+statuses and the identity that reached each path, lists out-of-scope URLs seen, and with
+--forms lists forms discovered-but-never-submitted (reusing CR.a over captured HTML). The
+pure builder is `hexora_crawl::SiteMap::build(pages, scope)`, decoupled from storage so the
+desktop window can reuse the same function. The window view itself is the remaining half,
+deferred to the desktop surface. Note: adding Origin::Crawler required 'crawler' in the
+requests.origin CHECK (migration 0001) — caught by the crawl→sitemap end-to-end run. -->
+
 | **CR.f** — hardening and JS-rendered discovery | The HTML/URL extractor fuzzed on hostile bytes (the panic surface, like the HPACK and WebSocket parsers), a per-host budget the scheduler enforces, and the decision on **JS-rendered endpoints**: a static extractor misses SPA routes and XHR that only exist after JavaScript runs, so this **merges with browser integration (M18)** — driving a real browser over CDP, the approach ZAP's Client Spider adopted in 2026 — rather than being built twice. A static crawl reports honestly that a JS app needs the browser. | CR.a–e, M18 |
 
 **Decisions to lock first.** The crawler is a *producer* for the scheduler, not a second sender

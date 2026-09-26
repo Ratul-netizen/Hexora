@@ -28,10 +28,12 @@ use hexora_types::http::HttpService;
 
 pub mod frontier;
 pub mod robots;
+pub mod sitemap;
 pub use frontier::{
     CrawlBudget, CrawlCancel, CrawlPolicy, CrawlReport, CrawlStop, Crawler, SkipReason, Skipped,
     CRAWLER_USER_AGENT,
 };
+pub use sitemap::{CapturedPage, FormEntry, HostMap, PathEntry, SiteMap};
 
 /// The largest response body the extractor will scan, and the most links it will return.
 ///

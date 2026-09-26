@@ -88,8 +88,8 @@ CREATE TABLE requests (
     endpoint_id     TEXT REFERENCES endpoints(id) ON DELETE SET NULL,
     -- Which subsystem produced this request.
     origin          TEXT NOT NULL CHECK (origin IN
-                        ('proxy', 'repeater', 'scanner', 'fuzzer', 'workflow',
-                         'extension', 'import', 'authz')),
+                        ('proxy', 'repeater', 'scanner', 'crawler', 'fuzzer',
+                         'workflow', 'extension', 'import', 'authz')),
     identity_id     TEXT REFERENCES identities(id) ON DELETE SET NULL,
     -- Repeater request branching: a variant points at the request it derives from.
     parent_id       TEXT REFERENCES requests(id) ON DELETE SET NULL,
