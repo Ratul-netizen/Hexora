@@ -877,6 +877,53 @@ audit.
 
 ---
 
+## Commercialization — the plumbing to sell it
+
+The product is ahead of the business plumbing: there is a great deal to sell and no way to
+charge for it. Nothing in the tree does licensing, entitlement or paid-tier gating today.
+This track adds that, and the distribution a paid tool needs, without giving up the honesty
+the rest of the codebase keeps.
+
+**Two things are decided before any code.** The workspace is **AGPL-3.0**; selling closed
+Pro features on top of it is an *open-core* arrangement that needs a **commercial dual
+licence** and a **contributor licence agreement** in place before outside contributions
+arrive — retrofitting a CLA is far harder than starting with one. And the free/paid split is
+a product decision, not an engineering one: the shape below is a proposal, not a commitment.
+
+**An entitlement is a capability grant, and the codebase already has that pattern.**
+`core/engine/src/permission.rs` orders capabilities by implication and marks the dangerous
+ones; the AI `ToolGate` classifies a call at one boundary. An entitlement gate is the same
+shape — features ask "am I entitled to X?" at one chokepoint, the way automated traffic asks
+the scope guard — and a denial is **explicit** ("Repeater collections need Pro"), never a
+silent failure. Two principles are non-negotiable for *this* tool: licensing is
+**offline-first** (pentesters work air-gapped; a launch that phones home is a non-starter),
+so entitlements come from an **Ed25519-signed licence file verified against an embedded
+public key**, not a server check; and an expired licence **never locks a tester's evidence**
+— it degrades to a free read-and-report tier, it does not brick a live engagement.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **LIC.0** — the split and the licence (decision, not code) | The open-core boundary (which features are commercial), the AGPL + commercial dual licence, and a CLA in place before external contributions. A prerequisite, recorded so it is not skipped. | — |
+| **LIC.a** — the entitlement model and gate | An `Entitlements` value (tier, expiry, feature set) read from an Ed25519-signed licence file with an embedded public key — offline, no phone-home. A gate mirroring the capability/scope-guard pattern: one chokepoint, explicit denials, and a missing or expired licence falling back to the free tier rather than failing. | permission.rs precedent |
+| **LIC.b** — gating applied, and the free/pro split | The gate wired into real features under a defined split — core interception, repeater and reporting free; the active scanner, intruder at scale, SARIF/CI export and retest snapshots as paid, say — each gated feature naming its tier. `hexora license show|activate` and a desktop licence panel. | LIC.a |
+| **LIC.c** — trials, activation, and grace | A time-limited trial, in-app licence entry, an offline activation flow, and expiry handling that is loud before and graceful after — degrading to read-and-report, never locking evidence mid-engagement. | LIC.b |
+| **LIC.d** — signed, auto-updating installers | Authenticode-signed Windows installers, macOS notarization and Linux packages through the Tauri bundler; the Tauri updater with signature verification; and a release CI workflow — today CI only builds the CLI. Unsigned security tools do not get adopted (see Platform support). | Tauri bundle config |
+| **LIC.e** — supply-chain and release integrity | `cargo-audit` and `cargo-deny` in CI, an SBOM, and signed checksums on release artifacts — the things enterprise procurement asks for. `cargo-audit` is already installed locally; this wires it into the pipeline. | LIC.d |
+
+**The honesty this track must keep.** Client-side licensing deters casual sharing; it does
+not stop a determined attacker who can patch a binary, and the docs say so plainly rather
+than implying DRM the tool does not have. Hard, unbypassable enforcement lives server-side,
+which is the **M22** team/server track — the natural sequel to this one. And the licence
+signing key is the most sensitive thing this track introduces after the interception CA: its
+storage and rotation get a runbook, not a line in a script.
+
+**Sequencing.** LIC.0 is a decision to make now. a→b is the smallest path to actually
+charging money (a gate and a split); c makes the paid experience humane; d and e make it
+feel enterprise-grade and pass procurement. It is the shortest route from "a strong tool" to
+"a tool with a price", and it does not need another protocol first.
+
+---
+
 ## Platform support
 
 | Platform | Status | Notes |
