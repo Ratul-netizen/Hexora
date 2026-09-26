@@ -4,12 +4,18 @@
 only file that needs to be current for you to resume. Updated at the end of every
 milestone.
 
-- **Last updated:** M15.4, after an evening against a real bug bounty target.
-  `auth.enforcement` went 23 findings → 0, every one of them false; the identifier
-  analyzer stopped offering `boolean` as an object identifier, and then had to be
-  stopped from targeting the real restaurants it correctly found
+- **Last updated:** M5.1 — **HTTP/2 is done, end to end.** Hexora reaches h2 targets
+  (conforming client, pooled and multiplexed), proxies h2 from the browser (demultiplexing
+  streams, forwarding over the origin's negotiated protocol and surfacing the h2→h1
+  downgrade), sends deliberately-malformed h2 at the frame level through the scope guard,
+  and its hand-rolled HPACK decoder is fuzzed — which caught and fixed a panic on hostile
+  input. The same session added SARIF output + a GitHub Action (evidence-grade findings in
+  CI), a local Decoder and Ctrl+Enter in the desktop repeater, "new request from scratch",
+  and fixed a Windows debug-build stack overflow.
 - **Branch:** `main` · **Remote:** `github.com/Ratul-netizen/Hexora`
 - **Toolchain:** Rust 1.98 pinned in `rust-toolchain.toml` · MSRV 1.88
+- **Fuzzing:** `fuzz/` holds cargo-fuzz targets for the hand-rolled h2 parsers (nightly-only,
+  outside the workspace); proptest suites run the same properties on every `cargo test`.
 
 ---
 
@@ -55,8 +61,24 @@ milestone.
 | **M15.2** — Which cookie says who you are | Attribution compared the whole `Cookie` header byte for byte, which works for a bearer token and fails for cookies — and cookies are most of the web. A real engagement's header was 1,535 bytes of which three values changed per request, so nothing ever matched and the best check here said "there is nobody to say whose session it was" everywhere. `--session-cookie` names the one that identifies you and compares it exactly. **Never loosely**: two identities from one browser share every cookie but the session, so a fuzzy match attributes a request to the wrong person and files an IDOR that does not exist. Failing to attribute is recoverable; attributing wrongly is a false report. And `hexora identity list` now says when a project holds **no authenticated traffic at all** — the thing nobody asked, that cost an evening |
 | **M15.3** — What a credential says about itself | Getting cross-identity testing to a verdict against a real application took four fixes, each found by running it. It **sent twenty requests it knew were doomed** — the token's own `exp` said it died eighty-five minutes earlier. Session adoption took the newest *request* rather than the freshest *credential*. A cookie-only exchange shadowed the authenticated one as an endpoint's representative. And underneath all of it: **a rotating token never matches byte for byte**, so every captured exchange read as belonging to nobody — attribution now compares the JWT's subject, which is the application's own signed statement about whose request it was, while a token naming somebody else is still refused. Experiments ruled out went from 21 to 57 |
 | **M15.4** — A run that outlives its session | Sessions are short and runs are not: a run against a live target stopped being able to establish anything **49 seconds in** and spent the rest of its budget finding that out one request at a time. `--refresh` adopts the freshest session the proxy recorded before planning, sending nothing to do it. `StoppedBecause::CredentialExpired` is its own reason, checked before each experiment — a ceiling means there was more to do, an expired session means nothing after that point could have answered anything, and a retest needs to tell those apart. Only what a credential states about itself: an opaque token is never assumed dead, and one live identity keeps a run going. With the browser idle it now queues **nothing at all** rather than spending a budget on `401`s |
+| **CI + reporting** — SARIF output | A fourth report format, `hexora report --format sarif`, renders established findings as SARIF 2.1.0 for GitHub code scanning and GitLab. Each result's `partialFingerprints` is the finding's stable id, so a re-run correlates against the same finding and a "fail only on new findings" gate needs no fuzzy matching; a lead is emitted at note level and never turns a build red. A reusable GitHub Action (`ci/github-action`) and `docs/ci-integration.md` wrap it |
+| **Desktop** — Decoder, from-scratch requests, Ctrl+Enter | A local Decoder tab (base64/URL/HTML/hex/JWT, chainable, sends nothing — the point is not pasting a live token into an online tool); a Repeater that can craft a request to an endpoint nobody captured (`HttpService::parse_url` gives the target, every other byte is the tester's); and Ctrl/⌘+Enter to send |
+| **fix** — Windows debug build | Every debug-build CLI command overflowed the 1 MiB main-thread stack on Windows (even `--help`); `main` now runs on an 8 MiB worker thread. Release was always fine |
+| **M5.1a** — Conforming HTTP/2 client | `TcpTransport::http2(true)` negotiates `h2` at ALPN on the buffered `send` path and returns the same `Exchange` as HTTP/1.x, so the repeater, authz matrix and scanner reach h2-only endpoints. Wraps the `h2` crate; header casing is lowercased by the protocol and recorded as such; content coding reversed and both forms kept. The proxy's streaming path stays HTTP/1.x |
+| **M5.1b** — h2 connection reuse and multiplexing | One connection per host, kept alive and multiplexed: the fast path holds no lock across a send, so concurrent requests to a host share a connection rather than queue, while a per-host gate collapses a first-connect race to one connection. A dead connection is evicted and the request retried once on a fresh one. A hostile peer is bounded at the handshake by `max_header_list_size`, the HPACK analogue of the decompression-bomb guard |
+| **M5.1c** — Proxy accepts HTTP/2 from the browser | An intercepted tunnel is now an h2 server: each of the browser's concurrent streams is demultiplexed into its own exchange and processed by one shared `produce` — the same interceptor hooks, scope check and capture the HTTP/1.x path uses, so the two cannot drift. The old assertion that h2 must never be advertised is gone |
+| **M5.1d** — Protocol-faithful forwarding, downgrade surface | The proxy forwards upstream over the origin's negotiated protocol — h2 when offered, HTTP/1.1 otherwise. A browser's h2 request reaching an h1 origin is a **downgrade**, recorded as an explicit event that names the request-smuggling primitives such a translation would carry (a CR/LF-splitting header, an h2.CL length mismatch) |
+| **M5.1e** — Frame-level HTTP/2 | The h2 analogue of raw mode, for the requests the `h2` crate refuses: a hand-rolled client encodes an ordered header list (pseudo-headers and all, as raw bytes) with HPACK literal-without-indexing and frames it by hand, so an uppercase name, a duplicate `:path` or a CR/LF value goes out as written. `RawH2Request` lives in `hexora-types`; `send_raw_h2` is on the `HttpTransport` trait so it passes the **scope guard** and is captured like any send; the desktop repeater has an **H2 raw** editor. The response is HPACK-decoded far enough to be useful and never further — a Huffman or dynamic-table field is consumed exactly and marked, never guessed |
+| **M5.1f** — Fuzzing the hand-rolled parsers | proptest hammers the HPACK decoder and frame parsers on every `cargo test`; it immediately caught a malformed HPACK integer overflowing the shift and **panicking on bytes a server sends** — now saturated, still consuming every continuation byte to stay in sync, with a regression test and checked-in seeds. cargo-fuzz targets under `fuzz/` chase the same property with coverage guidance |
 
 ## Next
+
+**After M5.1 (HTTP/2), the open parity items are WebSocket interception and a seeded,
+in-scope crawler for coverage** — the two things a pro still misses versus Burp. The
+enterprise track (team/server mode, SSO, audit log, licensing) and the extension SDK
+(`extensions/sdk` is still a stub) remain the path to selling it; see `docs/roadmap.md`
+and `docs/feature-parity.md`. The notes below are the scanner-era retrospective that
+preceded this work and are kept for context.
 
 **The spine now runs in both directions.** A passive check raises a suspicion it
 cannot settle; the scheduler settles it, and a refutation is as much a result as a
