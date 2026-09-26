@@ -291,12 +291,166 @@ impl RequestSource {
     }
 }
 
+/// A frame-level HTTP/2 request: the h2 analogue of [`RawRequest`].
+///
+/// HTTP/1.x raw mode is a byte string; HTTP/2's wire form is HPACK-compressed and
+/// stream-scoped, so a frame-level h2 request is expressed a level up — as an ordered list
+/// of header fields, pseudo-headers included, that the sender encodes exactly as written.
+/// Its order, casing and duplication are the tester's to decide, which is the whole point:
+/// this is how the requests a conforming HTTP/2 stack refuses to emit get sent.
+///
+/// Like [`RawRequest`], it carries the [`HttpService`] it is addressed to, so the scope
+/// guard has a destination to check — a frame-level request is no more a way around scope
+/// than a byte-level one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawH2Request {
+    /// The connection target: where the socket goes and what SNI is offered. Separate from
+    /// any `:authority` in the header list, so a tester can deliberately disagree with it.
+    pub service: HttpService,
+    /// The header fields, in order, as raw bytes. Pseudo-headers (`:method`, `:path`, …)
+    /// are ordinary entries; nothing is validated, lowercased or reordered.
+    pub headers: Vec<(Bytes, Bytes)>,
+    /// The request body, sent as DATA after the header block.
+    pub body: Bytes,
+}
+
+impl RawH2Request {
+    /// A well-formed `GET` to `path`, as a starting point to then perturb.
+    pub fn get(service: HttpService, path: &str) -> Self {
+        let headers = vec![
+            (Bytes::from_static(b":method"), Bytes::from_static(b"GET")),
+            (
+                Bytes::from_static(b":scheme"),
+                Bytes::from(service.scheme().as_bytes().to_vec()),
+            ),
+            (
+                Bytes::from_static(b":authority"),
+                Bytes::from(service.authority().into_bytes()),
+            ),
+            (Bytes::from_static(b":path"), Bytes::from(path.as_bytes().to_vec())),
+        ];
+        Self {
+            service,
+            headers,
+            body: Bytes::new(),
+        }
+    }
+
+    /// Parses the editor's text form for a request addressed to `service`: `name: value`
+    /// per line, a blank line, then the body. Order, casing and duplicates are preserved,
+    /// and a line without a `: ` separator is refused rather than guessed at.
+    pub fn parse(service: HttpService, text: &str) -> Result<Self, HexoraError> {
+        let (head, body) = match text.split_once("\n\n") {
+            Some((head, body)) => (head, body),
+            None => (text, ""),
+        };
+
+        let mut headers = Vec::new();
+        for line in head.lines() {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            if line.is_empty() {
+                continue;
+            }
+            let (name, value) = line.split_once(": ").ok_or_else(|| {
+                HexoraError::invalid_input(
+                    "h2-request",
+                    format!("line {line:?} is not in `name: value` form"),
+                )
+            })?;
+            headers.push((
+                Bytes::from(name.as_bytes().to_vec()),
+                Bytes::from(value.as_bytes().to_vec()),
+            ));
+        }
+
+        if headers.is_empty() {
+            return Err(HexoraError::invalid_input(
+                "h2-request",
+                "a request needs at least the pseudo-headers (:method, :path, :scheme, :authority)",
+            ));
+        }
+
+        Ok(Self {
+            service,
+            headers,
+            body: Bytes::from(body.as_bytes().to_vec()),
+        })
+    }
+
+    /// Renders the request in the editor's text form (the header list, then the body).
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        for (name, value) in &self.headers {
+            out.push_str(&String::from_utf8_lossy(name));
+            out.push_str(": ");
+            out.push_str(&String::from_utf8_lossy(value));
+            out.push('\n');
+        }
+        out.push('\n');
+        out.push_str(&String::from_utf8_lossy(&self.body));
+        out
+    }
+
+    /// The request target the scope check reads: the first `:path`, or `/`.
+    ///
+    /// The first, not a merged view, because a deliberately duplicated `:path` is a test in
+    /// itself; scope is decided on the target the request most plainly names.
+    pub fn scope_path(&self) -> String {
+        self.headers
+            .iter()
+            .find(|(name, _)| name.as_ref() == b":path")
+            .map(|(_, value)| String::from_utf8_lossy(value).into_owned())
+            .filter(|path| !path.is_empty())
+            .unwrap_or_else(|| "/".to_string())
+    }
+
+    /// The absolute URL, for logging and the scope decision's messages.
+    pub fn url(&self) -> String {
+        format!("{}{}", self.service.origin(), self.scope_path())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn service() -> HttpService {
         HttpService::new("api.example.com", 443, true)
+    }
+
+    #[test]
+    fn raw_h2_text_preserves_order_casing_and_duplicates() {
+        let text = ":method: POST\n:path: /a\n:scheme: https\n:authority: h\n\
+                    :path: /b\nX-Upper: 1\n\nthe body";
+        let request = RawH2Request::parse(service(), text).unwrap();
+
+        // Two :path entries survive, in order — a duplicate a conforming stack forbids.
+        let paths: Vec<_> = request
+            .headers
+            .iter()
+            .filter(|(n, _)| n.as_ref() == b":path")
+            .map(|(_, v)| String::from_utf8_lossy(v).into_owned())
+            .collect();
+        assert_eq!(paths, vec!["/a".to_string(), "/b".to_string()]);
+        assert!(request.headers.iter().any(|(n, _)| n.as_ref() == b"X-Upper"));
+        assert_eq!(request.body.as_ref(), b"the body");
+
+        // scope_path reads the first :path.
+        assert_eq!(request.scope_path(), "/a");
+    }
+
+    #[test]
+    fn raw_h2_refuses_a_malformed_line() {
+        assert!(RawH2Request::parse(service(), "not a header line").is_err());
+        assert!(RawH2Request::parse(service(), "").is_err());
+    }
+
+    #[test]
+    fn raw_h2_get_round_trips_through_its_text_form() {
+        let request = RawH2Request::get(service(), "/x");
+        let text = request.to_text();
+        let reparsed = RawH2Request::parse(service(), &text).unwrap();
+        assert_eq!(reparsed.headers, request.headers);
     }
 
     fn raw(bytes: &[u8]) -> crate::Result<RawRequest> {

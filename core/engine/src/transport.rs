@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use hexora_types::error::Result;
 use hexora_types::http::{HttpRequest, HttpResponse};
 use hexora_types::limits::Limits;
-use hexora_types::raw::RawRequest;
+use hexora_types::raw::{RawH2Request, RawRequest};
 
 /// Which subsystem originated a request.
 ///
@@ -170,6 +170,21 @@ pub trait HttpTransport: Send + Sync {
         let _ = (request, options);
         Err(hexora_types::error::HexoraError::NotImplemented(
             "raw request sending on this transport",
+        ))
+    }
+
+    /// Sends a **frame-level HTTP/2** request — a header list encoded and framed exactly as
+    /// written, for the requests a conforming stack refuses.
+    ///
+    /// On this trait for the same reason `send_raw` is: everything the guard layer enforces,
+    /// scope above all, is enforced by wrapping *this trait*, so a frame-level send cannot
+    /// become a second door onto the network with nobody standing at it.
+    ///
+    /// The default refuses. Only a transport that can drive HTTP/2 by hand implements it.
+    async fn send_raw_h2(&self, request: RawH2Request, options: SendOptions) -> Result<Exchange> {
+        let _ = (request, options);
+        Err(hexora_types::error::HexoraError::NotImplemented(
+            "frame-level HTTP/2 sending on this transport",
         ))
     }
 }

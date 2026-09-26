@@ -47,7 +47,7 @@ use hexora_types::http::{HttpRequest, HttpService};
 use hexora_types::identity::Identity;
 use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
-use hexora_types::raw::{RawRequest, RequestMode, RequestSource};
+use hexora_types::raw::{RawH2Request, RawRequest, RequestMode, RequestSource};
 
 pub use crate::diff::{HeaderChange, ResponseDiff};
 pub use crate::raw::{inspect, parse, render, ParsedRequest, Warning};
@@ -560,6 +560,43 @@ impl<T: HttpTransport> Repeater<T> {
             id,
             parent: draft.parent,
             identity: sender.identity.map(|i| i.id),
+            exchange,
+            decision,
+        })
+    }
+
+    /// Sends a frame-level HTTP/2 request and records the exchange against the project.
+    ///
+    /// The h2 analogue of a raw send: it goes through the same scope guard every other send
+    /// does — a frame-level request is no more a way around scope than a byte-level one — and
+    /// its exchange is captured like any other. No identity is applied and no project header
+    /// is attached: like raw mode, the bytes are the tester's and Hexora adds nothing to them.
+    pub async fn send_raw_h2(&self, request: RawH2Request) -> Result<Sent> {
+        let mut options = SendOptions::interactive(Origin::Repeater);
+        options.limits = self.limits.clone();
+
+        let decision = self.transport.decide_raw_h2(&request, &options);
+        let exchange = self.transport.send_raw_h2(request, options).await?;
+
+        let captured = CapturedExchange {
+            request: exchange.request.clone(),
+            raw_request: exchange.raw_request.clone(),
+            response: exchange.response.clone(),
+            encoded_body: exchange.encoded_body.clone(),
+            content_encoding: exchange.content_encoding.clone(),
+            origin: Origin::Repeater.as_str(),
+            identity: None,
+            parent: None,
+            quirks: Vec::new(),
+            tls: exchange.tls.clone(),
+            duration_ms: exchange.duration.as_millis().min(u128::from(u32::MAX)) as u32,
+        };
+        let id = self.store.record(&captured)?;
+
+        Ok(Sent {
+            id,
+            parent: None,
+            identity: None,
             exchange,
             decision,
         })

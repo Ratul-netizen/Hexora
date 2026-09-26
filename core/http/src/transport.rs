@@ -132,52 +132,6 @@ impl TcpTransport {
         self
     }
 
-    /// Sends a **frame-level** HTTP/2 request — the h2 analogue of a raw h1 send.
-    ///
-    /// `service` is the connection target (host, port, SNI); `request` is the header list
-    /// and body, encoded and sent exactly as written, with none of the validation the
-    /// conforming path applies. This is how a tester reaches the requests the `h2` crate
-    /// refuses to emit — an uppercase name, a duplicate pseudo-header, a CR/LF in a value.
-    ///
-    /// A fresh connection is always opened: a hand-driven raw stream shares no state with
-    /// the conforming pool, and a raw send wants to control the whole connection anyway.
-    /// h2 is required — it is offered alone at ALPN and a server that declines is an error,
-    /// because there is no such thing as a frame-level h2 request over HTTP/1.1.
-    pub async fn send_raw_h2(
-        &self,
-        service: &hexora_types::http::HttpService,
-        request: &crate::h2raw::RawH2Request,
-        options: SendOptions,
-    ) -> Result<Exchange> {
-        let started = Instant::now();
-        let limits = &options.limits;
-
-        if !service.secure {
-            return Err(HexoraError::NotImplemented(
-                "frame-level HTTP/2 over cleartext (h2c)",
-            ));
-        }
-
-        let tcp = connect(&service.host, service.port, limits).await?;
-        let mut tls_config = self.tls.clone();
-        tls_config.alpn = vec![b"h2".to_vec()];
-        let (stream, info) =
-            crate::tls::handshake(tcp, &service.host, &tls_config, limits).await?;
-
-        if info.alpn.as_deref() != Some("h2") {
-            return Err(HexoraError::Protocol(
-                hexora_types::error::ProtocolError::Malformed {
-                    protocol: "HTTP/2",
-                    reason: "the server did not negotiate h2, so a frame-level h2 request \
-                             cannot be sent"
-                        .to_string(),
-                },
-            ));
-        }
-
-        crate::h2raw::send(stream, info, request, limits, started).await
-    }
-
     /// Sends a request and returns as soon as the response *head* has arrived.
     ///
     /// The body is still on the wire. This is what the proxy uses: it can begin
@@ -535,6 +489,49 @@ impl HttpTransport for TcpTransport {
             .await?
             .collect()
             .await
+    }
+
+    /// Frame-level HTTP/2 — the h2 analogue of a raw h1 send.
+    ///
+    /// The request carries the connection target and the header list; both go out exactly as
+    /// written, with none of the validation the conforming path applies, which is how a
+    /// tester reaches the requests the `h2` crate refuses to emit. A fresh connection is
+    /// always opened — a hand-driven raw stream shares no state with the conforming pool, and
+    /// a raw send wants to control the whole connection anyway. h2 is required: it is offered
+    /// alone at ALPN and a server that declines is an error, because there is no such thing
+    /// as a frame-level h2 request over HTTP/1.1.
+    async fn send_raw_h2(
+        &self,
+        request: hexora_types::raw::RawH2Request,
+        options: SendOptions,
+    ) -> Result<Exchange> {
+        let started = Instant::now();
+        let limits = &options.limits;
+
+        if !request.service.secure {
+            return Err(HexoraError::NotImplemented(
+                "frame-level HTTP/2 over cleartext (h2c)",
+            ));
+        }
+
+        let tcp = connect(&request.service.host, request.service.port, limits).await?;
+        let mut tls_config = self.tls.clone();
+        tls_config.alpn = vec![b"h2".to_vec()];
+        let (stream, info) =
+            crate::tls::handshake(tcp, &request.service.host, &tls_config, limits).await?;
+
+        if info.alpn.as_deref() != Some("h2") {
+            return Err(HexoraError::Protocol(
+                hexora_types::error::ProtocolError::Malformed {
+                    protocol: "HTTP/2",
+                    reason: "the server did not negotiate h2, so a frame-level h2 request \
+                             cannot be sent"
+                        .to_string(),
+                },
+            ));
+        }
+
+        crate::h2raw::send(stream, info, &request, limits, started).await
     }
 }
 
@@ -1785,10 +1782,10 @@ mod tests {
 
         let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
         let service = HttpService::new("localhost", port, true);
-        let request = crate::h2raw::RawH2Request::get(&service, "/");
+        let request = hexora_types::raw::RawH2Request::get(service, "/");
 
         let exchange = transport
-            .send_raw_h2(&service, &request, SendOptions::interactive(Origin::Repeater))
+            .send_raw_h2(request, SendOptions::interactive(Origin::Repeater))
             .await
             .unwrap();
 
@@ -1806,14 +1803,14 @@ mod tests {
 
         let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
         let service = HttpService::new("localhost", port, true);
-        let mut request = crate::h2raw::RawH2Request::get(&service, "/");
+        let mut request = hexora_types::raw::RawH2Request::get(service, "/");
         request.headers.push((
             bytes::Bytes::from_static(b"X-Uppercase-Name"),
             bytes::Bytes::from_static(b"1"),
         ));
 
         let error = transport
-            .send_raw_h2(&service, &request, SendOptions::interactive(Origin::Repeater))
+            .send_raw_h2(request, SendOptions::interactive(Origin::Repeater))
             .await
             .expect_err("the server must refuse a malformed header the conforming client could not send");
 

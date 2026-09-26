@@ -542,6 +542,52 @@ pub async fn repeater_send(
     })
 }
 
+/// Sends a frame-level HTTP/2 request from the repeater's h2 editor.
+///
+/// `url` is the connection target; `text` is the header list the tester wrote (pseudo-headers
+/// and all). It goes through the same scope guard and capture as every other repeater send.
+#[tauri::command]
+pub async fn repeater_send_raw_h2(
+    state: State<'_, AppState>,
+    text: String,
+    url: String,
+    insecure: bool,
+) -> CommandResult<SendResult> {
+    let (service, _) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let request = hexora_types::raw::RawH2Request::parse(service, &text).map_err(fail)?;
+
+    let repeater = build_repeater(&state, insecure)?;
+    let sent = repeater.send_raw_h2(request).await.map_err(fail)?;
+
+    let response = &sent.exchange.response;
+    let mut head = format!(
+        "{} {}{}\r\n",
+        response.version.as_str(),
+        response.status,
+        response
+            .reason
+            .as_ref()
+            .map(|r| format!(" {r}"))
+            .unwrap_or_default()
+    );
+    for header in response.headers.iter() {
+        head.push_str(&format!("{}: {}\r\n", header.name, header.value_lossy()));
+    }
+
+    Ok(SendResult {
+        id: sent.id.to_string(),
+        parent: None,
+        mode: "h2".to_string(),
+        status: response.status,
+        duration_ms: sent.exchange.duration.as_millis().min(u128::from(u64::MAX)) as u64,
+        out_of_scope: sent.decision == ScopeDecision::AllowedOutOfScope,
+        response_head: head,
+        response_body: BodyPreview::of(&response.body),
+        warnings: Vec::new(),
+        diff: None,
+    })
+}
+
 /// Lists the variants derived from a request.
 #[tauri::command]
 pub fn repeater_tree(state: State<'_, AppState>, id: String) -> CommandResult<Vec<HistoryRow>> {

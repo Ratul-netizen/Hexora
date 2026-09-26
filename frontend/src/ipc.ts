@@ -218,6 +218,18 @@ export const sendDraft = (
     requestMode,
   });
 
+/**
+ * Sends a frame-level HTTP/2 request: the header list in `text` (pseudo-headers and all)
+ * is encoded and framed exactly as written, for the requests a conforming stack refuses.
+ * `url` is the connection target.
+ */
+export const sendRawH2 = (
+  text: string,
+  url: string,
+  insecure: boolean,
+): Promise<SendResult> =>
+  invoke<SendResult>("repeater_send_raw_h2", { text, url, insecure });
+
 export const branchesOf = (id: string): Promise<HistoryRow[]> =>
   invoke<HistoryRow[]>("repeater_tree", { id });
 

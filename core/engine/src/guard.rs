@@ -25,7 +25,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hexora_types::error::{HexoraError, Result};
 use hexora_types::http::HttpRequest;
-use hexora_types::raw::RawRequest;
+use hexora_types::raw::{RawH2Request, RawRequest};
 use hexora_types::scope::Scope;
 
 use crate::transport::{Exchange, HttpTransport, SendOptions};
@@ -82,6 +82,13 @@ impl<T: HttpTransport> ScopeGuard<T> {
     /// authority, so a rewritten request line cannot point the socket somewhere the
     /// scope does not cover.
     pub fn decide_raw(&self, request: &RawRequest, options: &SendOptions) -> ScopeDecision {
+        self.decide_for(&request.service, &request.scope_path(), options)
+    }
+
+    /// The same decision for a frame-level HTTP/2 request. The destination is the service
+    /// the request is addressed to, and the path is its first `:path` — a rewritten or
+    /// duplicated pseudo-header cannot point the socket outside the scope.
+    pub fn decide_raw_h2(&self, request: &RawH2Request, options: &SendOptions) -> ScopeDecision {
         self.decide_for(&request.service, &request.scope_path(), options)
     }
 
@@ -150,6 +157,29 @@ impl<T: HttpTransport> HttpTransport for ScopeGuard<T> {
                 self.inner.send_raw(request, options).await
             }
             ScopeDecision::Allowed => self.inner.send_raw(request, options).await,
+        }
+    }
+
+    async fn send_raw_h2(&self, request: RawH2Request, options: SendOptions) -> Result<Exchange> {
+        match self.decide_raw_h2(&request, &options) {
+            ScopeDecision::Refused => {
+                let target = request.url();
+                tracing::warn!(
+                    origin = options.origin.as_str(),
+                    target = %target,
+                    "refusing an out-of-scope frame-level HTTP/2 request from an automated subsystem"
+                );
+                Err(HexoraError::OutOfScope(target))
+            }
+            ScopeDecision::AllowedOutOfScope => {
+                tracing::debug!(
+                    origin = options.origin.as_str(),
+                    target = %request.url(),
+                    "sending an out-of-scope frame-level HTTP/2 request from a human-driven subsystem"
+                );
+                self.inner.send_raw_h2(request, options).await
+            }
+            ScopeDecision::Allowed => self.inner.send_raw_h2(request, options).await,
         }
     }
 }

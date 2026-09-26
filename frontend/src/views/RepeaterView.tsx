@@ -7,11 +7,15 @@ import {
   loadDraft,
   newDraft,
   sendDraft,
+  sendRawH2,
   type DiffView,
   type HistoryRow,
   type RequestMode,
   type SendResult,
 } from "../ipc";
+
+/** The repeater's three editing modes: h1 structured, h1 raw, and frame-level h2. */
+type EditMode = RequestMode | "h2";
 
 /**
  * Edit a captured request and send it again.
@@ -49,7 +53,7 @@ export function RepeaterView({
   const [branches, setBranches] = useState<HistoryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [insecure, setInsecure] = useState(false);
-  const [mode, setMode] = useState<RequestMode>("structured");
+  const [mode, setMode] = useState<EditMode>("structured");
   const [busy, setBusy] = useState(false);
 
   // What a send derives from. `parent` is a stored request — a captured one, or the
@@ -117,11 +121,38 @@ export function RepeaterView({
     }
   }
 
+  /// Seeds the h2 editor with a template built from the current target, unless the text is
+  /// already an h2 header list — so switching to h2 does not clobber edits already in it.
+  function seedH2IfNeeded() {
+    const firstField = raw.split("\n").find((line) => line.trim() !== "");
+    if (firstField?.startsWith(":")) return;
+    try {
+      const parsed = new URL(url);
+      const scheme = parsed.protocol.replace(":", "");
+      const authority = parsed.host;
+      const path = (parsed.pathname || "/") + (parsed.search || "");
+      setRaw(
+        `:method: GET\n:path: ${path}\n:scheme: ${scheme}\n:authority: ${authority}\n\n`,
+      );
+    } catch {
+      // Leave the editor as-is if the URL cannot be parsed; the tester can write the list.
+    }
+  }
+
   async function send() {
     if (!ready) return;
     setBusy(true);
     setError(null);
     try {
+      if (mode === "h2") {
+        // Frame-level h2 goes to its own path: the header list is sent as written, and
+        // there is no diff or lineage — the request is not derived from another.
+        const sent = await sendRawH2(raw, url, insecure);
+        setResult(sent);
+        setWarnings([]);
+        onCaptured();
+        return;
+      }
       const sent = await sendDraft(raw, parent, target, insecure, mode);
       setResult(sent);
       setWarnings(sent.warnings);
@@ -195,13 +226,20 @@ export function RepeaterView({
             New
           </button>
           <div className="modes">
-            {(["structured", "raw"] as const).map((option) => (
+            {(["structured", "raw", "h2"] as const).map((option) => (
               <button
                 key={option}
                 className={mode === option ? "tab active" : "tab"}
-                onClick={() => setMode(option)}
+                onClick={() => {
+                  setMode(option);
+                  if (option === "h2") seedH2IfNeeded();
+                }}
               >
-                {option === "structured" ? "Structured" : "Raw"}
+                {option === "structured"
+                  ? "Structured"
+                  : option === "raw"
+                    ? "Raw"
+                    : "H2 raw"}
               </button>
             ))}
           </div>
@@ -224,10 +262,12 @@ export function RepeaterView({
 
         {/* Said above the editor rather than in the warning list, because it changes
             what every other line of that list means. */}
-        <p className={mode === "raw" ? "notice warn" : "muted small"}>
+        <p className={mode === "raw" || mode === "h2" ? "notice warn" : "muted small"}>
           {mode === "raw"
             ? "Raw: these bytes are sent exactly as typed. Nothing is parsed, added or corrected — including the line endings."
-            : "Structured: the text is parsed and the message re-serialized, so bare LF becomes CRLF and missing framing may be added. Switch to Raw to send bytes untouched."}
+            : mode === "h2"
+              ? "H2 raw: one `name: value` per line (pseudo-headers included), a blank line, then the body. Each field is framed exactly as written — an uppercase name, a duplicate :path or a value with control bytes all go out unchanged, which is how you test what a conforming client refuses to send."
+              : "Structured: the text is parsed and the message re-serialized, so bare LF becomes CRLF and missing framing may be added. Switch to Raw to send bytes untouched."}
         </p>
 
         <textarea

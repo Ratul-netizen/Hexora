@@ -27,8 +27,9 @@ use std::time::Instant;
 use bytes::{Bytes, BytesMut};
 use hexora_engine::transport::Exchange;
 use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result, TimeoutPhase};
-use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpVersion};
 use hexora_types::limits::Limits;
+use hexora_types::raw::RawH2Request;
 use hexora_types::tls::TlsInfo;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -49,96 +50,6 @@ const FRAME_CONTINUATION: u8 = 0x9;
 const FLAG_END_STREAM: u8 = 0x1;
 const FLAG_ACK: u8 = 0x1;
 const FLAG_END_HEADERS: u8 = 0x4;
-
-/// A request expressed at the frame level: an ordered list of header fields (pseudo-headers
-/// included, as raw bytes) and a body. Nothing here is validated.
-#[derive(Debug, Clone)]
-pub struct RawH2Request {
-    /// The header fields, in order, exactly as they should be encoded. Pseudo-headers such
-    /// as `:method` and `:path` are ordinary entries here — their order, casing and
-    /// duplication are the tester's to decide.
-    pub headers: Vec<(Bytes, Bytes)>,
-    /// The request body, sent as DATA after the header block.
-    pub body: Bytes,
-}
-
-impl RawH2Request {
-    /// Parses the editor's text form: `name: value` per line, a blank line, then the body.
-    ///
-    /// Pseudo-headers are ordinary lines (`:method: GET`), and their order, casing and
-    /// duplication are preserved exactly — the point is to express the request a conforming
-    /// stack would not. A line without a `: ` separator is refused rather than guessed at.
-    pub fn parse(text: &str) -> Result<Self> {
-        let (head, body) = match text.split_once("\n\n") {
-            Some((head, body)) => (head, body),
-            None => (text, ""),
-        };
-
-        let mut headers = Vec::new();
-        for line in head.lines() {
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            if line.is_empty() {
-                continue;
-            }
-            let (name, value) = line.split_once(": ").ok_or_else(|| {
-                HexoraError::invalid_input(
-                    "h2-request",
-                    format!("line {line:?} is not in `name: value` form"),
-                )
-            })?;
-            headers.push((
-                Bytes::from(name.as_bytes().to_vec()),
-                Bytes::from(value.as_bytes().to_vec()),
-            ));
-        }
-
-        if headers.is_empty() {
-            return Err(HexoraError::invalid_input(
-                "h2-request",
-                "a request needs at least the pseudo-headers (:method, :path, :scheme, :authority)",
-            ));
-        }
-
-        Ok(Self {
-            headers,
-            body: Bytes::from(body.as_bytes().to_vec()),
-        })
-    }
-
-    /// Renders the request in the editor's text form.
-    pub fn to_text(&self) -> String {
-        let mut out = String::new();
-        for (name, value) in &self.headers {
-            out.push_str(&String::from_utf8_lossy(name));
-            out.push_str(": ");
-            out.push_str(&String::from_utf8_lossy(value));
-            out.push('\n');
-        }
-        out.push('\n');
-        out.push_str(&String::from_utf8_lossy(&self.body));
-        out
-    }
-
-    /// A convenience constructor from a method, target and the usual pseudo-headers, for a
-    /// caller that wants a well-formed starting point to then perturb.
-    pub fn get(service: &HttpService, path: &str) -> Self {
-        Self {
-            headers: vec![
-                (Bytes::from_static(b":method"), Bytes::from_static(b"GET")),
-                (
-                    Bytes::from_static(b":scheme"),
-                    Bytes::from(service.scheme().as_bytes().to_vec()),
-                ),
-                (
-                    Bytes::from_static(b":authority"),
-                    Bytes::from(service.authority().into_bytes()),
-                ),
-                (Bytes::from_static(b":path"), Bytes::from(path.as_bytes().to_vec())),
-            ],
-            body: Bytes::new(),
-        }
-    }
-}
 
 /// Sends a frame-level request over an already-negotiated h2 stream and reads the response.
 ///
@@ -318,18 +229,22 @@ where
 fn view_of(request: &RawH2Request) -> HttpRequest {
     let mut method = String::from("GET");
     let mut path = String::from("/");
-    let mut authority = String::new();
-    let mut scheme = String::from("https");
     let mut headers = Headers::new();
+    let mut seen_method = false;
+    let mut seen_path = false;
 
     for (name, value) in &request.headers {
         let value_str = String::from_utf8_lossy(value).into_owned();
         match name.as_ref() {
-            b":method" if method == "GET" => method = value_str,
-            b":path" if path == "/" => path = value_str,
-            b":authority" if authority.is_empty() => authority = value_str,
-            b":scheme" => scheme = value_str,
-            _ if name.starts_with(b":") => {} // an unknown pseudo-header; kept out of the view
+            b":method" if !seen_method => {
+                method = value_str;
+                seen_method = true;
+            }
+            b":path" if !seen_path => {
+                path = value_str;
+                seen_path = true;
+            }
+            _ if name.starts_with(b":") => {} // other/duplicate pseudo-headers stay out of the view
             _ => headers.append(Header {
                 name: String::from_utf8_lossy(name).into_owned(),
                 value: value.clone(),
@@ -337,23 +252,15 @@ fn view_of(request: &RawH2Request) -> HttpRequest {
         }
     }
 
-    let secure = scheme.eq_ignore_ascii_case("https");
-    let (host, port) = split_authority(&authority, secure);
+    // The connection target is the request's own service — where the socket went — not a
+    // re-parse of a `:authority` the tester may have set to something else on purpose.
     HttpRequest {
-        service: HttpService::new(host, port, secure),
+        service: request.service.clone(),
         method,
         path,
         version: HttpVersion::Http2,
         headers,
         body: request.body.clone(),
-    }
-}
-
-fn split_authority(authority: &str, secure: bool) -> (String, u16) {
-    let default = if secure { 443 } else { 80 };
-    match authority.rsplit_once(':') {
-        Some((h, p)) if !h.is_empty() => (h.to_string(), p.parse().unwrap_or(default)),
-        _ => (authority.to_string(), default),
     }
 }
 
@@ -805,35 +712,9 @@ mod tests {
     }
 
     #[test]
-    fn the_text_form_preserves_order_casing_and_duplicates() {
-        let text = ":method: POST\n:path: /a\n:scheme: https\n:authority: h\n\
-                    :path: /b\nX-Upper: 1\n\nthe body";
-        let request = RawH2Request::parse(text).unwrap();
-
-        // Two :path entries survive, in order — a duplicate a conforming stack forbids.
-        let paths: Vec<_> = request
-            .headers
-            .iter()
-            .filter(|(n, _)| n.as_ref() == b":path")
-            .map(|(_, v)| String::from_utf8_lossy(v).into_owned())
-            .collect();
-        assert_eq!(paths, vec!["/a".to_string(), "/b".to_string()]);
-
-        // Casing is kept, not normalised.
-        assert!(request.headers.iter().any(|(n, _)| n.as_ref() == b"X-Upper"));
-        assert_eq!(request.body.as_ref(), b"the body");
-    }
-
-    #[test]
-    fn a_malformed_line_is_refused() {
-        assert!(RawH2Request::parse("this is not a header line").is_err());
-        assert!(RawH2Request::parse("").is_err());
-    }
-
-    #[test]
     fn a_raw_request_view_reads_its_pseudo_headers() {
-        let service = HttpService::new("example.com", 443, true);
-        let mut request = RawH2Request::get(&service, "/accounts/7");
+        let service = hexora_types::http::HttpService::new("example.com", 443, true);
+        let mut request = RawH2Request::get(service, "/accounts/7");
         request
             .headers
             .push((Bytes::from_static(b"x-test"), Bytes::from_static(b"1")));
