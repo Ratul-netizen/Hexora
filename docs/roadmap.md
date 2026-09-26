@@ -299,6 +299,11 @@ the manual-testing power; f hardens. **WS.a is the largest single piece** — th
 connection-model change plus the frame parser and capture — with the rest medium to
 medium-large, mirroring the HTTP/2 cadence.
 
+**RFC 8441 (WebSocket over HTTP/2, Extended CONNECT) is deferred**, not built in WS.f. It is
+rare in the wild, it interacts with the h2 stream machinery rather than the h1 tunnel every
+other WS step uses, and no target seen so far needs it; the frame codec and capture model
+built here carry straight over when a target does.
+
 **M8 — Traffic query language** · PLANNED
 
 A query language over captured traffic, in the spirit of HTTPQL. Burp's Bambdas require

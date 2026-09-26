@@ -466,6 +466,22 @@ pub fn inflate(compressed: &[u8], limits: &Limits) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Drives the frame parser over arbitrary bytes. Public only for the fuzz target; the
+/// property is that it never panics, loops or reads out of bounds on any input.
+#[doc(hidden)]
+pub fn fuzz_parse_frames(bytes: &[u8]) {
+    let mut parser = FrameParser::new(1 << 20);
+    parser.push(bytes);
+    while let Ok(Some(_)) = parser.next_frame() {}
+}
+
+/// Runs the permessage-deflate inflater over arbitrary bytes. Public only for the fuzz
+/// target; the property is that it never panics or runs unbounded on any input.
+#[doc(hidden)]
+pub fn fuzz_inflate(bytes: &[u8]) {
+    let _ = inflate(bytes, &Limits::default());
+}
+
 /// Reads a response head (through the blank line), returning it and any bytes past it.
 async fn read_response_head<S: AsyncRead + Unpin>(
     stream: &mut S,
@@ -824,6 +840,12 @@ mod tests {
                     Ok(None) | Err(_) => break,
                 }
             }
+        }
+
+        #[test]
+        fn inflating_arbitrary_bytes_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..2048)) {
+            // Garbage is an error, valid deflate is bounded output — neither panics or hangs.
+            let _ = inflate(&bytes, &Limits::default());
         }
     }
 }
