@@ -917,8 +917,33 @@ M14.5  Programmes in the window    the desktop UI knows a class was excluded
 ## Phase 5 — Extensibility
 
 **M17 — TypeScript extension SDK** · PLANNED
-**M18 — Browser integration** · PLANNED — drive the user's installed Chrome over CDP
-rather than shipping Chromium; DOM XSS testing.
+**M18 — Browser integration** · IN PROGRESS — drive the user's installed Chrome/Edge over
+CDP rather than shipping Chromium; the JS-rendered crawl CR.f deferred here, and DOM XSS.
+
+Why this, and why now: a static extractor (CR.a) finds the links in the bytes as delivered,
+which a single-page app does not have — its routes and XHR endpoints only exist after
+JavaScript runs. Every serious crawler answered this by driving a real browser (ZAP's Client
+Spider, Burp's built-in Chromium). Hexora **drives the browser already on the machine** over
+the **Chrome DevTools Protocol** rather than shipping a 150 MB Chromium: smaller, and it tests
+the engine the target's users actually run. The discipline is unchanged — a browser Hexora
+drives is a producer under the scope guard, and what it navigates to and submits is bounded
+the same way the crawler is.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **M18.a** — the CDP transport | Connect to a browser's DevTools endpoint (discover the WebSocket URL over its `/json` HTTP interface), speak CDP over that socket — **reusing the WS.d client** — with request/response id matching and an event stream. The foundation everything else rides. Testable against a local headless browser, no target needed. | WS.d (`WsConnection`) |
+| **M18.b** — launch and attach | Find the user's installed Chrome or Edge, launch it headless with a throwaway profile and a debugging port, or attach to one already running; clean shutdown that never leaves an orphan. No Chromium shipped. | M18.a |
+| **M18.c** — navigate and capture | Drive `Page.navigate`, wait for load, enable the `Network` domain, and capture the requests the page actually made — **through the scope guard**, recorded like proxy traffic so the scanner sees a SPA's real surface. | M18.b, scope guard |
+| **M18.d** — the JS-rendered crawl | After load, extract links and endpoints from the **rendered DOM** and the network the page generated, feed them to CR.a/CR.f, and crawl under the same bounds and safety policy — closing the SPA coverage gap CR.f named. `rel="nofollow"` from the live DOM lands here. | M18.c, CR.b–f |
+| **M18.e** — DOM XSS testing | The flagship: drive a source, observe the sink in the live DOM, and settle it with the verification model — a finding no request/response scanner can make. | M18.d, verify |
+
+**Ground rules.** The browser is a **producer under the scope guard**, never a second door
+onto the network: it navigates and submits only what scope and the crawler's safety policy
+allow. Chromium is **not shipped** — Hexora drives what the tester already has, and says so
+honestly when neither Chrome nor Edge is found rather than pretending to a capability it lacks.
+The static crawl still reports what it could not reach; the browser is where a SPA's real
+surface is found, not a replacement for the honest static answer.
+
 **M19 — Extension runtime, sandboxing (WASM) and store** · PLANNED
 
 ---

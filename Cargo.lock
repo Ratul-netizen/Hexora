@@ -1576,6 +1576,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hexora-browser"
+version = "0.1.0"
+dependencies = [
+ "hexora-engine",
+ "hexora-http",
+ "hexora-types",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "hexora-cli"
 version = "0.1.0"
 dependencies = [

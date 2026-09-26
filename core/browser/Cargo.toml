@@ -1,0 +1,18 @@
+[package]
+name = "hexora-browser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hexora-types.workspace = true
+hexora-http.workspace = true
+hexora-engine.workspace = true
+tokio = { workspace = true, features = ["time"] }
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
