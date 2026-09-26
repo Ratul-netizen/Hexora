@@ -1635,6 +1635,7 @@ dependencies = [
  "chrono",
  "hexora-active",
  "hexora-authz",
+ "hexora-crawl",
  "hexora-engine",
  "hexora-http",
  "hexora-proxy",

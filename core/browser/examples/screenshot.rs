@@ -32,6 +32,17 @@ async fn main() {
     // Let the SPA's async boot (the invoke chain) run to completion before capturing.
     tokio::time::sleep(Duration::from_millis(settle_ms)).await;
 
+    // Optional 4th arg: a tab label to click before capturing.
+    if let Some(label) = std::env::args().nth(4) {
+        let js = format!(
+            "(()=>{{const b=[...document.querySelectorAll('button.tab')].find(x=>x.textContent.trim()==={label:?});if(b){{b.click();return true}}return false}})()",
+        );
+        let _ = cdp
+            .call("Runtime.evaluate", json!({ "expression": js, "returnByValue": true }))
+            .await;
+        tokio::time::sleep(Duration::from_millis(900)).await;
+    }
+
     // Probe: what did the app actually render?
     if let Ok(probe) = cdp
         .call(

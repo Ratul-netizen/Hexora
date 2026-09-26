@@ -5,6 +5,8 @@ import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
 import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
+import { LicenseView } from "./views/LicenseView";
+import { SitemapView } from "./views/SitemapView";
 import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
 import { ScanView } from "./views/ScanView";
@@ -42,7 +44,9 @@ type Tab =
   | "authz"
   | "findings"
   | "report"
-  | "snapshots";
+  | "sitemap"
+  | "snapshots"
+  | "license";
 
 /** The tab strip, in the order the work happens in. */
 const TABS: { id: Tab; label: string }[] = [
@@ -55,8 +59,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "scan", label: "Scan" },
   { id: "authz", label: "Authorization" },
   { id: "findings", label: "Findings" },
+  { id: "sitemap", label: "Site map" },
   { id: "report", label: "Report" },
   { id: "snapshots", label: "Snapshots" },
+  { id: "license", label: "Licence" },
 ];
 
 export default function App() {
@@ -232,9 +238,13 @@ export default function App() {
             onOpenExchange={showExchange}
           />
         )}
+        {tab === "sitemap" && <SitemapView hasProject={project !== null} />}
         {tab === "report" && <ReportView hasProject={project !== null} />}
         {tab === "snapshots" && (
           <SnapshotsView hasProject={project !== null} />
+        )}
+        {tab === "license" && (
+          <LicenseView license={license} onChange={setLicense} />
         )}
       </main>
 

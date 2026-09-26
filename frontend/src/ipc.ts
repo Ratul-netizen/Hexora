@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 11;
+export const EXPECTED_RPC_CONTRACT_VERSION = 12;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -207,6 +207,50 @@ export interface LicenseStatus {
 
 export const licenseStatus = (): Promise<LicenseStatus> =>
   invoke<LicenseStatus>("license_status");
+
+/** Verifies a licence file and installs it for later runs. */
+export const activateLicense = (file: string): Promise<LicenseStatus> =>
+  invoke<LicenseStatus>("license_activate", { file });
+
+/** Starts a time-limited Pro trial on this machine. */
+export const startTrial = (): Promise<LicenseStatus> =>
+  invoke<LicenseStatus>("license_start_trial");
+
+/** One path under a host in the coverage tree. */
+export interface SitemapPath {
+  path: string;
+  methods: string[];
+  statuses: number[];
+  identities: string[];
+}
+
+/** A form discovered under a host — found, never submitted. */
+export interface SitemapForm {
+  action: string;
+  method: string;
+}
+
+/** Everything captured for one host. */
+export interface SitemapHost {
+  host: string;
+  secure: boolean;
+  paths: SitemapPath[];
+  forms: SitemapForm[];
+}
+
+/** The coverage a project holds, as a host → path tree. */
+export interface SitemapView {
+  hosts: SitemapHost[];
+  out_of_scope: string[];
+  host_count: number;
+  path_count: number;
+}
+
+/** Builds the host → path coverage tree from captured traffic. */
+export const buildSitemap = (
+  host: string | null,
+  forms: boolean,
+): Promise<SitemapView> => invoke<SitemapView>("sitemap_build", { host, forms });
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

@@ -165,6 +165,44 @@ pub fn license_status() -> LicenseStatus {
     }
 }
 
+/// Verifies a licence file and installs it for later runs.
+///
+/// Refused rather than stored when it does not verify against this build's embedded key:
+/// a licence that would only read back as free is not worth keeping, and installing it
+/// silently would hide why a paid feature is still unavailable.
+#[tauri::command]
+pub fn license_activate(file: String) -> CommandResult<LicenseStatus> {
+    use hexora_engine::license::{
+        default_license_path, EntitlementGate, Tier, EMBEDDED_LICENSE_KEY,
+    };
+
+    let path = PathBuf::from(&file);
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let now = chrono::Utc::now();
+
+    let g = EntitlementGate::from_license(&bytes, &EMBEDDED_LICENSE_KEY, now);
+    if g.entitlements().tier == Tier::Free {
+        return Err("this file did not verify as a Hexora licence signed for this build; \
+                    it was not installed"
+            .to_string());
+    }
+
+    let dest = default_license_path()
+        .ok_or_else(|| "could not determine where to store the licence".to_string())?;
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(fail)?;
+    }
+    std::fs::write(&dest, &bytes).map_err(fail)?;
+    Ok(license_status())
+}
+
+/// Starts a time-limited Pro trial on this machine.
+#[tauri::command]
+pub fn license_start_trial() -> CommandResult<LicenseStatus> {
+    hexora_engine::license::start_trial(chrono::Utc::now()).map_err(fail)?;
+    Ok(license_status())
+}
+
 // ---------------------------------------------------------------------------
 // Engine
 // ---------------------------------------------------------------------------
@@ -193,7 +231,7 @@ pub fn engine_info() -> EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
         schema_version: hexora_storage::migrations::target_version(),
-        milestone: "M14.1",
+        milestone: "M18 — Browser integration",
     }
 }
 
@@ -2508,6 +2546,156 @@ fn default_ca_dir() -> CommandResult<PathBuf> {
 /// A fresh handle each time rather than one held open in [`AppState`]: SQLite
 /// connections are pooled underneath, and a command that borrowed a long-lived
 /// project would have to decide what happens when the tester opens another one.
+// ---------------------------------------------------------------------------
+// Site map (CR.e)
+// ---------------------------------------------------------------------------
+
+/// One path under a host in the coverage tree.
+#[derive(Debug, Clone, Serialize)]
+pub struct SitemapPath {
+    pub path: String,
+    pub methods: Vec<String>,
+    pub statuses: Vec<u16>,
+    pub identities: Vec<String>,
+}
+
+/// A form discovered under a host — found, never submitted.
+#[derive(Debug, Clone, Serialize)]
+pub struct SitemapForm {
+    pub action: String,
+    pub method: String,
+}
+
+/// Everything captured for one host.
+#[derive(Debug, Clone, Serialize)]
+pub struct SitemapHost {
+    pub host: String,
+    pub secure: bool,
+    pub paths: Vec<SitemapPath>,
+    pub forms: Vec<SitemapForm>,
+}
+
+/// The coverage a project holds, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct SitemapView {
+    pub hosts: Vec<SitemapHost>,
+    pub out_of_scope: Vec<String>,
+    pub host_count: usize,
+    pub path_count: usize,
+}
+
+/// Builds the host → path coverage tree from captured traffic.
+///
+/// Read-only: it maps what the project already holds. With `forms`, it reads HTML bodies to
+/// list forms that were discovered but never submitted (the same pure builder the CLI uses).
+#[tauri::command]
+pub fn sitemap_build(
+    state: State<'_, AppState>,
+    host: Option<String>,
+    forms: bool,
+) -> CommandResult<SitemapView> {
+    let project = open(&state)?;
+    let scope = project.settings().scope().map_err(fail)?;
+    let store = project.traffic();
+
+    let mut pages = Vec::new();
+    let mut cursor: Option<Cursor> = None;
+    loop {
+        let page = store.history(cursor.as_ref(), Limit::new(500)).map_err(fail)?;
+        for item in &page.items {
+            if let Some(want) = &host {
+                if !url_matches_host(&item.url, want) {
+                    continue;
+                }
+            }
+            let (content_type, body) = if forms {
+                read_body_for_forms(&store, item.id)
+            } else {
+                (String::new(), Vec::new())
+            };
+            pages.push(hexora_crawl::CapturedPage {
+                url: item.url.clone(),
+                method: item.method.clone(),
+                status: item.status,
+                identity: item.identity.clone(),
+                content_type,
+                body,
+            });
+        }
+        match page.next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+
+    let map = hexora_crawl::SiteMap::build(pages, &scope);
+    Ok(SitemapView {
+        hosts: map
+            .hosts
+            .iter()
+            .map(|h| SitemapHost {
+                host: h.host.clone(),
+                secure: h.secure,
+                paths: h
+                    .paths
+                    .iter()
+                    .map(|p| SitemapPath {
+                        path: p.path.clone(),
+                        methods: p.methods.clone(),
+                        statuses: p.statuses.clone(),
+                        identities: p.identities.clone(),
+                    })
+                    .collect(),
+                forms: h
+                    .forms
+                    .iter()
+                    .map(|f| SitemapForm {
+                        action: f.action.clone(),
+                        method: f.method.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        out_of_scope: map.out_of_scope.clone(),
+        host_count: map.hosts.len(),
+        path_count: map.path_count(),
+    })
+}
+
+/// Whether a captured URL's authority matches a host filter (bare host or host:port).
+fn url_matches_host(url: &str, want: &str) -> bool {
+    match hexora_types::http::HttpService::parse_url(url) {
+        Ok((service, _)) => service.host == want || service.authority() == want,
+        Err(_) => false,
+    }
+}
+
+/// Reads a row's content type and, for HTML, its body — best effort.
+fn read_body_for_forms(store: &hexora_storage::TrafficStore, id: RequestId) -> (String, Vec<u8>) {
+    let content_type = match store.response_head(id) {
+        Ok((_, _, _, headers_raw)) => content_type_of(&headers_raw),
+        Err(_) => return (String::new(), Vec::new()),
+    };
+    if !content_type.to_ascii_lowercase().contains("html") {
+        return (content_type, Vec::new());
+    }
+    let body = store.response_body(id, false).unwrap_or_default();
+    (content_type, body)
+}
+
+/// Finds the `Content-Type` value in a raw response header block.
+fn content_type_of(headers_raw: &[u8]) -> String {
+    let text = String::from_utf8_lossy(headers_raw);
+    for line in text.lines() {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-type") {
+                return value.trim().to_string();
+            }
+        }
+    }
+    String::new()
+}
+
 fn open(state: &State<'_, AppState>) -> CommandResult<Project> {
     let path = state.project_path().map_err(fail)?;
     Project::open(&path).map_err(fail)

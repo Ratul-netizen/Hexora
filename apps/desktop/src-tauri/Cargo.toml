@@ -24,6 +24,7 @@ hexora-repeater.workspace = true
 hexora-authz.workspace = true
 hexora-scan.workspace = true
 hexora-active.workspace = true
+hexora-crawl.workspace = true
 hexora-verify.workspace = true
 hexora-report.workspace = true
 bytes.workspace = true
