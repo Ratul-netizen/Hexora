@@ -54,6 +54,7 @@ pub mod h2raw;
 pub mod parse;
 pub mod request;
 pub mod tls;
+pub mod ws;
 pub mod transport;
 pub mod write;
 
