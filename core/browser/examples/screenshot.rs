@@ -29,6 +29,8 @@ async fn main() {
 
     cdp.call("Page.enable", json!({})).await.expect("Page.enable");
     cdp.call("Runtime.enable", json!({})).await.ok();
+    // Reload so each capture starts from a clean mount, deterministic across runs.
+    cdp.call("Page.reload", json!({ "ignoreCache": false })).await.ok();
     // Let the SPA's async boot (the invoke chain) run to completion before capturing.
     tokio::time::sleep(Duration::from_millis(settle_ms)).await;
 
