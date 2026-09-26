@@ -30,11 +30,13 @@
 //! not a bare transport.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use hexora_engine::guard::ScopeGuard;
 use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
-use hexora_types::http::{HttpRequest, HttpService};
+use hexora_types::http::{Header, HttpRequest, HttpService};
 
 use crate::robots::Robots;
 use crate::{extract, LinkSource};
@@ -160,6 +162,34 @@ pub enum CrawlStop {
     FrontierEmpty,
     /// [`CrawlBudget::max_requests`] was reached; there may be more to visit.
     RequestCeiling,
+    /// The cancel handle was set — a tester stopped the crawl. What had been fetched by
+    /// then is in the report; the frontier may still have held work.
+    Cancelled,
+}
+
+/// Stops a running crawl. Cloneable and thread-safe: take a handle before the crawl starts
+/// (with [`Crawler::cancel_handle`]) and set it from a signal handler. The crawl checks it
+/// before each fetch and stops with [`CrawlStop::Cancelled`], returning what it has — the
+/// same promise the active scheduler's `Cancel` makes, so a stopped crawl still feeds the
+/// project the pages it reached.
+#[derive(Debug, Clone, Default)]
+pub struct CrawlCancel(Arc<AtomicBool>);
+
+impl CrawlCancel {
+    /// A fresh, un-set handle.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Asks the crawl to stop before its next fetch.
+    pub fn stop(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether a stop has been requested.
+    pub fn is_stopped(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 /// What a crawl did.
@@ -185,25 +215,83 @@ struct Pending {
     depth: usize,
 }
 
-/// Crawls from `seeds`, following in-scope links through `guard` until the frontier
-/// empties or `budget` is spent, under the safety controls in `policy`.
+/// A bounded, scope-checked crawl over a scope-guarded transport.
 ///
-/// `seeds` are absolute URLs — typically gathered from traffic already captured. Each is
-/// put to the guard like any other candidate, so a seed that is out of scope is recorded,
-/// not fetched. Seeds are the tester's explicit choice, so the destructive-link and
-/// form guards apply only to links the crawl *discovers*, not to what it was handed.
-pub async fn crawl<T, S, I>(
-    guard: &ScopeGuard<T>,
-    seeds: I,
-    budget: &CrawlBudget,
-    policy: &CrawlPolicy,
-) -> CrawlReport
-where
-    T: HttpTransport,
-    S: Into<String>,
-    I: IntoIterator<Item = S>,
-{
-    let options = SendOptions::automated(Origin::Crawler);
+/// Built once and then run: the guard it holds is the only way it reaches the network, so
+/// it is a *producer* under scope, never a second door onto it. Defaults are cautious —
+/// a modest [`CrawlBudget`] and a [`CrawlPolicy`] that respects `robots.txt` and does not
+/// follow destructive-looking links; the builder methods relax or tighten them.
+///
+/// ```no_run
+/// # async fn f<T: hexora_engine::transport::HttpTransport>(guard: &hexora_engine::guard::ScopeGuard<T>) {
+/// use hexora_crawl::Crawler;
+/// let report = Crawler::new(guard).run(["https://example.test/"]).await;
+/// # let _ = report;
+/// # }
+/// ```
+pub struct Crawler<'a, T: HttpTransport> {
+    guard: &'a ScopeGuard<T>,
+    budget: CrawlBudget,
+    policy: CrawlPolicy,
+    attached: Vec<Header>,
+    cancel: CrawlCancel,
+}
+
+impl<'a, T: HttpTransport> Crawler<'a, T> {
+    /// A crawler over `guard`, with the default budget and cautious policy.
+    pub fn new(guard: &'a ScopeGuard<T>) -> Self {
+        Self {
+            guard,
+            budget: CrawlBudget::default(),
+            policy: CrawlPolicy::default(),
+            attached: Vec::new(),
+            cancel: CrawlCancel::new(),
+        }
+    }
+
+    /// Sets the bounds the crawl runs within.
+    pub fn budget(mut self, budget: CrawlBudget) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// Sets the safety policy (robots, destructive links).
+    pub fn policy(mut self, policy: CrawlPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Headers the programme requires on every request (a research identifier, say),
+    /// applied to each in-scope request exactly as the repeater applies them — in scope,
+    /// attached; out of scope, never sent at all.
+    pub fn attaching(mut self, headers: Vec<Header>) -> Self {
+        self.attached = headers;
+        self
+    }
+
+    /// A handle that stops this crawl. Clone it before [`Self::run`] and set it from a
+    /// signal handler to stop cleanly with what has been fetched so far.
+    pub fn cancel_handle(&self) -> CrawlCancel {
+        self.cancel.clone()
+    }
+
+    /// Crawls from `seeds`, following in-scope links until the frontier empties, the budget
+    /// is spent, or the crawl is cancelled.
+    ///
+    /// `seeds` are absolute URLs — typically gathered from traffic already captured. Each is
+    /// put to the guard like any other candidate, so a seed that is out of scope is
+    /// recorded, not fetched. Seeds are the tester's explicit choice, so the destructive-link
+    /// and form guards apply only to links the crawl *discovers*, not to what it was handed.
+    pub async fn run<S, I>(&self, seeds: I) -> CrawlReport
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = S>,
+    {
+        let budget = &self.budget;
+        let policy = &self.policy;
+        let attached = &self.attached[..];
+        let guard = self.guard;
+        let options = SendOptions::automated(Origin::Crawler);
 
     let mut frontier: VecDeque<Pending> = VecDeque::new();
     let mut visited: HashSet<String> = HashSet::new();
@@ -259,6 +347,14 @@ where
                 });
                 return;
             }
+            // In scope: attach the programme's headers, so this crawl's traffic carries
+            // whatever marks it as authorized research. Done after the scope decision so a
+            // refused request never has them applied — the repeater's discipline.
+            for header in attached {
+                request
+                    .headers
+                    .set(&header.name, header.value_lossy().into_owned());
+            }
             if depth > budget.max_depth {
                 skipped.push(Skipped {
                     url,
@@ -281,6 +377,11 @@ where
     }
 
     let stopped = loop {
+        // Checked before every fetch, so a cancelled crawl stops promptly and returns what
+        // it has rather than abandoning it.
+        if self.cancel.is_stopped() {
+            break CrawlStop::Cancelled;
+        }
         let Some(item) = frontier.pop_front() else {
             break CrawlStop::FrontierEmpty;
         };
@@ -295,7 +396,7 @@ where
         // it is not counted against the ceiling or the per-host cap), then honour it.
         if !policy.ignore_robots {
             if !robots_by_host.contains_key(&host) {
-                let robots = fetch_robots(guard, &service, &options).await;
+                let robots = fetch_robots(guard, &service, &options, attached).await;
                 robots_by_host.insert(host.clone(), robots);
             }
             if let Some(robots) = robots_by_host.get(&host) {
@@ -354,10 +455,11 @@ where
         }
     };
 
-    CrawlReport {
-        fetched,
-        skipped,
-        stopped,
+        CrawlReport {
+            fetched,
+            skipped,
+            stopped,
+        }
     }
 }
 
@@ -367,11 +469,17 @@ async fn fetch_robots<T: HttpTransport>(
     guard: &ScopeGuard<T>,
     service: &HttpService,
     options: &SendOptions,
+    attached: &[Header],
 ) -> Robots {
     let mut request = HttpRequest::get(service.clone(), "/robots.txt");
     request.headers.set("User-Agent", CRAWLER_USER_AGENT);
     if !guard.decide(&request, options).permits_sending() {
         return Robots::allow_all();
+    }
+    for header in attached {
+        request
+            .headers
+            .set(&header.name, header.value_lossy().into_owned());
     }
     match guard.send(request, options.clone()).await {
         Ok(exchange) if exchange.response.is_success() => {

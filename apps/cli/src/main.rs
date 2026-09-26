@@ -16,6 +16,7 @@ use hexora_storage::{migrations, Project};
 
 mod active;
 mod authz;
+mod crawl;
 mod detectors;
 mod findings;
 mod fuzz;
@@ -48,9 +49,8 @@ mod ws;
                   penetration testing and security research.\n\n\
                   Development status: M15.4. The proxy, HTTP/1.x engine with TLS, \
                   projects, traffic capture, the repeater, authorization testing, the \
-                  passive scanner, the active scheduler, the intruder, findings and \
-                  reports all work. There is no crawler: Hexora tests the traffic it \
-                  was shown, so what it was never shown it never tested."
+                  passive scanner, the active scheduler, the intruder, findings, \
+                  reports and a bounded scope-checked crawler all work."
 )]
 struct Cli {
     /// Increase log verbosity. Repeat for more detail.
@@ -608,6 +608,61 @@ enum Command {
         /// to be forwarded without the sentence that qualified it.
         #[arg(long)]
         no_poc: bool,
+    },
+
+    /// Crawl in-scope targets to widen coverage, feeding fetched pages to the project.
+    ///
+    /// This sends requests. Seeds come from the traffic the project already holds (in
+    /// scope) unless you name them with --url. Out-of-scope links are recorded, not
+    /// fetched; forms are discovered, never submitted; destructive-looking links and
+    /// robots.txt are respected by default. Use --dry-run to see the plan first.
+    Crawl {
+        /// Project directory.
+        path: PathBuf,
+
+        /// A starting URL. Repeatable. When given, captured traffic is not used for seeds.
+        #[arg(long = "url", value_name = "URL")]
+        url: Vec<String>,
+
+        /// The whole crawl's request ceiling.
+        #[arg(long, value_name = "N")]
+        max_requests: Option<usize>,
+
+        /// The deepest a followed link may be from a seed.
+        #[arg(long, value_name = "N")]
+        max_depth: Option<usize>,
+
+        /// The most requests sent to any one host.
+        #[arg(long = "per-host", value_name = "N")]
+        max_per_host: Option<usize>,
+
+        /// Milliseconds to wait between fetches.
+        #[arg(long, value_name = "MS")]
+        delay: Option<u64>,
+
+        /// Follow links that look state-changing (logout, delete…). Off by default.
+        #[arg(long)]
+        follow_destructive: bool,
+
+        /// Ignore robots.txt. Off by default.
+        #[arg(long)]
+        ignore_robots: bool,
+
+        /// Work out the plan, print it, and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Do not ask before sending.
+        #[arg(long)]
+        yes: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+
+        /// Print what was found without writing the pages into the project.
+        #[arg(long)]
+        no_save: bool,
     },
 
     /// Captured WebSocket sessions, and the WebSocket repeater.
@@ -1173,6 +1228,39 @@ fn real_main() -> ExitCode {
 
 fn run(cli: &Cli) -> hexora_types::Result<()> {
     match &cli.command {
+        Command::Crawl {
+            path,
+            url,
+            max_requests,
+            max_depth,
+            max_per_host,
+            delay,
+            follow_destructive,
+            ignore_robots,
+            dry_run,
+            yes,
+            insecure,
+            no_save,
+        } => {
+            // The crawler sends automated traffic on its own, like the active scanner, so
+            // it sits behind the same entitlement.
+            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            crawl::run(crawl::Args {
+                project: path.clone(),
+                seeds: url.clone(),
+                max_requests: *max_requests,
+                max_depth: *max_depth,
+                max_per_host: *max_per_host,
+                delay_ms: *delay,
+                follow_destructive: *follow_destructive,
+                ignore_robots: *ignore_robots,
+                dry_run: *dry_run,
+                yes: *yes,
+                insecure: *insecure,
+                no_save: *no_save,
+                json: cli.json,
+            })
+        }
         Command::Ws(WsCommand::List { path }) => ws::list(path, cli.json),
         Command::Ws(WsCommand::Show { path, id }) => ws::show(path, id, cli.json),
         Command::Ws(WsCommand::Send {

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hexora_crawl::{crawl, CrawlBudget, CrawlPolicy, CrawlStop, SkipReason};
+use hexora_crawl::{CrawlBudget, CrawlPolicy, CrawlStop, Crawler, SkipReason};
 use hexora_engine::guard::ScopeGuard;
 use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
 use hexora_types::error::Result;
@@ -104,7 +104,10 @@ fn fetched_paths(report: &hexora_crawl::CrawlReport) -> Vec<String> {
 #[tokio::test]
 async fn crawls_the_whole_in_scope_site_once_each() {
     let guard = scoped_site();
-    let report = crawl(&guard, ["https://site.test/"], &no_delay(CrawlBudget::default()), &CrawlPolicy::default()).await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .run(["https://site.test/"])
+        .await;
 
     let mut paths = fetched_paths(&report);
     paths.sort();
@@ -128,7 +131,10 @@ async fn the_request_ceiling_stops_the_crawl() {
         max_requests: 2,
         ..CrawlBudget::default()
     });
-    let report = crawl(&guard, ["https://site.test/"], &budget, &CrawlPolicy::default()).await;
+    let report = Crawler::new(&guard)
+        .budget(budget)
+        .run(["https://site.test/"])
+        .await;
 
     assert_eq!(report.fetched.len(), 2);
     assert_eq!(report.stopped, CrawlStop::RequestCeiling);
@@ -141,7 +147,10 @@ async fn depth_zero_fetches_only_the_seed_and_records_its_links() {
         max_depth: 0,
         ..CrawlBudget::default()
     });
-    let report = crawl(&guard, ["https://site.test/"], &budget, &CrawlPolicy::default()).await;
+    let report = Crawler::new(&guard)
+        .budget(budget)
+        .run(["https://site.test/"])
+        .await;
 
     assert_eq!(fetched_paths(&report), vec!["/"]);
     assert_eq!(report.stopped, CrawlStop::FrontierEmpty);
@@ -163,7 +172,10 @@ async fn the_per_host_cap_bounds_one_host() {
         max_per_host: 1,
         ..CrawlBudget::default()
     });
-    let report = crawl(&guard, ["https://site.test/"], &budget, &CrawlPolicy::default()).await;
+    let report = Crawler::new(&guard)
+        .budget(budget)
+        .run(["https://site.test/"])
+        .await;
 
     assert_eq!(report.fetched.len(), 1);
     assert!(report
@@ -175,7 +187,10 @@ async fn the_per_host_cap_bounds_one_host() {
 #[tokio::test]
 async fn an_out_of_scope_seed_is_recorded_and_nothing_is_sent() {
     let guard = scoped_site();
-    let report = crawl(&guard, ["https://evil.test/"], &no_delay(CrawlBudget::default()), &CrawlPolicy::default()).await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .run(["https://evil.test/"])
+        .await;
 
     assert!(report.fetched.is_empty());
     assert_eq!(report.skipped.len(), 1);
@@ -202,13 +217,10 @@ async fn a_destructive_link_is_recorded_not_followed() {
             .page("/logout", "text/html", "bye"),
     );
 
-    let report = crawl(
-        &guard,
-        ["https://site.test/"],
-        &no_delay(CrawlBudget::default()),
-        &CrawlPolicy::default(),
-    )
-    .await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .run(["https://site.test/"])
+        .await;
 
     let paths = fetched_paths(&report);
     assert!(paths.contains(&"/safe".to_string()));
@@ -230,13 +242,11 @@ async fn opting_in_follows_the_destructive_link() {
         follow_destructive: true,
         ignore_robots: false,
     };
-    let report = crawl(
-        &guard,
-        ["https://site.test/"],
-        &no_delay(CrawlBudget::default()),
-        &policy,
-    )
-    .await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .policy(policy)
+        .run(["https://site.test/"])
+        .await;
 
     assert!(fetched_paths(&report).contains(&"/logout".to_string()));
 }
@@ -249,13 +259,10 @@ async fn a_form_is_discovered_but_never_auto_submitted() {
         r#"<form action="/submit" method="post"><input name="x"></form>"#,
     ));
 
-    let report = crawl(
-        &guard,
-        ["https://site.test/"],
-        &no_delay(CrawlBudget::default()),
-        &CrawlPolicy::default(),
-    )
-    .await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .run(["https://site.test/"])
+        .await;
 
     assert_eq!(fetched_paths(&report), vec!["/"]);
     assert!(report.skipped.iter().any(|s| {
@@ -277,13 +284,10 @@ async fn robots_disallow_is_respected_by_default() {
             .page("/public", "text/html", "ok"),
     );
 
-    let report = crawl(
-        &guard,
-        ["https://site.test/"],
-        &no_delay(CrawlBudget::default()),
-        &CrawlPolicy::default(),
-    )
-    .await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .run(["https://site.test/"])
+        .await;
 
     let paths = fetched_paths(&report);
     assert!(paths.contains(&"/public".to_string()));
@@ -306,13 +310,11 @@ async fn robots_can_be_overridden_loudly() {
         follow_destructive: false,
         ignore_robots: true,
     };
-    let report = crawl(
-        &guard,
-        ["https://site.test/"],
-        &no_delay(CrawlBudget::default()),
-        &policy,
-    )
-    .await;
+    let report = Crawler::new(&guard)
+        .budget(no_delay(CrawlBudget::default()))
+        .policy(policy)
+        .run(["https://site.test/"])
+        .await;
 
     assert!(fetched_paths(&report).contains(&"/private/x".to_string()));
 }

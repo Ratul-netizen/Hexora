@@ -1584,6 +1584,7 @@ dependencies = [
  "clap",
  "hexora-active",
  "hexora-authz",
+ "hexora-crawl",
  "hexora-engine",
  "hexora-fuzz",
  "hexora-http",

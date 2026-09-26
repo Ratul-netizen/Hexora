@@ -29,7 +29,7 @@ use hexora_types::http::HttpService;
 pub mod frontier;
 pub mod robots;
 pub use frontier::{
-    crawl, CrawlBudget, CrawlPolicy, CrawlReport, CrawlStop, SkipReason, Skipped,
+    CrawlBudget, CrawlCancel, CrawlPolicy, CrawlReport, CrawlStop, Crawler, SkipReason, Skipped,
     CRAWLER_USER_AGENT,
 };
 

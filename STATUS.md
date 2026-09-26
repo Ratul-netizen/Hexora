@@ -73,11 +73,14 @@ milestone.
 
 ## Next
 
-**After M5.1 (HTTP/2), the open parity items are WebSocket interception and a seeded,
-in-scope crawler for coverage** — the two things a pro still misses versus Burp. The
-enterprise track (team/server mode, SSO, audit log, licensing) and the extension SDK
-(`extensions/sdk` is still a stub) remain the path to selling it; see `docs/roadmap.md`
-and `docs/feature-parity.md`. The notes below are the scanner-era retrospective that
+**HTTP/2 (M5.1), WebSocket interception (WS.a–f) and a seeded, in-scope crawler
+(CR.a–CR.c, with a `hexora crawl` command) have all landed** — the coverage and
+protocol-breadth items a pro used to miss versus Burp. Remaining crawler work is CR.d
+(authenticated crawling), CR.e (the site-map view) and CR.f (fuzzing + JS-rendered
+discovery via M18). The enterprise track (team/server mode, SSO, audit log, licensing)
+and the extension SDK (`extensions/sdk` is still a stub) remain the path to selling it;
+see `docs/roadmap.md` and `docs/feature-parity.md`. The notes below are the scanner-era
+retrospective that
 preceded this work and are kept for context.
 
 **The spine now runs in both directions.** A passive check raises a suspicion it
