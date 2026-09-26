@@ -991,6 +991,17 @@ which is the **M22** team/server track — the natural sequel to this one. And t
 signing key is the most sensitive thing this track introduces after the interception CA: its
 storage and rotation get a runbook, not a line in a script.
 
+<!-- Release-blocker resolved: the licence key is no longer a placeholder. `EMBEDDED_LICENSE_KEY`
+is now set at build time from `HEXORA_LICENSE_PUBKEY` (64 hex), all-zeros (free tier) when
+unset — so dev and tests cannot grant a tier, and a release embeds the real key. The issuer
+tooling landed: `hexora license keygen` (Ed25519 keypair) and `hexora license sign` (mint a
+signed licence). Shipping them is safe because signing needs the offline private key and the
+build verifies against the separately-embedded public key. The one-time key ceremony is in
+docs/licensing-keys.md. Proven end to end: keyed build + signed Pro licence unlocks a gated
+feature; no licence stays free; a wrong-key licence is refused. Remaining: LIC.d (signed
+installers, needs code-signing certs) and running the ceremony once before release. -->
+
+
 **Sequencing.** LIC.0 is a decision to make now. a→b is the smallest path to actually
 charging money (a gate and a split); c makes the paid experience humane; d and e make it
 feel enterprise-grade and pass procurement. It is the shortest route from "a strong tool" to

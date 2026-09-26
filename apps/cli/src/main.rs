@@ -750,6 +750,43 @@ enum LicenseCommand {
     },
     /// Start a time-limited Pro trial on this machine.
     Trial,
+
+    /// Issuer tool: generate an Ed25519 keypair for signing licences.
+    ///
+    /// You do this once. The private key stays offline and signs licences (`license sign`);
+    /// the printed public key is embedded in release builds via HEXORA_LICENSE_PUBKEY.
+    Keygen {
+        /// Where to write the private key (PKCS#8). Refuses to overwrite an existing file.
+        #[arg(long, value_name = "PATH", default_value = "hexora-issuer.key")]
+        out: PathBuf,
+    },
+
+    /// Issuer tool: sign a licence file with the issuing private key.
+    Sign {
+        /// The issuing private key from `license keygen`.
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+
+        /// The tier to grant: pro or enterprise.
+        #[arg(long, value_name = "TIER")]
+        tier: String,
+
+        /// Who the licence is issued to.
+        #[arg(long, value_name = "NAME")]
+        licensee: Option<String>,
+
+        /// An explicit RFC 3339 expiry (conflicts with --days).
+        #[arg(long, value_name = "TIME", conflicts_with = "days")]
+        expires: Option<String>,
+
+        /// Expire this many days from now (conflicts with --expires).
+        #[arg(long, value_name = "N")]
+        days: Option<i64>,
+
+        /// Where to write the licence. Printed to stdout when omitted.
+        #[arg(long, value_name = "PATH")]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1315,6 +1352,23 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         Command::License(LicenseCommand::Show) => license::show(cli.json),
         Command::License(LicenseCommand::Activate { file }) => license::activate(file, cli.json),
         Command::License(LicenseCommand::Trial) => license::trial(cli.json),
+        Command::License(LicenseCommand::Keygen { out }) => license::keygen(out, cli.json),
+        Command::License(LicenseCommand::Sign {
+            key,
+            tier,
+            licensee,
+            expires,
+            days,
+            out,
+        }) => license::sign(license::SignArgs {
+            key,
+            tier,
+            licensee: licensee.as_deref(),
+            expires: expires.as_deref(),
+            days: *days,
+            out: out.as_deref(),
+            json: cli.json,
+        }),
         Command::Version => {
             print_version(cli.json);
             Ok(())

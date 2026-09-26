@@ -40,11 +40,55 @@ use hexora_types::error::{HexoraError, Result};
 
 /// The Ed25519 public key licences are verified against, embedded in the binary.
 ///
-/// This placeholder is all zeros, so it verifies nothing and every build using it runs at
-/// the free tier — a safe default. A release build replaces it with Hexora's real public
-/// key; the matching private key is the most sensitive secret this feature introduces after
-/// the interception CA, and its storage and rotation are a runbook, not a line in a script.
-pub const EMBEDDED_LICENSE_KEY: [u8; 32] = [0u8; 32];
+/// Set at build time from `HEXORA_LICENSE_PUBKEY` (64 hex characters, the 32-byte key a
+/// [`generate_keypair`] run printed). A release is built with it set:
+///
+/// ```console
+/// $ HEXORA_LICENSE_PUBKEY=<64 hex> cargo build --release -p hexora-cli
+/// ```
+///
+/// Unset — every ordinary `cargo build`, and every test — it is all zeros, which verifies
+/// nothing, so those builds run at the free tier. That is the safe default and why the
+/// signing tools live beside the gate without weakening it: a build with no real key
+/// embedded cannot grant a tier no matter what licence it is handed. The matching private
+/// key is the most sensitive secret this feature introduces after the interception CA; its
+/// storage and rotation are a runbook, not a line in a script.
+pub const EMBEDDED_LICENSE_KEY: [u8; 32] = embedded_key();
+
+/// Resolves the embedded key from the build environment, or all zeros when unset.
+const fn embedded_key() -> [u8; 32] {
+    match option_env!("HEXORA_LICENSE_PUBKEY") {
+        Some(hex) => decode_key_hex(hex),
+        None => [0u8; 32],
+    }
+}
+
+/// Decodes exactly 64 hex characters into a 32-byte key, at compile time. A wrong length or a
+/// non-hex character fails the build rather than shipping a silently-wrong key.
+const fn decode_key_hex(hex: &str) -> [u8; 32] {
+    let bytes = hex.as_bytes();
+    assert!(
+        bytes.len() == 64,
+        "HEXORA_LICENSE_PUBKEY must be 64 hex characters (a 32-byte Ed25519 public key)"
+    );
+    let mut out = [0u8; 32];
+    let mut i = 0;
+    while i < 32 {
+        out[i] = (hex_nibble(bytes[2 * i]) << 4) | hex_nibble(bytes[2 * i + 1]);
+        i += 1;
+    }
+    out
+}
+
+/// One hex character to its nibble, at compile time.
+const fn hex_nibble(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        b'A'..=b'F' => c - b'A' + 10,
+        _ => panic!("HEXORA_LICENSE_PUBKEY contains a non-hex character"),
+    }
+}
 
 /// A licence tier, ordered from least to most.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -442,6 +486,82 @@ fn verify(license: &[u8], verifying_key: &[u8], now: DateTime<Utc>) -> std::resu
     })
 }
 
+// ---- Issuer-side: generating a key and signing licences ----
+//
+// These are the vendor's tools, not a customer's. They are compiled into the binary
+// unconditionally, and that is safe: signing needs the private key, which a customer does not
+// have, and the *embedded* key a build verifies against is set separately at build time. A
+// build with no real key embedded (the default) cannot be tricked into honouring a licence,
+// whatever it was signed with.
+
+/// The claims to put in a licence.
+#[derive(Debug, Clone)]
+pub struct LicenseClaims {
+    /// The tier to grant.
+    pub tier: Tier,
+    /// Who it is issued to, for display. May be empty.
+    pub licensee: String,
+    /// When it expires. `None` is perpetual.
+    pub expires: Option<DateTime<Utc>>,
+}
+
+/// Generates a fresh Ed25519 issuing keypair.
+///
+/// Returns `(pkcs8_private_key, public_key)`: the PKCS#8 DER private key to keep offline and
+/// feed to [`sign_license`], and the 32-byte public key to embed via `HEXORA_LICENSE_PUBKEY`.
+/// The private key never leaves the issuer; losing it means re-keying every licence.
+pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
+        .map_err(|_| HexoraError::Internal("could not generate an Ed25519 key".into()))?;
+    let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
+        .map_err(|_| HexoraError::Internal("generated an unusable Ed25519 key".into()))?;
+    use ring::signature::KeyPair as _;
+    Ok((
+        pkcs8.as_ref().to_vec(),
+        key_pair.public_key().as_ref().to_vec(),
+    ))
+}
+
+/// Signs a licence file for `claims` with a PKCS#8 Ed25519 private key.
+///
+/// Produces the exact on-disk bytes [`EntitlementGate::from_license`] reads: a `{payload,
+/// signature}` JSON where the signature is over the claims bytes, so verification checks the
+/// same bytes that were signed.
+pub fn sign_license(pkcs8_private_key: &[u8], claims: &LicenseClaims) -> Result<Vec<u8>> {
+    let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_private_key)
+        .map_err(|_| HexoraError::invalid_input("key", "not a valid Ed25519 PKCS#8 private key"))?;
+
+    // Build the claims JSON, omitting fields that carry nothing, so the payload is minimal and
+    // matches what the verifier's `Claims` reads back.
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "tier".into(),
+        serde_json::Value::String(claims.tier.label().to_ascii_lowercase()),
+    );
+    if !claims.licensee.is_empty() {
+        object.insert(
+            "licensee".into(),
+            serde_json::Value::String(claims.licensee.clone()),
+        );
+    }
+    if let Some(expires) = claims.expires {
+        object.insert(
+            "expires".into(),
+            serde_json::Value::String(expires.to_rfc3339()),
+        );
+    }
+    let claims_json = serde_json::to_vec(&serde_json::Value::Object(object))
+        .map_err(|e| HexoraError::Internal(format!("serialising licence claims: {e}")))?;
+
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let payload = b64.encode(&claims_json);
+    let signature = b64.encode(key_pair.sign(&claims_json).as_ref());
+    let file = serde_json::json!({ "payload": payload, "signature": signature });
+    serde_json::to_vec_pretty(&file)
+        .map_err(|e| HexoraError::Internal(format!("serialising licence file: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,6 +674,87 @@ mod tests {
         let licence = issuer.issue(r#"{"tier":"enterprise"}"#);
         let gate = EntitlementGate::from_license(&licence, &EMBEDDED_LICENSE_KEY, now());
         assert_eq!(gate.entitlements().tier, Tier::Free);
+    }
+
+    #[test]
+    fn keygen_sign_and_verify_is_a_round_trip() {
+        // The real issuer path, end to end: generate a key, sign a licence with the private
+        // half, verify it against the public half.
+        let (private_key, public_key) = generate_keypair().unwrap();
+        let licence = sign_license(
+            &private_key,
+            &LicenseClaims {
+                tier: Tier::Pro,
+                licensee: "Acme Pentest Ltd".into(),
+                expires: None,
+            },
+        )
+        .unwrap();
+
+        let gate = EntitlementGate::from_license(&licence, &public_key, now());
+        assert_eq!(gate.entitlements().tier, Tier::Pro);
+        assert_eq!(gate.entitlements().licensee, "Acme Pentest Ltd");
+        assert!(gate.allows(Feature::ActiveScanner));
+    }
+
+    #[test]
+    fn a_signed_licence_is_rejected_by_a_different_embedded_key() {
+        // The security property that makes shipping the signing tool safe: a licence signed
+        // by one key does not verify against another (and the shipped placeholder is neither).
+        let (private_key, _public_key) = generate_keypair().unwrap();
+        let (_other_private, other_public) = generate_keypair().unwrap();
+        let licence = sign_license(
+            &private_key,
+            &LicenseClaims {
+                tier: Tier::Enterprise,
+                licensee: String::new(),
+                expires: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            EntitlementGate::from_license(&licence, &other_public, now())
+                .entitlements()
+                .tier,
+            Tier::Free
+        );
+        assert_eq!(
+            EntitlementGate::from_license(&licence, &EMBEDDED_LICENSE_KEY, now())
+                .entitlements()
+                .tier,
+            Tier::Free
+        );
+    }
+
+    #[test]
+    fn a_signed_expiry_is_honoured_then_lapses() {
+        let (private_key, public_key) = generate_keypair().unwrap();
+        let expires = now() + chrono::Duration::days(30);
+        let licence = sign_license(
+            &private_key,
+            &LicenseClaims {
+                tier: Tier::Pro,
+                licensee: "Time-Boxed".into(),
+                expires: Some(expires),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            EntitlementGate::from_license(&licence, &public_key, now())
+                .entitlements()
+                .tier,
+            Tier::Pro
+        );
+        // Past the expiry it degrades to free, never a lock.
+        let later = expires + chrono::Duration::days(1);
+        assert_eq!(
+            EntitlementGate::from_license(&licence, &public_key, later)
+                .entitlements()
+                .tier,
+            Tier::Free
+        );
     }
 
     #[test]
