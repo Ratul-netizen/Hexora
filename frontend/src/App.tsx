@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthzView } from "./views/AuthzView";
 import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
+import { CrawlerView } from "./views/CrawlerView";
 import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
 import { LicenseView } from "./views/LicenseView";
@@ -43,6 +44,7 @@ type Tab =
   | "scan"
   | "authz"
   | "findings"
+  | "crawler"
   | "report"
   | "sitemap"
   | "snapshots"
@@ -59,6 +61,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "scan", label: "Scan" },
   { id: "authz", label: "Authorization" },
   { id: "findings", label: "Findings" },
+  { id: "crawler", label: "Crawler" },
   { id: "sitemap", label: "Site map" },
   { id: "report", label: "Report" },
   { id: "snapshots", label: "Snapshots" },
@@ -237,6 +240,9 @@ export default function App() {
             refreshToken={findingCount}
             onOpenExchange={showExchange}
           />
+        )}
+        {tab === "crawler" && (
+          <CrawlerView hasProject={project !== null} license={license} />
         )}
         {tab === "sitemap" && <SitemapView hasProject={project !== null} />}
         {tab === "report" && <ReportView hasProject={project !== null} />}

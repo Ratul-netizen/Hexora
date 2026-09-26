@@ -57,6 +57,7 @@ pub fn run() {
             commands::license_activate,
             commands::license_start_trial,
             commands::sitemap_build,
+            commands::crawl_run,
             commands::websocket_sessions,
             commands::websocket_messages,
             commands::repeater_draft,

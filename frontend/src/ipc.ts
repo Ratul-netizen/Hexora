@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 12;
+export const EXPECTED_RPC_CONTRACT_VERSION = 13;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -251,6 +251,27 @@ export const buildSitemap = (
   host: string | null,
   forms: boolean,
 ): Promise<SitemapView> => invoke<SitemapView>("sitemap_build", { host, forms });
+
+/** What a crawl did. */
+export interface CrawlSummary {
+  seeds: number;
+  fetched: number;
+  recorded: number;
+  skipped: number;
+  skipped_by_reason: Record<string, number>;
+  stopped: string;
+}
+
+/** Runs a bounded, scope-checked crawl and records what it fetched. Sends traffic. */
+export const runCrawl = (args: {
+  seeds: string[];
+  maxRequests: number | null;
+  maxDepth: number | null;
+  followDestructive: boolean;
+  ignoreRobots: boolean;
+  insecure: boolean;
+  identity: string | null;
+}): Promise<CrawlSummary> => invoke<CrawlSummary>("crawl_run", args);
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

@@ -1673,3 +1673,65 @@ table.tree td.methods {
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+
+/* ---- Crawler ---- */
+.crawler {
+  display: grid;
+  gap: 16px;
+  max-width: 820px;
+}
+.crawler .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  flex: 1 1 auto;
+}
+.crawler .field > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.crawler textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  resize: vertical;
+}
+.crawler .row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+.crawler .toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 14px;
+}
+.crawler .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+.crawler button.primary {
+  margin-top: 14px;
+}
+.reasons {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.reasons li {
+  padding: 3px 0;
+  color: var(--text-muted);
+}
+.reasons .count {
+  display: inline-block;
+  min-width: 24px;
+  color: var(--text-bright);
+  font-weight: 600;
+}

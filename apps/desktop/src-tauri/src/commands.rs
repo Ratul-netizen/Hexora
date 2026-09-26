@@ -2541,11 +2541,213 @@ fn default_ca_dir() -> CommandResult<PathBuf> {
     Ok(PathBuf::from(base).join(".hexora").join("ca"))
 }
 
-/// Opens the project the window is working in.
+// ---------------------------------------------------------------------------
+// Crawler (M13.8)
+// ---------------------------------------------------------------------------
+
+/// What a crawl did, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct CrawlSummary {
+    pub seeds: usize,
+    pub fetched: usize,
+    pub recorded: usize,
+    pub skipped: usize,
+    pub skipped_by_reason: std::collections::BTreeMap<String, usize>,
+    /// `frontier_empty`, `request_ceiling` or `cancelled`.
+    pub stopped: String,
+}
+
+/// Runs a bounded, scope-checked crawl and records what it fetched.
 ///
-/// A fresh handle each time rather than one held open in [`AppState`]: SQLite
-/// connections are pooled underneath, and a command that borrowed a long-lived
-/// project would have to decide what happens when the tester opens another one.
+/// Automated traffic, so it sits behind the same entitlement as the active scanner, and the
+/// button that starts it is the tester's consent — nothing is sent before it is pressed.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn crawl_run(
+    state: State<'_, AppState>,
+    seeds: Vec<String>,
+    max_requests: Option<usize>,
+    max_depth: Option<usize>,
+    follow_destructive: bool,
+    ignore_robots: bool,
+    insecure: bool,
+    identity: Option<String>,
+) -> CommandResult<CrawlSummary> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+    let path = state.project_path().map_err(fail)?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        crawl_run_blocking(
+            path,
+            seeds,
+            max_requests,
+            max_depth,
+            follow_destructive,
+            ignore_robots,
+            insecure,
+            identity,
+        )
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+/// The crawl itself, owning everything it touches.
+#[allow(clippy::too_many_arguments)]
+fn crawl_run_blocking(
+    path: PathBuf,
+    seeds_in: Vec<String>,
+    max_requests: Option<usize>,
+    max_depth: Option<usize>,
+    follow_destructive: bool,
+    ignore_robots: bool,
+    insecure: bool,
+    identity_label: Option<String>,
+) -> CommandResult<CrawlSummary> {
+    let project = Project::open(&path).map_err(fail)?;
+    let scope = project.settings().scope().map_err(fail)?;
+    let attached = project.settings().attached_headers().map_err(fail)?;
+
+    let identity = match identity_label.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(who) => Some(resolve_identity(&project.identities(), who)?),
+        None => None,
+    };
+
+    let seeds: Vec<String> = if seeds_in.iter().all(|s| s.trim().is_empty()) {
+        gather_seeds(&project, &scope)?
+    } else {
+        seeds_in
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    if seeds.is_empty() {
+        return Err("no in-scope traffic to seed a crawl; capture some, or give a URL".to_string());
+    }
+    let seed_count = seeds.len();
+
+    let mut budget = hexora_crawl::CrawlBudget::default();
+    if let Some(m) = max_requests {
+        budget.max_requests = m;
+    }
+    if let Some(d) = max_depth {
+        budget.max_depth = d;
+    }
+    let policy = hexora_crawl::CrawlPolicy {
+        follow_destructive,
+        ignore_robots,
+    };
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, Arc::new(scope));
+    let mut crawler = hexora_crawl::Crawler::new(&guard)
+        .budget(budget)
+        .policy(policy)
+        .attaching(attached);
+    let identity_id = identity.as_ref().map(|i| i.id);
+    if let Some(id) = identity {
+        crawler = crawler.crawling_as(id);
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+    let report = runtime.block_on(crawler.run(seeds));
+
+    let store = project.traffic();
+    let mut recorded = 0;
+    for exchange in &report.fetched {
+        let captured = hexora_storage::CapturedExchange {
+            request: exchange.request.clone(),
+            raw_request: exchange.raw_request.clone(),
+            response: exchange.response.clone(),
+            encoded_body: exchange.encoded_body.clone(),
+            content_encoding: exchange.content_encoding.clone(),
+            origin: hexora_engine::transport::Origin::Crawler.as_str(),
+            identity: identity_id,
+            parent: None,
+            quirks: Vec::new(),
+            tls: exchange.tls.clone(),
+            duration_ms: exchange.duration.as_millis().min(u128::from(u32::MAX)) as u32,
+        };
+        store.record(&captured).map_err(fail)?;
+        recorded += 1;
+    }
+
+    let mut by_reason: std::collections::BTreeMap<String, usize> = Default::default();
+    for skipped in &report.skipped {
+        *by_reason.entry(skip_reason_word(skipped.reason).to_string()).or_insert(0) += 1;
+    }
+    let stopped = match report.stopped {
+        hexora_crawl::CrawlStop::FrontierEmpty => "frontier_empty",
+        hexora_crawl::CrawlStop::RequestCeiling => "request_ceiling",
+        hexora_crawl::CrawlStop::Cancelled => "cancelled",
+    };
+
+    Ok(CrawlSummary {
+        seeds: seed_count,
+        fetched: report.fetched.len(),
+        recorded,
+        skipped: report.skipped.len(),
+        skipped_by_reason: by_reason,
+        stopped: stopped.to_string(),
+    })
+}
+
+/// Gathers in-scope seed URLs from captured traffic, newest first, deduplicated.
+fn gather_seeds(project: &Project, scope: &Scope) -> CommandResult<Vec<String>> {
+    let store = project.traffic();
+    let mut seeds = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut cursor: Option<Cursor> = None;
+    loop {
+        let page = store.history(cursor.as_ref(), Limit::new(500)).map_err(fail)?;
+        for item in &page.items {
+            if url_in_scope(scope, &item.url) && seen.insert(item.url.clone()) {
+                seeds.push(item.url.clone());
+                if seeds.len() >= 1000 {
+                    return Ok(seeds);
+                }
+            }
+        }
+        match page.next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    Ok(seeds)
+}
+
+/// Whether a captured URL is in scope.
+fn url_in_scope(scope: &Scope, url: &str) -> bool {
+    match hexora_types::http::HttpService::parse_url(url) {
+        Ok((service, path)) => scope.contains(&service, &path),
+        Err(_) => false,
+    }
+}
+
+/// A short reason word for a crawl skip.
+fn skip_reason_word(reason: hexora_crawl::SkipReason) -> &'static str {
+    use hexora_crawl::SkipReason as R;
+    match reason {
+        R::OutOfScope => "out of scope",
+        R::DepthLimit => "past the depth limit",
+        R::PerHostLimit => "past the per-host cap",
+        R::Unfetchable => "not a fetchable URL",
+        R::Form => "a form (never submitted)",
+        R::LooksDestructive => "looks destructive",
+        R::RobotsDisallowed => "disallowed by robots.txt",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Site map (CR.e)
 // ---------------------------------------------------------------------------
@@ -2696,6 +2898,11 @@ fn content_type_of(headers_raw: &[u8]) -> String {
     String::new()
 }
 
+/// Opens the project the window is working in.
+///
+/// A fresh handle each time rather than one held open in [`AppState`]: SQLite
+/// connections are pooled underneath, and a command that borrowed a long-lived
+/// project would have to decide what happens when the tester opens another one.
 fn open(state: &State<'_, AppState>) -> CommandResult<Project> {
     let path = state.project_path().map_err(fail)?;
     Project::open(&path).map_err(fail)
