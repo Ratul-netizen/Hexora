@@ -1667,6 +1667,7 @@ dependencies = [
  "hexora-engine",
  "hexora-types",
  "http",
+ "proptest",
  "rcgen",
  "rustls",
  "rustls-native-certs",

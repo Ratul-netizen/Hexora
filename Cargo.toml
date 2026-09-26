@@ -18,6 +18,9 @@ members = [
     "apps/cli",
     "apps/desktop/src-tauri",
 ]
+# The fuzz targets are a package of their own: they need nightly and libfuzzer-sys, and a
+# normal build must never pull them in. See fuzz/README.md.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

@@ -28,3 +28,4 @@ http.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 rcgen.workspace = true
+proptest.workspace = true

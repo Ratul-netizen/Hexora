@@ -433,6 +433,17 @@ fn encode_integer(out: &mut Vec<u8>, value: usize, prefix_bits: u8, flags: u8) {
     }
 }
 
+/// Runs the response header-block decoder over arbitrary bytes.
+///
+/// Public only so the `fuzz/` targets can reach it, and hidden from the docs for the same
+/// reason. It returns nothing because the property under test is that the decoder does not
+/// panic, loop or read out of bounds on hostile input — not what it decodes, since a
+/// malformed block has no correct decoding.
+#[doc(hidden)]
+pub fn fuzz_decode_header_block(block: &[u8]) {
+    let _ = decode_header_block(block);
+}
+
 /// What a decoded response header block yielded.
 struct DecodedHeaders {
     status: Option<u16>,
@@ -528,17 +539,27 @@ fn record(headers: &mut Headers, status: &mut Option<u16>, name: &str, value: &s
 }
 
 /// Decodes an HPACK integer with the given prefix, returning it and the next position.
+///
+/// Hostile-input safe: a malformed integer with a long continuation cannot overflow. The
+/// value saturates, but every continuation byte is still consumed so the decoder stays in
+/// sync — a saturated length is bounded against the block by the caller anyway, and a value
+/// this large has no honest meaning.
 fn decode_integer(block: &[u8], pos: usize, prefix_bits: u8) -> (usize, usize) {
     let max_prefix = (1usize << prefix_bits) - 1;
     let mut value = (block[pos] as usize) & max_prefix;
     let mut pos = pos + 1;
     if value == max_prefix {
-        let mut shift = 0;
+        let mut shift = 0u32;
         while pos < block.len() {
             let byte = block[pos];
             pos += 1;
-            value += ((byte & 0x7f) as usize) << shift;
-            shift += 7;
+            if shift < usize::BITS {
+                let add = ((byte & 0x7f) as usize).checked_shl(shift).unwrap_or(0);
+                value = value.saturating_add(add);
+                shift += 7;
+            }
+            // Past the width of `usize` the value is saturated; keep consuming continuation
+            // bytes so the next field starts where it should.
             if byte & 0x80 == 0 {
                 break;
             }
@@ -727,5 +748,66 @@ mod tests {
             view.headers.get("x-test").map(|h| h.value_lossy().into_owned()),
             Some("1".to_string())
         );
+    }
+
+    #[test]
+    fn a_long_hpack_integer_saturates_rather_than_panicking() {
+        // Regression: a malformed HPACK integer with a long continuation used to overflow
+        // the shift and panic — a crash on bytes a hostile server controls. It must now
+        // saturate while still consuming every continuation byte, so the decoder stays in
+        // sync. Found by the proptest below.
+        let mut bytes = vec![0xffu8]; // 7-bit prefix maxed, so a continuation follows
+        bytes.extend(std::iter::repeat(0xff).take(30)); // 30 continuation bytes
+        bytes.push(0x00); // terminator
+        let (value, pos) = decode_integer(&bytes, 0, 7);
+        assert_eq!(pos, bytes.len(), "every continuation byte is consumed");
+        assert!(value > 0);
+    }
+
+    // -------------------------------------------------- hostile-peer hardening
+    //
+    // The HPACK decoder and the padding strippers read bytes a hostile server controls, and
+    // they are hand-rolled. The bar is not "decodes correctly" — a malformed block has no
+    // correct decoding — but "never panics, always terminates, never reads out of bounds,
+    // and stays in sync". proptest hammers that with arbitrary input; the cargo-fuzz targets
+    // under `fuzz/` chase the same property with coverage guidance.
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn decoding_arbitrary_bytes_never_panics_and_terminates(block in prop::collection::vec(any::<u8>(), 0..4096)) {
+            // A hostile header block must not crash the decoder or loop forever. The number
+            // of fields it yields is bounded by the block length, since every field consumes
+            // at least one byte — a decoder that returned more would be looping.
+            let decoded = decode_header_block(&block);
+            let field_count = decoded.headers.iter().count() + usize::from(decoded.status.is_some());
+            prop_assert!(field_count <= block.len() + 1);
+        }
+
+        #[test]
+        fn decode_integer_never_reads_out_of_bounds(bytes in prop::collection::vec(any::<u8>(), 1..64), prefix in 1u8..=7) {
+            let (_value, pos) = decode_integer(&bytes, 0, prefix);
+            prop_assert!(pos >= 1 && pos <= bytes.len());
+        }
+
+        #[test]
+        fn decode_string_stays_within_the_block(bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+            let (out, pos) = decode_string(&bytes, 0);
+            prop_assert!(pos <= bytes.len());
+            // A non-Huffman string is a slice of the input; a Huffman one is the marker.
+            prop_assert!(out.len() <= bytes.len() || out == b"<huffman>");
+        }
+
+        #[test]
+        fn padding_strippers_return_a_slice_within_the_payload(
+            payload in prop::collection::vec(any::<u8>(), 0..512),
+            flags in any::<u8>(),
+        ) {
+            let headers = strip_headers_padding(&payload, flags);
+            prop_assert!(headers.len() <= payload.len());
+            let data = strip_data_padding(&payload, flags);
+            prop_assert!(data.len() <= payload.len());
+        }
     }
 }

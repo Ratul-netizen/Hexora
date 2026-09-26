@@ -1,0 +1,30 @@
+# cargo-fuzz targets for Hexora's hand-rolled binary parsers.
+#
+# This is a separate package, deliberately outside the main workspace (the root's `members`
+# list does not include it, and `exclude` names it), because it depends on libfuzzer-sys and
+# only builds under `cargo +nightly fuzz`. Nothing in a normal `cargo build`/`test` touches
+# it. See README.md for how to run.
+[package]
+name = "hexora-http-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.hexora-http]
+path = "../core/http"
+
+[[bin]]
+name = "hpack_decode"
+path = "fuzz_targets/hpack_decode.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

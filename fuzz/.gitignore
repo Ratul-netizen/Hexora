@@ -1,0 +1,6 @@
+# cargo-fuzz build output and generated inputs; the corpus is large and machine-specific.
+target/
+corpus/
+artifacts/
+coverage/
+Cargo.lock
