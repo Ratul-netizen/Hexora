@@ -36,12 +36,12 @@ use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
 use hexora_types::scope::Scope;
 use hexora_types::ws::WsDirection;
-use hexora_http::ws::FrameParser;
+use hexora_http::ws::{encode, Frame, FrameParser};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::ca::CertificateAuthority;
-use crate::hook::{Interceptor, PassThrough, RequestVerdict, ResponseVerdict};
+use crate::hook::{Interceptor, PassThrough, RequestVerdict, ResponseVerdict, WsVerdict};
 use crate::intercept::{self, InterceptionPolicy, TunnelOutcome};
 
 /// Bytes read from a client per call.
@@ -382,6 +382,7 @@ async fn relay_websocket<C, U>(
     upstream: U,
     request_id: Option<RequestId>,
     observer: Arc<dyn ExchangeObserver>,
+    interceptor: Arc<dyn Interceptor>,
     limits: Limits,
     // Bytes already read from each side that belong to the WebSocket stream — frames that
     // arrived in the same segment as the handshake. Forwarded and captured before the relay
@@ -403,6 +404,7 @@ where
         WsDirection::ClientToServer,
         request_id,
         observer.clone(),
+        interceptor.clone(),
         cap,
         client_seed,
     );
@@ -412,6 +414,7 @@ where
         WsDirection::ServerToClient,
         request_id,
         observer.clone(),
+        interceptor.clone(),
         cap,
         upstream_seed,
     );
@@ -424,7 +427,13 @@ where
     }
 }
 
-/// Copies one direction of a WebSocket, forwarding bytes verbatim and recording frames.
+/// Copies one direction of a WebSocket, recording every frame — and, when the interceptor
+/// wants them, letting it forward, replace or drop each one.
+///
+/// Two modes. With no WebSocket interception the bytes are forwarded exactly as they arrived
+/// and only observed, so the wire is preserved. With interception on, each frame is parsed,
+/// put to the interceptor, and re-encoded from its verdict — a client frame re-masked, a
+/// server frame not — which is the cost of being able to change or drop one.
 #[allow(clippy::too_many_arguments)]
 async fn pump<R, W>(
     read: &mut R,
@@ -432,6 +441,7 @@ async fn pump<R, W>(
     direction: WsDirection,
     request_id: Option<RequestId>,
     observer: Arc<dyn ExchangeObserver>,
+    interceptor: Arc<dyn Interceptor>,
     cap: usize,
     seed: Vec<u8>,
 ) -> Result<()>
@@ -439,33 +449,65 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    let intercepting = interceptor.intercepts_websocket();
     let mut parser = FrameParser::new(cap);
-    let observe = |parser: &mut FrameParser, observer: &Arc<dyn ExchangeObserver>| {
-        while let Ok(Some(frame)) = parser.next_frame() {
-            if let Some(id) = request_id {
-                observer.observe_websocket_message(
-                    id,
-                    direction,
-                    frame.opcode.as_u8(),
-                    &frame.payload,
+    let mut buf = vec![0u8; 16 * 1024];
+    let mut chunk = seed;
+
+    loop {
+        if intercepting {
+            // Interception owns the forwarding: parse whole frames, decide, re-encode.
+            parser.push(&chunk);
+            while let Ok(Some(frame)) = parser.next_frame() {
+                let payload = match interceptor
+                    .on_websocket_message(direction, frame.opcode.as_u8(), &frame.payload)
+                    .await
+                {
+                    WsVerdict::Forward => frame.payload.clone(),
+                    WsVerdict::Replace(new) => new,
+                    WsVerdict::Drop => continue, // the peer never sees it, and it is not recorded
+                };
+                let mask = matches!(direction, WsDirection::ClientToServer).then(random_mask);
+                let out = encode(
+                    &Frame {
+                        fin: frame.fin,
+                        rsv1: frame.rsv1,
+                        opcode: frame.opcode,
+                        masked: mask.is_some(),
+                        payload: payload.clone(),
+                    },
+                    mask,
                 );
+                write
+                    .write_all(&out)
+                    .await
+                    .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+                write.flush().await.ok();
+                if let Some(id) = request_id {
+                    observer.observe_websocket_message(id, direction, frame.opcode.as_u8(), &payload);
+                }
+            }
+        } else {
+            // Pass-through: forward verbatim, then observe. Re-framing would make the relay
+            // the thing under test.
+            write
+                .write_all(&chunk)
+                .await
+                .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+            write.flush().await.ok();
+            parser.push(&chunk);
+            while let Ok(Some(frame)) = parser.next_frame() {
+                if let Some(id) = request_id {
+                    observer.observe_websocket_message(
+                        id,
+                        direction,
+                        frame.opcode.as_u8(),
+                        &frame.payload,
+                    );
+                }
             }
         }
-    };
 
-    // The seed — bytes read alongside the handshake — is forwarded and captured first.
-    if !seed.is_empty() {
-        write
-            .write_all(&seed)
-            .await
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
-        write.flush().await.ok();
-        parser.push(&seed);
-        observe(&mut parser, &observer);
-    }
-
-    let mut buf = vec![0u8; 16 * 1024];
-    loop {
         let n = read
             .read(&mut buf)
             .await
@@ -473,21 +515,22 @@ where
         if n == 0 {
             return Ok(()); // the peer closed this half
         }
-
-        // Forward first, exactly as it arrived; the tester's and the server's bytes are the
-        // evidence, and re-framing them would make the relay the thing under test.
-        write
-            .write_all(&buf[..n])
-            .await
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
-        write.flush().await.ok();
-
-        // Then observe. A parse error means an over-long declared frame; the bytes have
-        // already been forwarded, so the session continues — Hexora records what it could
-        // read rather than tearing down a connection over a frame it found odd.
-        parser.push(&buf[..n]);
-        observe(&mut parser, &observer);
+        chunk = buf[..n].to_vec();
     }
+}
+
+/// A per-frame masking key for a re-encoded client frame.
+///
+/// A relay that re-masks does not need cryptographic unpredictability — the server unmasks
+/// with whatever key the frame carries — so this is a cheap time-derived key, used only when
+/// interception rewrites a client frame.
+fn random_mask() -> [u8; 4] {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    (nanos ^ nanos.rotate_left(13)).to_ne_bytes()
 }
 
 /// Carries an intercepted WebSocket upgrade through to the origin and relays the session.
@@ -584,6 +627,7 @@ where
         upstream,
         request_id,
         context.observer.clone(),
+        context.interceptor.clone(),
         context.limits.clone(),
         client_prefix.to_vec(),
         upstream_prefix.to_vec(),
@@ -1307,6 +1351,7 @@ mod tests {
             upstream_relay,
             Some(request_id),
             observer,
+            Arc::new(PassThrough),
             Limits::default(),
             Vec::new(),
             Vec::new(),
@@ -1358,6 +1403,101 @@ mod tests {
         let messages = recorder.messages.lock().unwrap();
         assert_eq!(messages[0], (WsDirection::ClientToServer, 0x1, b"hi server".to_vec()));
         assert_eq!(messages[1], (WsDirection::ServerToClient, 0x1, b"hi client".to_vec()));
+    }
+
+    /// Replaces every client message and drops every server message.
+    struct WsEditor;
+
+    #[async_trait::async_trait]
+    impl Interceptor for WsEditor {
+        async fn on_request(&self, _request: &HttpRequest) -> RequestVerdict {
+            RequestVerdict::Forward
+        }
+        async fn on_response(
+            &self,
+            _request: &HttpRequest,
+            _response: &HttpResponse,
+        ) -> ResponseVerdict {
+            ResponseVerdict::Forward
+        }
+        fn intercepts_websocket(&self) -> bool {
+            true
+        }
+        async fn on_websocket_message(
+            &self,
+            direction: WsDirection,
+            _opcode: u8,
+            _payload: &[u8],
+        ) -> WsVerdict {
+            match direction {
+                WsDirection::ClientToServer => WsVerdict::Replace(b"EDITED".to_vec()),
+                WsDirection::ServerToClient => WsVerdict::Drop,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn interception_replaces_a_client_frame_and_drops_a_server_frame() {
+        use hexora_http::ws::{encode, Frame, FrameParser, Opcode};
+
+        let (mut client_test, client_relay) = tokio::io::duplex(8192);
+        let (upstream_relay, mut upstream_test) = tokio::io::duplex(8192);
+        let observer: Arc<dyn ExchangeObserver> = Arc::new(NoObserver);
+
+        tokio::spawn(relay_websocket(
+            client_relay,
+            upstream_relay,
+            None,
+            observer,
+            Arc::new(WsEditor),
+            Limits::default(),
+            Vec::new(),
+            Vec::new(),
+        ));
+
+        // Client sends "original"; the interceptor rewrites it to "EDITED".
+        let client_frame = encode(
+            &Frame {
+                fin: true,
+                rsv1: false,
+                opcode: Opcode::Text,
+                masked: true,
+                payload: b"original".to_vec(),
+            },
+            Some([9, 8, 7, 6]),
+        );
+        client_test.write_all(&client_frame).await.unwrap();
+
+        let mut parser = FrameParser::new(1 << 16);
+        let mut buf = vec![0u8; 128];
+        let n = upstream_test.read(&mut buf).await.unwrap();
+        parser.push(&buf[..n]);
+        let forwarded = parser.next_frame().unwrap().unwrap();
+        assert_eq!(forwarded.payload, b"EDITED", "the client frame was rewritten");
+        assert!(forwarded.masked, "a re-encoded client frame is re-masked");
+
+        // Server sends a frame; it is dropped and never reaches the client.
+        let server_frame = encode(
+            &Frame {
+                fin: true,
+                rsv1: false,
+                opcode: Opcode::Text,
+                masked: false,
+                payload: b"secret".to_vec(),
+            },
+            None,
+        );
+        upstream_test.write_all(&server_frame).await.unwrap();
+
+        let got =
+            tokio::time::timeout(std::time::Duration::from_millis(250), client_test.read(&mut buf))
+                .await;
+        match got {
+            Err(_) => {}            // timed out: nothing forwarded — the drop worked
+            Ok(Ok(0)) => {}         // closed, also fine
+            Ok(Ok(n)) => panic!("a dropped server frame reached the client: {n} bytes"),
+            Ok(Err(_)) => {}
+        }
     }
 
     /// An upstream server that answers every request with `response`.

@@ -77,6 +77,18 @@ pub enum ResponseVerdict {
     Drop,
 }
 
+/// What to do with a WebSocket message passing through the relay.
+#[derive(Debug, Clone)]
+pub enum WsVerdict {
+    /// Forward it unchanged.
+    Forward,
+    /// Forward this payload instead. The opcode and direction are unchanged; a client
+    /// message is re-masked, a server message is not.
+    Replace(Vec<u8>),
+    /// Drop it — the peer never sees this frame.
+    Drop,
+}
+
 /// A request paused for a decision.
 #[derive(Debug, Clone)]
 pub struct PendingRequest {
@@ -105,6 +117,30 @@ pub trait Interceptor: Send + Sync + 'static {
 
     /// Called before a response is returned to the client.
     async fn on_response(&self, request: &HttpRequest, response: &HttpResponse) -> ResponseVerdict;
+
+    /// Whether this interceptor wants to see WebSocket messages.
+    ///
+    /// A cheap check the relay makes once: when it is false — as it is for the pass-through
+    /// default — the relay forwards frames byte for byte and only observes them, preserving
+    /// the wire exactly. Only when it is true does the relay parse, consult and re-encode
+    /// each frame, which is the cost of being able to change one.
+    fn intercepts_websocket(&self) -> bool {
+        false
+    }
+
+    /// Called for each WebSocket message passing through an intercepted session.
+    ///
+    /// The default forwards, so an interceptor gains WebSocket control by overriding this
+    /// (and [`Self::intercepts_websocket`]) rather than every interceptor having to.
+    async fn on_websocket_message(
+        &self,
+        direction: hexora_types::ws::WsDirection,
+        opcode: u8,
+        payload: &[u8],
+    ) -> WsVerdict {
+        let _ = (direction, opcode, payload);
+        WsVerdict::Forward
+    }
 }
 
 /// Forwards everything without pausing.

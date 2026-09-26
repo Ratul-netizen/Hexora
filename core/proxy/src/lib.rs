@@ -21,7 +21,9 @@
 //! upgrade is carried through with `permessage-deflate` stripped so the session stays
 //! legible, and from then on the connection is relayed both ways verbatim while every frame
 //! is parsed and recorded into `websocket_messages` — masking kept as observed, since a
-//! client that does not mask or a server that does is a finding.
+//! client that does not mask or a server that does is a finding. An interceptor that opts in
+//! can forward, replace or drop each message in either direction (WS.c), on the same seam as
+//! the HTTP request and response hooks; when none does, the relay stays byte-for-byte.
 //!
 //! [`trust`] installs and removes the CA from the platform trust store, and asks the
 //! platform whether it is trusted rather than assuming.
@@ -49,7 +51,7 @@ pub use capture::ProjectCapture;
 pub use fanout::Fanout;
 pub use hook::{
     InterceptDirections, InterceptHandle, Interceptor, ManualInterceptor, PassThrough,
-    RequestVerdict, ResponseVerdict,
+    RequestVerdict, ResponseVerdict, WsVerdict,
 };
 pub use intercept::{InterceptionPolicy, TunnelOutcome};
 pub use server::{ExchangeObserver, NoObserver, ProxyConfig, ProxyServer};
