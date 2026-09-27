@@ -60,6 +60,27 @@ The bundle config (`apps/desktop/src-tauri/tauri.conf.json`) produces, per OS:
 A malformed `HEXORA_LICENSE_PUBKEY` (not 64 hex characters) fails the build rather than shipping
 a silently wrong key — see `core/engine/src/license.rs`.
 
+### Automated: the release workflow
+
+`.github/workflows/release.yml` does steps 2 and 3 on a tag. Push a `vX.Y.Z` tag and each OS
+runner builds the licensed CLI and the desktop installers and attaches them to a **draft**
+GitHub release for review before you publish it. `workflow_dispatch` runs the same build against
+a branch for a dry run.
+
+Configure these repository secrets (all optional except the first; a missing signing secret just
+leaves that platform unsigned):
+
+| Secret | Purpose |
+| --- | --- |
+| `HEXORA_LICENSE_PUBKEY` | The 64-hex public key embedded so paid licences verify. Omit and every build is free-tier. |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` | The base64 Developer ID cert and its password, for macOS signing. |
+| `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | macOS signing identity and notarization credentials. |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The Tauri updater signing key, if you ship auto-updates. |
+
+Windows Authenticode signing is configured in `tauri.conf.json`
+(`bundle.windows.certificateThumbprint` / `signCommand`) on a runner that has the certificate;
+the workflow leaves Windows unsigned until that is set.
+
 ## 3. Code signing
 
 Unsigned installers warn or are blocked by the OS. Signing certificates are held on the release

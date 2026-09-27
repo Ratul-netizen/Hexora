@@ -1,0 +1,113 @@
+name: Release
+
+# Tag a commit `vX.Y.Z` to cut a release. Each OS runner builds the licensed CLI and the
+# desktop installers, and everything is attached to a DRAFT GitHub release for review before
+# it is published. Manual runs (workflow_dispatch) build the same artifacts against a branch,
+# for a dry run without cutting a tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# The workflow creates a release and uploads assets to it.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build & bundle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98"
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # WebView2 is present on Windows runners and WKWebView on macOS; only Linux needs the
+      # WebKitGTK stack Tauri bundles against.
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup-3.0-dev \
+            build-essential
+
+      # Built here explicitly (not left to tauri's beforeBuildCommand) so the release does not
+      # depend on the working directory that command runs in.
+      - name: Build frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+        working-directory: frontend
+
+      # The licence public key is embedded at build time. Set HEXORA_LICENSE_PUBKEY as a repo
+      # secret (see docs/release.md); without it the build runs at the free tier.
+      - name: Build CLI
+        shell: bash
+        env:
+          HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
+        run: cargo build -p hexora-cli --release
+
+      - name: Stage CLI binary
+        shell: bash
+        run: |
+          mkdir -p cli-dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/hexora.exe "cli-dist/hexora-${{ github.ref_name }}-windows-x86_64.exe"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            cp target/release/hexora "cli-dist/hexora-${{ github.ref_name }}-macos-x86_64"
+          else
+            cp target/release/hexora "cli-dist/hexora-${{ github.ref_name }}-linux-x86_64"
+          fi
+
+      - name: Build & bundle desktop, publish draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
+          # macOS code signing + notarization. Unset -> the .app/.dmg are unsigned.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri updater signing (optional). Unset -> no update signatures are produced.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # The directory that holds src-tauri; the config's paths are relative to it.
+          projectPath: apps/desktop/src-tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: "Hexora ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+
+      # Attach the CLI binary to the same draft release the desktop bundles created. Each OS
+      # uploads its own uniquely-named binary; --clobber lets a re-run replace it.
+      - name: Attach CLI binary to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" cli-dist/* --clobber
