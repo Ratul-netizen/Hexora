@@ -7,6 +7,7 @@ import {
   describeError,
   installCa,
   listIdentities,
+  renewIdentity,
   listScope,
   openProject,
   proxyStatus,
@@ -471,6 +472,13 @@ function IdentityCard({ project }: { project: ProjectSummary | null }) {
   const [owns, setOwns] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Session renewal: replay a captured login and read the new token from its response.
+  const [renewWho, setRenewWho] = useState("");
+  const [renewFrom, setRenewFrom] = useState("");
+  const [renewSource, setRenewSource] = useState("cookie");
+  const [renewName, setRenewName] = useState("");
+  const [renewBusy, setRenewBusy] = useState(false);
+  const [renewNote, setRenewNote] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     if (project === null) return;
@@ -641,6 +649,79 @@ function IdentityCard({ project }: { project: ProjectSummary | null }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {identities.length > 0 && (
+        <div className="field">
+          <span>
+            Renew a session <span className="muted small">— replay a captured login and read
+            the new token from its response (for API token / refresh flows)</span>
+          </span>
+          <div className="row">
+            <select value={renewWho} onChange={(e) => setRenewWho(e.target.value)}>
+              <option value="">identity…</option>
+              {identities.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={renewFrom}
+              placeholder="login request id (from History)"
+              spellCheck={false}
+              onChange={(e) => setRenewFrom(e.target.value)}
+            />
+            <select value={renewSource} onChange={(e) => setRenewSource(e.target.value)}>
+              <option value="cookie">Set-Cookie</option>
+              <option value="header">response header</option>
+              <option value="json">JSON body field</option>
+            </select>
+            <input
+              type="text"
+              value={renewName}
+              placeholder={
+                renewSource === "json" ? "path e.g. data.token" : "name e.g. session"
+              }
+              spellCheck={false}
+              onChange={(e) => setRenewName(e.target.value)}
+            />
+            <button
+              disabled={
+                renewBusy ||
+                renewWho === "" ||
+                renewFrom.trim() === "" ||
+                renewName.trim() === ""
+              }
+              onClick={() => {
+                setRenewBusy(true);
+                setError(null);
+                setRenewNote(null);
+                const name = renewName.trim();
+                void renewIdentity({
+                  who: renewWho,
+                  from: renewFrom.trim(),
+                  cookie: renewSource === "cookie" ? name : null,
+                  header: renewSource === "header" ? name : null,
+                  jsonField: renewSource === "json" ? name : null,
+                  insecure: false,
+                })
+                  .then((i) => {
+                    setRenewNote(`Renewed ${i.label}. The new token is stored, not shown.`);
+                    setRenewFrom("");
+                    setRenewName("");
+                    reload();
+                  })
+                  .catch((e) => setError(describeError(e)))
+                  .finally(() => setRenewBusy(false));
+              }}
+            >
+              {renewBusy ? "Renewing…" : "Renew"}
+            </button>
+          </div>
+          {renewNote && <p className="muted small">{renewNote}</p>}
         </div>
       )}
     </section>

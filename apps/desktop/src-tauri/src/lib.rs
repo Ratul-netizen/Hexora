@@ -100,6 +100,7 @@ pub fn run() {
             commands::identities_list,
             commands::identity_add,
             commands::identity_remove,
+            commands::identity_renew,
             commands::objects_list,
             commands::object_add,
             commands::object_remove,

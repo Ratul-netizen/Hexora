@@ -843,6 +843,19 @@ export const addIdentity = (identity: {
   owns: string[];
 }): Promise<IdentityView> => invoke<IdentityView>("identity_add", identity);
 
+/**
+ * Renews an identity's session by replaying a captured login and reading the new token from its
+ * response (one of a Set-Cookie cookie, a response header, or a JSON body field).
+ */
+export const renewIdentity = (args: {
+  who: string;
+  from: string;
+  cookie: string | null;
+  header: string | null;
+  jsonField: string | null;
+  insecure: boolean;
+}): Promise<IdentityView> => invoke<IdentityView>("identity_renew", args);
+
 export const removeIdentity = (id: string): Promise<void> =>
   invoke<void>("identity_remove", { id });
 

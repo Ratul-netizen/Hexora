@@ -2097,6 +2097,164 @@ pub fn identity_remove(state: State<'_, AppState>, id: String) -> CommandResult<
     Ok(())
 }
 
+/// Renews an identity's session by replaying a recorded login and reading the new token from
+/// its response — the complement to a session adopted from proxy traffic.
+///
+/// For API token / refresh-endpoint flows: it re-runs a captured login and takes the fresh token
+/// from exactly one of a Set-Cookie cookie, a response header, or a JSON body field. The token is
+/// stored, never returned. Anonymous/basic identities have no session to renew.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn identity_renew(
+    state: State<'_, AppState>,
+    who: String,
+    from: String,
+    cookie: Option<String>,
+    header: Option<String>,
+    json_field: Option<String>,
+    insecure: bool,
+) -> CommandResult<IdentityView> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+    let path = state.project_path().map_err(fail)?;
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        identity_renew_blocking(path, who, from, cookie, header, json_field, insecure)
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+#[allow(clippy::too_many_arguments)]
+fn identity_renew_blocking(
+    path: PathBuf,
+    who: String,
+    from: String,
+    cookie: Option<String>,
+    header: Option<String>,
+    json_field: Option<String>,
+    insecure: bool,
+) -> CommandResult<IdentityView> {
+    let project = Project::open(&path).map_err(fail)?;
+    let identities = project.identities();
+    let identity = resolve_identity(&identities, &who)?;
+
+    let kind = match &identity.credential {
+        Credential::None => {
+            return Err("this identity is anonymous — no session to renew".to_string())
+        }
+        Credential::Bearer { .. } => "bearer".to_string(),
+        Credential::Cookie { .. } => "cookie".to_string(),
+        Credential::Basic { .. } => {
+            return Err("a basic-auth password is not a session".to_string())
+        }
+        Credential::Header { name, .. } => name.clone(),
+    };
+
+    let sources = [cookie.is_some(), header.is_some(), json_field.is_some()]
+        .iter()
+        .filter(|s| **s)
+        .count();
+    if sources != 1 {
+        return Err(
+            "give exactly one of a cookie, a header, or a JSON field to read the token from"
+                .to_string(),
+        );
+    }
+
+    let request_id: RequestId = from
+        .parse()
+        .map_err(|e| format!("{from} is not a request id: {e}"))?;
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
+    } else {
+        TcpTransport::new().http2(true)
+    };
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+    let store = Arc::new(project.traffic());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store)
+        .attaching(project.settings().attached_headers().map_err(fail)?);
+    let draft = repeater.draft_from(request_id).map_err(fail)?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+    let sent = runtime
+        .block_on(repeater.send_as(&draft, hexora_repeater::SendAs::repeater()))
+        .map_err(fail)?;
+    let response = &sent.exchange.response;
+
+    let raw_value = if let Some(name) = &cookie {
+        let mut found = None;
+        for h in response.headers.get_all("set-cookie") {
+            let value = h.value_lossy();
+            let pair = value.split(';').next().unwrap_or("");
+            if let Some((k, v)) = pair.split_once('=') {
+                if k.trim().eq_ignore_ascii_case(name) {
+                    found = Some(v.trim().to_string());
+                    break;
+                }
+            }
+        }
+        let v = found.ok_or_else(|| {
+            format!(
+                "the login response set no `{name}` cookie (status {})",
+                response.status
+            )
+        })?;
+        if kind == "cookie" {
+            format!("{name}={v}")
+        } else {
+            v
+        }
+    } else if let Some(name) = &header {
+        response
+            .headers
+            .get(name)
+            .map(|h| h.value_lossy().trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "the login response had no `{name}` header (status {})",
+                    response.status
+                )
+            })?
+    } else {
+        let path = json_field.as_deref().unwrap();
+        let root: serde_json::Value = serde_json::from_slice(response.body.as_ref())
+            .map_err(|_| "the response body is not JSON".to_string())?;
+        let mut cur = &root;
+        for seg in path.split('.') {
+            cur = cur
+                .get(seg)
+                .ok_or_else(|| format!("the response body has no `{path}`"))?;
+        }
+        match cur {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => return Err(format!("`{path}` is not a string in the response body")),
+        }
+    };
+
+    // Bearer tokens are stored without the scheme; strip a re-pasted one.
+    let value = if kind == "bearer" {
+        raw_value
+            .strip_prefix("Bearer ")
+            .or_else(|| raw_value.strip_prefix("bearer "))
+            .unwrap_or(&raw_value)
+            .trim()
+            .to_string()
+    } else {
+        raw_value
+    };
+
+    let mut updated = identity.clone();
+    updated.credential = build_credential(&kind, value)?;
+    identities.put(&updated).map_err(fail)?;
+    Ok(identity_view(&updated))
+}
+
 // ---------------------------------------------------------------------------
 // Declared objects
 // ---------------------------------------------------------------------------
