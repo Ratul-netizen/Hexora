@@ -86,6 +86,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The engine (Rust) and the UI (TypeScript) each hard-code the RPC contract version, and
+      # nothing links them at compile time. When they drift, the desktop app refuses to start with
+      # "Incompatible engine". This fails the build the moment they disagree, so the mismatch is
+      # caught here instead of in a shipped installer.
+      - name: RPC contract version — engine and UI must match
+        shell: bash
+        run: |
+          engine=$(grep -oP 'RPC_CONTRACT_VERSION: u32 = \K[0-9]+' core/types/src/lib.rs)
+          ui=$(grep -oP 'EXPECTED_RPC_CONTRACT_VERSION = \K[0-9]+' frontend/src/ipc.ts)
+          echo "engine contract=$engine, ui contract=$ui"
+          if [ -z "$engine" ] || [ -z "$ui" ]; then
+            echo "::error::could not read one of the contract versions" >&2; exit 1
+          fi
+          if [ "$engine" != "$ui" ]; then
+            echo "::error::RPC contract mismatch: engine=$engine, UI=$ui. Update EXPECTED_RPC_CONTRACT_VERSION in frontend/src/ipc.ts to match core/types/src/lib.rs." >&2
+            exit 1
+          fi
+
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
