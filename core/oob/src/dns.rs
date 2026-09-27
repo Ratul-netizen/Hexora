@@ -10,7 +10,7 @@ use std::net::Ipv4Addr;
 
 use tokio::net::UdpSocket;
 
-use hexora_types::error::{HexoraError, NetworkError, Result};
+use nullhawk_types::error::{NetworkError, NullhawkError, Result};
 
 use crate::server::Store;
 use crate::Interaction;
@@ -20,7 +20,7 @@ use crate::Interaction;
 pub(crate) async fn run_dns(addr: &str, store: Store, answer_ip: Ipv4Addr) -> Result<()> {
     let socket = UdpSocket::bind(addr)
         .await
-        .map_err(|e| HexoraError::invalid_input("dns", format!("{addr}: {e}")))?;
+        .map_err(|e| NullhawkError::invalid_input("dns", format!("{addr}: {e}")))?;
     if let Ok(local) = socket.local_addr() {
         tracing::info!(%local, "collaborator DNS listening");
     }
@@ -30,7 +30,7 @@ pub(crate) async fn run_dns(addr: &str, store: Store, answer_ip: Ipv4Addr) -> Re
         let (len, peer) = match socket.recv_from(&mut buf).await {
             Ok(pair) => pair,
             Err(e) => {
-                return Err(HexoraError::Network(NetworkError::Io(e.to_string())));
+                return Err(NullhawkError::Network(NetworkError::Io(e.to_string())));
             }
         };
         if let Some((qname, response)) = respond(&buf[..len], answer_ip) {

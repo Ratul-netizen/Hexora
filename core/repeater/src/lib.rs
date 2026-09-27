@@ -1,4 +1,4 @@
-//! # hexora-repeater
+//! # nullhawk-repeater
 //!
 //! Take a request out of history, change it, send it again, and see what moved.
 //!
@@ -26,7 +26,7 @@
 //!
 //! ## Scope
 //!
-//! The repeater is human-driven, so [`hexora_engine::guard::ScopeGuard`] flags
+//! The repeater is human-driven, so [`nullhawk_engine::guard::ScopeGuard`] flags
 //! out-of-scope requests rather than refusing them: a tester who types a URL has made
 //! a decision. Automated subsystems get the opposite treatment.
 
@@ -39,15 +39,15 @@ pub mod raw;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use hexora_engine::guard::{ScopeDecision, ScopeGuard};
-use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_storage::{CapturedExchange, TrafficStore};
-use hexora_types::error::Result;
-use hexora_types::http::{HttpRequest, HttpService};
-use hexora_types::identity::Identity;
-use hexora_types::ids::RequestId;
-use hexora_types::limits::Limits;
-use hexora_types::raw::{RawH2Request, RawRequest, RequestMode, RequestSource};
+use nullhawk_engine::guard::{ScopeDecision, ScopeGuard};
+use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+use nullhawk_storage::{CapturedExchange, TrafficStore};
+use nullhawk_types::error::Result;
+use nullhawk_types::http::{HttpRequest, HttpService};
+use nullhawk_types::identity::Identity;
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::limits::Limits;
+use nullhawk_types::raw::{RawH2Request, RawRequest, RequestMode, RequestSource};
 
 pub use crate::diff::{HeaderChange, ResponseDiff};
 pub use crate::raw::{inspect, parse, render, ParsedRequest, Warning};
@@ -81,7 +81,7 @@ pub struct Draft {
     /// The stored request this was derived from, if any.
     pub parent: Option<RequestId>,
     /// What the parser noticed when the draft was last parsed from text.
-    pub quirks: Vec<hexora_http::Quirk>,
+    pub quirks: Vec<nullhawk_http::Quirk>,
     /// The bytes to send, when this draft is in raw mode.
     raw: Option<Bytes>,
 }
@@ -245,7 +245,7 @@ fn view_of(raw: &RawRequest) -> HttpRequest {
     // `HttpRequest::get` adds a Host from the service. These bytes may not have
     // carried one — a missing Host is a routing test — and a view that invented it
     // would show the tester a header they did not send.
-    request.headers = hexora_types::http::Headers::new();
+    request.headers = nullhawk_types::http::Headers::new();
 
     let head = raw.head();
     let text = String::from_utf8_lossy(&head);
@@ -257,7 +257,7 @@ fn view_of(raw: &RawRequest) -> HttpRequest {
         if let Some((name, value)) = field.split_once(':') {
             request
                 .headers
-                .append(hexora_types::http::Header::new(name.trim(), value.trim()));
+                .append(nullhawk_types::http::Header::new(name.trim(), value.trim()));
         }
     }
     request
@@ -274,9 +274,9 @@ pub struct Sent {
     /// The request this one derived from.
     pub parent: Option<RequestId>,
     /// The principal it was sent as, when one was chosen.
-    pub identity: Option<hexora_types::ids::IdentityId>,
+    pub identity: Option<nullhawk_types::ids::IdentityId>,
     /// What came back.
-    pub exchange: hexora_engine::transport::Exchange,
+    pub exchange: nullhawk_engine::transport::Exchange,
     /// What the scope guard decided. Out-of-scope is flagged, never refused.
     pub decision: ScopeDecision,
 }
@@ -346,7 +346,7 @@ pub struct Repeater<T: HttpTransport> {
     /// the intruder's payloads as much as an authenticated replay. An identity's
     /// `extra_headers` cannot express it, so it comes from the project and is applied
     /// here, where every send passes.
-    attached: Vec<hexora_types::http::Header>,
+    attached: Vec<nullhawk_types::http::Header>,
 }
 
 impl<T: HttpTransport> std::fmt::Debug for Repeater<T> {
@@ -380,15 +380,15 @@ impl<T: HttpTransport> Repeater<T> {
     /// **Not applied to a raw request**, for the same reason a credential is not: raw
     /// mode is byte-exact and rewriting a header block the tester wrote deliberately
     /// would undo the one thing it promises. A raw send carries whatever its bytes
-    /// carry, and `hexora fuzz --raw` is not a way to become anonymous by accident —
+    /// carry, and `nullhawk fuzz --raw` is not a way to become anonymous by accident —
     /// the CLI says so when a project has attached headers and a raw draft is sent.
-    pub fn attaching(mut self, headers: Vec<hexora_types::http::Header>) -> Self {
+    pub fn attaching(mut self, headers: Vec<nullhawk_types::http::Header>) -> Self {
         self.attached = headers;
         self
     }
 
     /// The headers this repeater puts on everything it sends.
-    pub fn attached(&self) -> &[hexora_types::http::Header] {
+    pub fn attached(&self) -> &[nullhawk_types::http::Header] {
         &self.attached
     }
 
@@ -414,7 +414,7 @@ impl<T: HttpTransport> Repeater<T> {
         // would produce a structured request that *looks* the same and is not: the
         // bare LF the tester wrote would come back as CRLF, which is precisely the
         // difference they were testing.
-        if let (hexora_types::raw::RequestMode::Raw, Some(bytes)) = (stored.mode, &stored.raw) {
+        if let (nullhawk_types::raw::RequestMode::Raw, Some(bytes)) = (stored.mode, &stored.raw) {
             let mut draft = Draft::raw(stored.service.clone(), bytes.clone())?;
             draft.parent = Some(id);
             return Ok(draft);
@@ -500,7 +500,7 @@ impl<T: HttpTransport> Repeater<T> {
         let (decision, exchange) = match draft.source()? {
             RequestSource::Raw(raw) => {
                 if sender.identity.is_some() {
-                    return Err(hexora_types::HexoraError::invalid_input(
+                    return Err(nullhawk_types::NullhawkError::invalid_input(
                         "raw",
                         "a raw request is sent byte for byte, so an identity's \
                          credential cannot be applied to it. Put the credential in the \
@@ -570,7 +570,7 @@ impl<T: HttpTransport> Repeater<T> {
     /// The h2 analogue of a raw send: it goes through the same scope guard every other send
     /// does — a frame-level request is no more a way around scope than a byte-level one — and
     /// its exchange is captured like any other. No identity is applied and no project header
-    /// is attached: like raw mode, the bytes are the tester's and Hexora adds nothing to them.
+    /// is attached: like raw mode, the bytes are the tester's and Nullhawk adds nothing to them.
     pub async fn send_raw_h2(&self, request: RawH2Request) -> Result<Sent> {
         let mut options = SendOptions::interactive(Origin::Repeater);
         options.limits = self.limits.clone();
@@ -621,7 +621,7 @@ impl<T: HttpTransport> Repeater<T> {
     }
 
     /// Rebuilds a stored response, with its round-trip time.
-    fn stored_response(&self, id: RequestId) -> Result<(hexora_types::http::HttpResponse, u128)> {
+    fn stored_response(&self, id: RequestId) -> Result<(nullhawk_types::http::HttpResponse, u128)> {
         let (status, reason, version, headers_raw) = self.store.response_head(id)?;
         let body = self.store.response_body(id, false)?;
 
@@ -644,10 +644,10 @@ impl<T: HttpTransport> Repeater<T> {
 
         // The method matters to the parser only for HEAD/204 framing, and the body
         // is supplied separately here, so GET is the honest placeholder.
-        let head = hexora_http::parse::parse_response_head(&raw, "GET", &self.limits)?;
+        let head = nullhawk_http::parse::parse_response_head(&raw, "GET", &self.limits)?;
         let duration = self
             .store
-            .history(None, hexora_storage::repository::Limit::new(1000))?
+            .history(None, nullhawk_storage::repository::Limit::new(1000))?
             .items
             .iter()
             .find(|item| item.id == id)
@@ -655,7 +655,7 @@ impl<T: HttpTransport> Repeater<T> {
             .unwrap_or(0) as u128;
 
         Ok((
-            hexora_types::http::HttpResponse {
+            nullhawk_types::http::HttpResponse {
                 status: head.status,
                 reason: head.reason,
                 version: head.version,
@@ -675,10 +675,10 @@ impl<T: HttpTransport> Repeater<T> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_engine::transport::{Exchange, RecordingTransport};
-    use hexora_storage::{MemoryBlobStore, Project};
-    use hexora_types::http::{Header, Headers, HttpResponse, HttpService, HttpVersion};
-    use hexora_types::scope::{Scope, ScopeRule};
+    use nullhawk_engine::transport::{Exchange, RecordingTransport};
+    use nullhawk_storage::{MemoryBlobStore, Project};
+    use nullhawk_types::http::{Header, Headers, HttpResponse, HttpService, HttpVersion};
+    use nullhawk_types::scope::{Scope, ScopeRule};
 
     use super::*;
 

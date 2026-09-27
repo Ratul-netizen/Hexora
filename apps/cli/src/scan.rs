@@ -1,4 +1,4 @@
-//! `hexora scan passive` — what the checks saw in traffic already captured.
+//! `nullhawk scan passive` — what the checks saw in traffic already captured.
 //!
 //! Sends nothing. The subcommand is spelled out rather than implied because the
 //! difference between a pass that reads a project and a pass that puts traffic on
@@ -20,11 +20,11 @@
 
 use std::path::Path;
 
-use hexora_scan::passive::{scan, Selection, Summary};
-use hexora_storage::Recorded;
-use hexora_types::Result;
+use nullhawk_scan::passive::{scan, Selection, Summary};
+use nullhawk_storage::Recorded;
+use nullhawk_types::Result;
 
-/// Options for `hexora scan passive`.
+/// Options for `nullhawk scan passive`.
 pub struct Args<'a> {
     pub project: &'a Path,
     /// Only this detector, by id.
@@ -63,11 +63,11 @@ pub fn passive(args: Args<'_>) -> Result<()> {
             .iter()
             .any(|e| e.manifest.id == detector);
         if registry.find(detector).is_none() && !is_custom && !is_extension {
-            return Err(hexora_types::HexoraError::invalid_input(
+            return Err(nullhawk_types::NullhawkError::invalid_input(
                 "--detector",
                 format!(
-                    "no check called {detector:?}. `hexora detectors` lists the built-ins, \
-                     `hexora check list` the custom ones, and `hexora ext list` the extensions"
+                    "no check called {detector:?}. `nullhawk detectors` lists the built-ins, \
+                     `nullhawk check list` the custom ones, and `nullhawk ext list` the extensions"
                 ),
             ));
         }
@@ -163,7 +163,7 @@ fn print_human(summary: &Summary, saved: &[Recorded], no_save: bool) {
         }
         println!();
         println!("  These ran and their observations are listed above. What they did not");
-        println!("  do is file a finding. Change it with `hexora programme allow`.");
+        println!("  do is file a finding. Change it with `nullhawk programme allow`.");
     }
 
     if !summary.observations.is_empty() {
@@ -246,7 +246,7 @@ fn print_human(summary: &Summary, saved: &[Recorded], no_save: bool) {
     println!();
     // Said once, at the end, because it is the thing most likely to be misread.
     println!("Every passive finding is a lead: it says what was seen, not that the");
-    println!("application is exploitable. Read them with `hexora findings <project>`.");
+    println!("application is exploitable. Read them with `nullhawk findings <project>`.");
 }
 
 fn print_json(summary: &Summary, saved: &[Recorded]) {
@@ -297,8 +297,8 @@ fn print_json(summary: &Summary, saved: &[Recorded]) {
     println!("{payload}");
 }
 
-fn severity_word(severity: hexora_types::Severity) -> &'static str {
-    hexora_storage::findings::severity_str(severity)
+fn severity_word(severity: nullhawk_types::Severity) -> &'static str {
+    nullhawk_storage::findings::severity_str(severity)
 }
 
 #[cfg(test)]
@@ -346,7 +346,7 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(error.contains("hexora detectors"), "{error}");
+        assert!(error.contains("nullhawk detectors"), "{error}");
         // Nothing ran, so nothing was recorded.
         let project = crate::open_project(&path).unwrap();
         assert_eq!(project.scans().count().unwrap(), 0);

@@ -1,4 +1,4 @@
-//! `hexora identity` — the principals a project can test as.
+//! `nullhawk identity` — the principals a project can test as.
 //!
 //! Credentials are taken from the environment or a file, never from a command-line
 //! argument. On a shared machine `ps` shows every running process's arguments, and a
@@ -9,17 +9,17 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_repeater::{Repeater, SendAs};
-use hexora_storage::IdentityStore;
-use hexora_types::http::Headers;
-use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
-use hexora_types::ids::RequestId;
-use hexora_types::redact::Secret;
-use hexora_types::{Header, HexoraError, Result};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_repeater::{Repeater, SendAs};
+use nullhawk_storage::IdentityStore;
+use nullhawk_types::http::Headers;
+use nullhawk_types::identity::{Credential, Identity, PrivilegeLevel};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::redact::Secret;
+use nullhawk_types::{Header, NullhawkError, Result};
 
-/// Options for `hexora identity add`.
+/// Options for `nullhawk identity add`.
 pub struct AddArgs<'a> {
     pub project: &'a Path,
     pub label: &'a str,
@@ -57,7 +57,7 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
     };
 
     let identity = Identity {
-        id: hexora_types::ids::IdentityId::new(),
+        id: nullhawk_types::ids::IdentityId::new(),
         label: args.label.to_string(),
         privilege,
         credential,
@@ -85,7 +85,7 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
             println!();
             println!("No owned object identifiers were declared. Authorization results for");
             println!("this identity will rest on response similarity alone, which is weaker");
-            println!("evidence — see `hexora identity add --owns`.");
+            println!("evidence — see `nullhawk identity add --owns`.");
         }
     }
     Ok(())
@@ -106,8 +106,9 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
     // target, an identity declared and a session adopted, and not one captured request
     // carried a credential. Every check said so in its own words, one endpoint at a
     // time, and none of them said the thing that mattered.
-    let coverage = hexora_authz::session::coverage(&opened.traffic(), &identities, COVERAGE_SAMPLE)
-        .unwrap_or_default();
+    let coverage =
+        nullhawk_authz::session::coverage(&opened.traffic(), &identities, COVERAGE_SAMPLE)
+            .unwrap_or_default();
 
     if json {
         let rows: Vec<_> = identities
@@ -138,7 +139,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
     }
 
     if identities.is_empty() {
-        println!("No identities. Add one with `hexora identity add`.");
+        println!("No identities. Add one with `nullhawk identity add`.");
         println!();
         println!("{}", coverage.describe());
         return Ok(());
@@ -181,7 +182,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
 
     if !expired.is_empty() {
         println!();
-        println!("Refresh before running anything: hexora identity refresh <project> <who>");
+        println!("Refresh before running anything: nullhawk identity refresh <project> <who>");
         println!("(log in through the proxy first — an expired token cannot renew itself)");
     }
 
@@ -231,25 +232,25 @@ pub fn resolve(store: &IdentityStore, who: &str) -> Result<Identity> {
 fn read_secret(args: &AddArgs<'_>) -> Result<String> {
     match (args.from_env, args.from_file) {
         (Some(name), None) => std::env::var(name).map_err(|_| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "--from-env",
                 format!("environment variable {name} is not set"),
             )
         }),
         (None, Some(path)) => Ok(std::fs::read_to_string(path)
             .map_err(|e| {
-                HexoraError::invalid_input("--from-file", format!("{}: {e}", path.display()))
+                NullhawkError::invalid_input("--from-file", format!("{}: {e}", path.display()))
             })?
             // A file written by `echo` ends in a newline, and a newline inside an
             // Authorization header value is a request-splitting bug waiting to happen.
             .trim()
             .to_string()),
-        (None, None) => Err(HexoraError::invalid_input(
+        (None, None) => Err(NullhawkError::invalid_input(
             "credential",
             "give the credential with --from-env or --from-file (never on the command \
              line, where `ps` and shell history can read it)",
         )),
-        (Some(_), Some(_)) => Err(HexoraError::invalid_input(
+        (Some(_), Some(_)) => Err(NullhawkError::invalid_input(
             "credential",
             "--from-env and --from-file are mutually exclusive",
         )),
@@ -284,7 +285,7 @@ fn build_credential(kind: &str, value: String) -> Result<Credential> {
         }),
         "basic" => {
             let (username, password) = value.split_once(':').ok_or_else(|| {
-                HexoraError::invalid_input(
+                NullhawkError::invalid_input(
                     "credential",
                     "basic credentials must be given as username:password",
                 )
@@ -297,7 +298,7 @@ fn build_credential(kind: &str, value: String) -> Result<Credential> {
         "none" => Ok(Credential::None),
         // Anything else is taken as a header name, which is how API keys arrive:
         // `--kind X-API-Key`. The name is taken from what the tester typed rather than
-        // from the lowercased copy used for matching — Hexora sends header names as
+        // from the lowercased copy used for matching — Nullhawk sends header names as
         // written, and an application that only accepts one casing is a finding, not
         // something to paper over.
         _ => Ok(Credential::Header {
@@ -312,7 +313,7 @@ fn parse_headers(headers: &[String]) -> Result<Vec<Header>> {
         .iter()
         .map(|raw| {
             let (name, value) = raw.split_once(':').ok_or_else(|| {
-                HexoraError::invalid_input("--header", format!("{raw:?} is not 'Name: Value'"))
+                NullhawkError::invalid_input("--header", format!("{raw:?} is not 'Name: Value'"))
             })?;
             Ok(Header::new(name.trim(), value.trim()))
         })
@@ -325,7 +326,7 @@ fn parse_privilege(value: &str) -> Result<PrivilegeLevel> {
         "user" => Ok(PrivilegeLevel::User),
         "elevated" => Ok(PrivilegeLevel::Elevated),
         "administrator" | "admin" => Ok(PrivilegeLevel::Administrator),
-        other => Err(HexoraError::invalid_input(
+        other => Err(NullhawkError::invalid_input(
             "--privilege",
             format!("{other:?} is not one of anonymous, user, elevated, administrator"),
         )),
@@ -360,7 +361,7 @@ fn truncate(value: &str, width: usize) -> String {
     }
 }
 
-/// Options for `hexora identity refresh`.
+/// Options for `nullhawk identity refresh`.
 pub struct RefreshArgs<'a> {
     pub project: &'a Path,
     /// Which identity, by label or id.
@@ -389,7 +390,7 @@ pub fn refresh(args: RefreshArgs<'_>) -> Result<()> {
     let traffic = project.traffic();
     let scope = project.settings().scope()?;
     let found =
-        hexora_authz::session::find_renewal(&traffic, &scope, &identity, args.limit, args.host)?;
+        nullhawk_authz::session::find_renewal(&traffic, &scope, &identity, args.limit, args.host)?;
 
     let Some(renewal) = found else {
         if args.json {
@@ -402,7 +403,7 @@ pub fn refresh(args: RefreshArgs<'_>) -> Result<()> {
         );
         println!();
         println!("Log in through the proxy and run this again. Only proxy traffic counts:");
-        println!("a credential Hexora sent itself is one it may have broken on purpose.");
+        println!("a credential Nullhawk sent itself is one it may have broken on purpose.");
         return Ok(());
     };
 
@@ -449,17 +450,17 @@ pub fn refresh(args: RefreshArgs<'_>) -> Result<()> {
 
     println!();
     println!("{} now authenticates with it.", identity.label);
-    println!("Re-run `hexora scan active` — the results that said the credential may no");
+    println!("Re-run `nullhawk scan active` — the results that said the credential may no");
     println!("longer be valid can be established now.");
     Ok(())
 }
 
-/// Options for `hexora identity renew`.
+/// Options for `nullhawk identity renew`.
 pub struct RenewArgs<'a> {
     pub project: &'a Path,
     /// The identity to update.
     pub who: &'a str,
-    /// The captured login/refresh request to replay, from `hexora history`.
+    /// The captured login/refresh request to replay, from `nullhawk history`.
     pub from: &'a str,
     /// Read the new session from this cookie in the response's `Set-Cookie`.
     pub cookie: Option<&'a str>,
@@ -477,7 +478,7 @@ pub struct RenewArgs<'a> {
 /// of *its response*.
 ///
 /// This is the complement to `refresh`: `refresh` adopts a credential a browser already sent
-/// through the proxy, and refuses anything Hexora sent itself; `renew` deliberately re-runs a
+/// through the proxy, and refuses anything Nullhawk sent itself; `renew` deliberately re-runs a
 /// login or token-refresh request and takes the fresh token from the response. It is for API
 /// token and refresh-endpoint flows — not password logins behind captcha, MFA or SSO, which
 /// this cannot and should not automate. The tester names the request, so the replay is their
@@ -489,7 +490,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
     let kind = credential_kind_key(&identity.credential)?;
 
     let request_id: RequestId = args.from.parse().map_err(|e| {
-        HexoraError::invalid_input("--from", format!("{} is not a request id: {e}", args.from))
+        NullhawkError::invalid_input("--from", format!("{} is not a request id: {e}", args.from))
     })?;
 
     let sources = [args.cookie, args.header, args.json_field]
@@ -497,7 +498,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
         .filter(|s| s.is_some())
         .count();
     if sources != 1 {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "source",
             "say where the new token is in the login response: exactly one of --cookie <name>, \
              --header <name>, or --json-field <path>",
@@ -529,13 +530,13 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
     let sent = runtime.block_on(repeater.send_as(&draft, SendAs::repeater()))?;
     let response = &sent.exchange.response;
 
     let new_value = if let Some(name) = args.cookie {
         let value = cookie_value(&response.headers, name).ok_or_else(|| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "--cookie",
                 format!(
                     "the login response set no `{name}` cookie (status {})",
@@ -556,7 +557,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
             .map(|h| h.value_lossy().trim().to_string())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| {
-                HexoraError::invalid_input(
+                NullhawkError::invalid_input(
                     "--header",
                     format!(
                         "the login response had no `{name}` header (status {})",
@@ -567,7 +568,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
     } else {
         let path = args.json_field.unwrap();
         json_field(response.body.as_ref(), path).ok_or_else(|| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "--json-field",
                 format!(
                     "the login response body has no string at `{path}` (status {})",
@@ -607,13 +608,13 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
 /// The credential kind key for `build_credential`, or an error when there is no session to renew.
 fn credential_kind_key(credential: &Credential) -> Result<String> {
     match credential {
-        Credential::None => Err(HexoraError::invalid_input(
+        Credential::None => Err(NullhawkError::invalid_input(
             "identity",
             "this identity is anonymous — there is no session to renew",
         )),
         Credential::Bearer { .. } => Ok("bearer".to_string()),
         Credential::Cookie { .. } => Ok("cookie".to_string()),
-        Credential::Basic { .. } => Err(HexoraError::invalid_input(
+        Credential::Basic { .. } => Err(NullhawkError::invalid_input(
             "identity",
             "a basic-auth password is not a session; `renew` does not apply to it",
         )),

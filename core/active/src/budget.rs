@@ -1,6 +1,6 @@
 //! What a run is allowed to do to somebody's system.
 //!
-//! Every other limit in Hexora protects the tool — [`Limits`](hexora_types::Limits)
+//! Every other limit in Nullhawk protects the tool — [`Limits`](nullhawk_types::Limits)
 //! stops a decompression bomb, the scope guard stops a request going somewhere nobody
 //! authorized. This one protects the *target*, and it is the first thing in the
 //! codebase that does.
@@ -17,7 +17,7 @@
 //! host C  ──▶ waiting for a slot                           at most `hosts_at_once`
 //! ```
 //!
-//! **One host never receives two Hexora requests at the same time.** Each host has one
+//! **One host never receives two Nullhawk requests at the same time.** Each host has one
 //! sequential queue, and a [`Budget::pause`] between its requests. Different hosts are
 //! worked concurrently, up to [`Budget::hosts_at_once`].
 //!

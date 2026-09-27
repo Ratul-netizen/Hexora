@@ -5,7 +5,7 @@
 //! identifier in an application is slow, and slowness is why constructed testing ends
 //! up narrower than it should be.
 //!
-//! An [`IdentifierCandidate`] is the other end of that: something Hexora noticed,
+//! An [`IdentifierCandidate`] is the other end of that: something Nullhawk noticed,
 //! offered, and will not act on. Three things are kept strictly apart, and the gap
 //! between them is the whole design:
 //!
@@ -19,7 +19,7 @@
 //! ownership             "…belonging to User A"
 //! ```
 //!
-//! Hexora produces the first. It never produces the second or third, because it
+//! Nullhawk produces the first. It never produces the second or third, because it
 //! cannot: `/api/users/1000` might be a user id, an account id, a tenant id, a page
 //! number or a version, and nothing in the bytes says which. A tool that guessed and
 //! then reasoned from the guess would put a fabricated premise underneath every

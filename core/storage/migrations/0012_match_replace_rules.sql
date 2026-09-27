@@ -3,7 +3,7 @@
 -- A rule names a part of an exchange (a request/response header, body, or the request's
 -- first line), a pattern to find, and what to put in its place. The proxy runs enabled
 -- rules on in-scope traffic — request rules on the way out, response rules on the way
--- back. This is Burp's and Caido's everyday rewriting, which Hexora had only as a narrow
+-- back. This is Burp's and Caido's everyday rewriting, which Nullhawk had only as a narrow
 -- "attach these headers" special case.
 --
 -- Stored as an ordered JSON array in the single project row, beside the scope and the

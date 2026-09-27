@@ -85,7 +85,7 @@ pub fn render(report: &Report) -> String {
         row(&mut out, "Started", started);
     }
     row(&mut out, "Report generated", &e.generated_at);
-    row(&mut out, "Tool", &format!("hexora {}", e.tool_version));
+    row(&mut out, "Tool", &format!("nullhawk {}", e.tool_version));
     let _ = writeln!(out, "</tbody></table>");
 
     summary(&mut out, report);
@@ -125,7 +125,7 @@ pub fn render(report: &Report) -> String {
 
     let _ = writeln!(
         out,
-        "<footer>Produced by hexora {} on {}. Every claim above cites the exchange it \
+        "<footer>Produced by nullhawk {} on {}. Every claim above cites the exchange it \
          rests on; nothing in this document was generated without one.</footer>",
         escape(&e.tool_version),
         escape(&e.generated_at)
@@ -333,7 +333,7 @@ fn render_reproduction(out: &mut String, poc: &crate::poc::Reproduction) {
 
     if !poc.placeholders.is_empty() {
         out.push_str(
-            "<p>Supply these first — Hexora never puts a real credential in a \
+            "<p>Supply these first — Nullhawk never puts a real credential in a \
              report.</p><ul>",
         );
         for placeholder in &poc.placeholders {

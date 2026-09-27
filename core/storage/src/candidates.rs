@@ -14,8 +14,8 @@
 //!   tables rather than one nullable column, so a heuristic cannot become an ownership
 //!   assertion by way of a schema shortcut.
 
-use hexora_types::candidate::{CandidateStatus, IdentifierCandidate, Signal};
-use hexora_types::ids::{CandidateId, RequestId};
+use nullhawk_types::candidate::{CandidateStatus, IdentifierCandidate, Signal};
+use nullhawk_types::ids::{CandidateId, RequestId};
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Result, StorageError};
@@ -321,8 +321,8 @@ fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::candidate::{SignalKind, Strength};
-    use hexora_types::object::ObjectLocation;
+    use nullhawk_types::candidate::{SignalKind, Strength};
+    use nullhawk_types::object::ObjectLocation;
 
     use super::*;
     use crate::Project;

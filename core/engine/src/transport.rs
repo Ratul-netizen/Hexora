@@ -13,10 +13,10 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hexora_types::error::Result;
-use hexora_types::http::{HttpRequest, HttpResponse};
-use hexora_types::limits::Limits;
-use hexora_types::raw::{RawH2Request, RawRequest};
+use nullhawk_types::error::Result;
+use nullhawk_types::http::{HttpRequest, HttpResponse};
+use nullhawk_types::limits::Limits;
+use nullhawk_types::raw::{RawH2Request, RawRequest};
 
 /// Which subsystem originated a request.
 ///
@@ -105,7 +105,7 @@ pub struct Exchange {
     /// Part of the exchange record rather than a side channel: how the peer was
     /// authenticated is a property of what happened, and a finding derived from an
     /// unverified connection has to be able to disclose that.
-    pub tls: Option<hexora_types::tls::TlsInfo>,
+    pub tls: Option<nullhawk_types::tls::TlsInfo>,
 }
 
 /// Per-request options.
@@ -170,7 +170,7 @@ pub trait HttpTransport: Send + Sync {
     /// request the tester did not write.
     async fn send_raw(&self, request: RawRequest, options: SendOptions) -> Result<Exchange> {
         let _ = (request, options);
-        Err(hexora_types::error::HexoraError::NotImplemented(
+        Err(nullhawk_types::error::NullhawkError::NotImplemented(
             "raw request sending on this transport",
         ))
     }
@@ -185,7 +185,7 @@ pub trait HttpTransport: Send + Sync {
     /// The default refuses. Only a transport that can drive HTTP/2 by hand implements it.
     async fn send_raw_h2(&self, request: RawH2Request, options: SendOptions) -> Result<Exchange> {
         let _ = (request, options);
-        Err(hexora_types::error::HexoraError::NotImplemented(
+        Err(nullhawk_types::error::NullhawkError::NotImplemented(
             "frame-level HTTP/2 sending on this transport",
         ))
     }
@@ -285,8 +285,8 @@ impl HttpTransport for RecordingTransport {
             response: HttpResponse {
                 status: self.status,
                 reason: None,
-                version: hexora_types::http::HttpVersion::Http11,
-                headers: hexora_types::http::Headers::new(),
+                version: nullhawk_types::http::HttpVersion::Http11,
+                headers: nullhawk_types::http::Headers::new(),
                 body: Default::default(),
                 truncated: false,
             },
@@ -308,8 +308,8 @@ impl HttpTransport for RecordingTransport {
             response: HttpResponse {
                 status: self.status,
                 reason: None,
-                version: hexora_types::http::HttpVersion::Http11,
-                headers: hexora_types::http::Headers::new(),
+                version: nullhawk_types::http::HttpVersion::Http11,
+                headers: nullhawk_types::http::Headers::new(),
                 body: Default::default(),
                 truncated: false,
             },
@@ -324,7 +324,7 @@ impl HttpTransport for RecordingTransport {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::HttpService;
+    use nullhawk_types::http::HttpService;
 
     use super::*;
 

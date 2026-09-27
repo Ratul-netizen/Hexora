@@ -1,4 +1,4 @@
-//! `hexora send` — issue a single request and print the exchange.
+//! `nullhawk send` — issue a single request and print the exchange.
 //!
 //! The smallest thing that proves the engine works end to end, and genuinely useful
 //! on its own: a `curl` that does not rewrite what you asked it to send.
@@ -10,15 +10,15 @@
 
 use std::sync::Arc;
 
-use hexora_engine::guard::{ScopeDecision, ScopeGuard};
-use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_http::{ClientIdentity, TcpTransport, TlsConfig};
-use hexora_types::http::{Header, HttpRequest, HttpService};
-use hexora_types::redact::{is_sensitive_header, RedactionPolicy, REDACTED};
-use hexora_types::scope::Scope;
-use hexora_types::{HexoraError, Result};
+use nullhawk_engine::guard::{ScopeDecision, ScopeGuard};
+use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+use nullhawk_http::{ClientIdentity, TcpTransport, TlsConfig};
+use nullhawk_types::http::{Header, HttpRequest, HttpService};
+use nullhawk_types::redact::{is_sensitive_header, RedactionPolicy, REDACTED};
+use nullhawk_types::scope::Scope;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for one `hexora send` invocation.
+/// Options for one `nullhawk send` invocation.
 pub struct SendArgs<'a> {
     pub url: &'a str,
     pub method: &'a str,
@@ -27,7 +27,7 @@ pub struct SendArgs<'a> {
     pub json: bool,
     /// Show `Authorization`, `Cookie` and friends in full.
     pub show_secrets: bool,
-    /// Accept any TLS certificate. See [`hexora_types::tls::Verification::AcceptAny`].
+    /// Accept any TLS certificate. See [`nullhawk_types::tls::Verification::AcceptAny`].
     pub insecure: bool,
     /// Client certificate chain (PEM) for mTLS.
     pub client_cert: Option<&'a std::path::Path>,
@@ -49,7 +49,7 @@ pub fn run(args: SendArgs<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let exchange = runtime.block_on(guard.send(request, options))?;
 
@@ -74,7 +74,7 @@ fn build_transport(args: &SendArgs<'_>) -> Result<TcpTransport> {
         // Half an identity is a misconfiguration, and silently ignoring it would look
         // like the server rejected the certificate.
         _ => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "client-cert",
                 "--client-cert and --client-key must be given together",
             ))
@@ -99,7 +99,7 @@ fn build_request(
 
     for raw in extra_headers {
         let (name, value) = raw.split_once(':').ok_or_else(|| {
-            HexoraError::invalid_input("header", format!("{raw:?} is not in 'Name: Value' form"))
+            NullhawkError::invalid_input("header", format!("{raw:?} is not in 'Name: Value' form"))
         })?;
         // Append, not set: sending two headers of the same name is a legitimate test.
         request
@@ -130,13 +130,13 @@ fn build_request(
 fn parse_url(url: &str) -> Result<(HttpService, String)> {
     let (scheme, rest) = url
         .split_once("://")
-        .ok_or_else(|| HexoraError::invalid_input("url", "expected http:// or https://"))?;
+        .ok_or_else(|| NullhawkError::invalid_input("url", "expected http:// or https://"))?;
 
     let secure = match scheme.to_ascii_lowercase().as_str() {
         "http" => false,
         "https" => true,
         other => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "url",
                 format!("unsupported scheme {other:?}"),
             ))
@@ -148,14 +148,17 @@ fn parse_url(url: &str) -> Result<(HttpService, String)> {
         None => (rest, "/".to_string()),
     };
     if authority.is_empty() {
-        return Err(HexoraError::invalid_input("url", "missing host"));
+        return Err(NullhawkError::invalid_input("url", "missing host"));
     }
 
     // Split host from port, taking the last colon so IPv6 literals in brackets survive.
     let (host, port) = match authority.rfind(':') {
         Some(i) if !authority[i..].contains(']') => {
             let port = authority[i + 1..].parse::<u16>().map_err(|_| {
-                HexoraError::invalid_input("url", format!("invalid port {:?}", &authority[i + 1..]))
+                NullhawkError::invalid_input(
+                    "url",
+                    format!("invalid port {:?}", &authority[i + 1..]),
+                )
             })?;
             (&authority[..i], port)
         }
@@ -174,7 +177,7 @@ fn render_header(name: &str, value: &str, show_secrets: bool) -> String {
 }
 
 fn print_human(
-    exchange: &hexora_engine::transport::Exchange,
+    exchange: &nullhawk_engine::transport::Exchange,
     decision: ScopeDecision,
     show_secrets: bool,
 ) {
@@ -241,7 +244,7 @@ fn print_human(
     );
 }
 
-fn print_json(exchange: &hexora_engine::transport::Exchange, show_secrets: bool) {
+fn print_json(exchange: &nullhawk_engine::transport::Exchange, show_secrets: bool) {
     let policy = if show_secrets {
         RedactionPolicy::Disabled
     } else {

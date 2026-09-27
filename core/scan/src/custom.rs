@@ -1,8 +1,8 @@
 //! User-defined passive checks (M15.5).
 //!
-//! A [`hexora_types::custom::CustomCheck`] is a saved query plus a finding template. This turns
+//! A [`nullhawk_types::custom::CustomCheck`] is a saved query plus a finding template. This turns
 //! one into a [`PassiveCheck`] the scanner runs alongside the built-ins: it builds a query
-//! [`Record`](hexora_query::Record) from the exchange the scanner already assembled, runs the
+//! [`Record`](nullhawk_query::Record) from the exchange the scanner already assembled, runs the
 //! compiled query, and on a match emits one observation carrying the check's name, severity and
 //! message.
 //!
@@ -22,8 +22,8 @@
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use hexora_query::{Field, Query};
-use hexora_types::custom::CustomCheck as CustomDef;
+use nullhawk_query::{Field, Query};
+use nullhawk_types::custom::CustomCheck as CustomDef;
 
 use crate::checks::prelude::*;
 
@@ -98,8 +98,8 @@ pub struct CustomCheck {
 
 impl CustomCheck {
     /// Builds a query record from the exchange the scanner assembled (metadata + headers).
-    fn record(exchange: &Exchange) -> hexora_query::Record {
-        hexora_query::Record {
+    fn record(exchange: &Exchange) -> nullhawk_query::Record {
+        nullhawk_query::Record {
             method: exchange.method.clone(),
             host: exchange.host.clone(),
             path: exchange.path.clone(),
@@ -170,7 +170,7 @@ impl PassiveCheck for CustomCheck {
 
 /// Header lines `Name: value`, for the query evaluator. Values are the redacted ones the
 /// scanner already put on the exchange, so a custom check cannot read a credential back out.
-fn header_lines(headers: &hexora_types::http::Headers) -> Vec<String> {
+fn header_lines(headers: &nullhawk_types::http::Headers) -> Vec<String> {
     headers
         .iter()
         .map(|h| format!("{}: {}", h.name, h.value_lossy()))

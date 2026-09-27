@@ -7,12 +7,12 @@
 //!
 //! It reports the endpoint as a **lead**, not a hypothesis for the active scanner to settle.
 //! Testing prompt injection means sending payloads, and the target is a `POST`: an automated
-//! run never replays a request that is not safe to repeat, and Hexora will not make an
+//! run never replays a request that is not safe to repeat, and Nullhawk will not make an
 //! exception to that for a guess about what an endpoint does. The tester tests it deliberately
-//! with `hexora llm <url>`, which is consent — the same line the crawler and the active
+//! with `nullhawk llm <url>`, which is consent — the same line the crawler and the active
 //! scanner draw.
 //!
-//! The path list mirrors `hexora_llm::looks_like_llm_path`, duplicated rather than depended on
+//! The path list mirrors `nullhawk_llm::looks_like_llm_path`, duplicated rather than depended on
 //! because the passive scanner is network-free by design and must not pull in the transport
 //! crate the LLM tester needs.
 
@@ -32,7 +32,7 @@ const INFO: DetectorInfo = DetectorInfo {
     settles: None,
 };
 
-/// Path fragments that mark a chat/LLM endpoint. Mirrors `hexora_llm::looks_like_llm_path`.
+/// Path fragments that mark a chat/LLM endpoint. Mirrors `nullhawk_llm::looks_like_llm_path`.
 const LLM_PATH_HINTS: &[&str] = &[
     "chat",
     "completion",
@@ -109,7 +109,7 @@ impl PassiveCheck for LlmEndpoints {
                           untrusted at every sink."
                 .into(),
             reproduction: format!(
-                "hexora llm {} — sends prompt-injection probes and confirms with a canary.",
+                "nullhawk llm {} — sends prompt-injection probes and confirms with a canary.",
                 endpoint(&exchange.url),
             ),
             cwe: Some("CWE-1427".into()),

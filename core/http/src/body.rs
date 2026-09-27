@@ -2,14 +2,14 @@
 //!
 //! # Why streaming is not an optimisation here
 //!
-//! Buffering a whole response before returning it is fine for `hexora send`, and wrong
+//! Buffering a whole response before returning it is fine for `nullhawk send`, and wrong
 //! for everything the proxy has to do. A proxy that waits for the last byte before
 //! forwarding the first turns every download into a stall, breaks server-sent events
 //! and long-poll endpoints outright, and needs enough memory to hold whatever the
 //! target decides to send.
 //!
 //! Worse for a security tool: buffering means a hostile server can hold the connection
-//! open indefinitely and Hexora would have nothing to show for it. Streaming means the
+//! open indefinitely and Nullhawk would have nothing to show for it. Streaming means the
 //! limit fires against bytes already counted, and whatever arrived before the cut is
 //! still evidence.
 //!
@@ -22,9 +22,9 @@
 //! asks for [`BodyStream::collect`], which reverses content coding at the end.
 
 use bytes::{Bytes, BytesMut};
-use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result, TimeoutPhase};
-use hexora_types::http::Headers;
-use hexora_types::limits::Limits;
+use nullhawk_types::error::{NetworkError, NullhawkError, ProtocolError, Result, TimeoutPhase};
+use nullhawk_types::http::Headers;
+use nullhawk_types::limits::Limits;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::chunked;
@@ -253,14 +253,14 @@ impl<'a> BodyStream<'a> {
         match result {
             Err(_) => {
                 self.buf.truncate(before);
-                Err(HexoraError::Network(NetworkError::Timeout {
+                Err(NullhawkError::Network(NetworkError::Timeout {
                     phase: TimeoutPhase::ReadResponseBody,
                     elapsed: self.limits.total_timeout,
                 }))
             }
             Ok(Err(e)) => {
                 self.buf.truncate(before);
-                Err(HexoraError::Network(NetworkError::Io(e.to_string())))
+                Err(NullhawkError::Network(NetworkError::Io(e.to_string())))
             }
             Ok(Ok(read)) => {
                 self.buf.truncate(before + read);
@@ -277,7 +277,7 @@ impl<'a> BodyStream<'a> {
             BodyFraming::UntilClose | BodyFraming::None => Ok(None),
 
             BodyFraming::ContentLength(declared) => {
-                Err(HexoraError::Protocol(ProtocolError::Malformed {
+                Err(NullhawkError::Protocol(ProtocolError::Malformed {
                     protocol: "HTTP/1.1",
                     reason: format!(
                         "connection closed after {} of {declared} declared body bytes",
@@ -286,7 +286,7 @@ impl<'a> BodyStream<'a> {
                 }))
             }
 
-            BodyFraming::Chunked => Err(HexoraError::Protocol(
+            BodyFraming::Chunked => Err(NullhawkError::Protocol(
                 ProtocolError::InvalidChunkedEncoding(
                     "connection closed before the terminating chunk".to_string(),
                 ),

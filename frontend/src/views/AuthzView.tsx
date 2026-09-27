@@ -239,7 +239,7 @@ export function AuthzView({
             <span className="muted small">
               {" "}
               — a matrix over <span className="mono">DELETE /accounts/42</span> will
-              delete account 42 once per identity. Hexora will do it if told; it
+              delete account 42 once per identity. Nullhawk will do it if told; it
               will not do it by accident.
             </span>
           </span>
@@ -345,7 +345,7 @@ function ObjectsCard({
     <section className="card">
       <h2>Declared objects</h2>
       <p className="muted">
-        Which identifiers are objects, and whose they are. Hexora never guesses this:
+        Which identifiers are objects, and whose they are. Nullhawk never guesses this:
         a value that looks like an id is not one, and a tool that assumed otherwise
         would send traffic at an endpoint on the strength of a guess. Declaring sends
         nothing.
@@ -446,7 +446,7 @@ function ObjectsCard({
  * The requests that were built rather than replayed.
  *
  * Every row says what was substituted, because that is the whole claim: this request
- * never existed until Hexora made it, and a reader who cannot see the substitution
+ * never existed until Nullhawk made it, and a reader who cannot see the substitution
  * cannot check it.
  */
 function ConstructedAttempts({

@@ -1,4 +1,4 @@
-//! `hexora setup` — the first ten minutes.
+//! `nullhawk setup` — the first ten minutes.
 //!
 //! Everything here can be done a command at a time, and the output says which command
 //! each step corresponds to. It exists because the alternative first-run experience is
@@ -12,10 +12,10 @@
 
 use std::path::Path;
 
-use hexora_proxy::{trust, CertificateAuthority, TrustState};
-use hexora_types::Result;
+use nullhawk_proxy::{trust, CertificateAuthority, TrustState};
+use nullhawk_types::Result;
 
-/// Options for `hexora setup`.
+/// Options for `nullhawk setup`.
 pub struct SetupArgs<'a> {
     pub project: &'a Path,
     pub ca_dir: Option<&'a Path>,
@@ -44,7 +44,7 @@ pub fn run(args: SetupArgs<'_>) -> Result<()> {
 
     // 2. The CA.
     let ca_dir = crate::proxy::resolve_ca_dir(args.ca_dir)?;
-    let ca_existed = ca_dir.join("hexora-ca.crt").exists();
+    let ca_existed = ca_dir.join("nullhawk-ca.crt").exists();
     let ca = CertificateAuthority::load_or_create(&ca_dir)?;
     let fingerprint = ca.fingerprints();
     steps.push((
@@ -103,11 +103,11 @@ pub fn run(args: SetupArgs<'_>) -> Result<()> {
     println!();
     println!("Point your browser at 127.0.0.1:8080 as its HTTP and HTTPS proxy, then:");
     println!();
-    println!("  hexora proxy --project {}", args.project.display());
-    println!("  hexora history {}", args.project.display());
+    println!("  nullhawk proxy --project {}", args.project.display());
+    println!("  nullhawk history {}", args.project.display());
     println!();
     println!("When you are finished with this machine:");
-    println!("  hexora ca --delete");
+    println!("  nullhawk ca --delete");
     Ok(())
 }
 
@@ -120,25 +120,28 @@ fn install_ca(
     ca_dir: &Path,
     yes: bool,
     json: bool,
-) -> Result<(String, Vec<hexora_proxy::ManualStep>)> {
+) -> Result<(String, Vec<nullhawk_proxy::ManualStep>)> {
     if !yes && !json {
-        println!("Hexora needs a certificate authority in your trust store to read HTTPS.");
+        println!("Nullhawk needs a certificate authority in your trust store to read HTTPS.");
         println!();
         println!("  Fingerprint: {}", ca.fingerprint_display());
-        println!("  Private key: {}", ca_dir.join("hexora-ca.key").display());
+        println!(
+            "  Private key: {}",
+            ca_dir.join("nullhawk-ca.key").display()
+        );
         println!();
         println!("Anyone who obtains that private key could impersonate any site to you.");
-        println!("Install it only on a machine you control. Undo it with: hexora ca --delete");
+        println!("Install it only on a machine you control. Undo it with: nullhawk ca --delete");
         println!();
         if !crate::proxy::confirm("Install it now?")? {
             return Ok((
-                "declined — install later with: hexora ca --install".to_string(),
+                "declined — install later with: nullhawk ca --install".to_string(),
                 Vec::new(),
             ));
         }
     }
 
-    let installed = trust::install(&ca_dir.join("hexora-ca.crt"), &ca.fingerprints())?;
+    let installed = trust::install(&ca_dir.join("nullhawk-ca.crt"), &ca.fingerprints())?;
     let manual = if json { Vec::new() } else { installed.manual };
 
     let outcome = match installed.verified {
@@ -178,8 +181,8 @@ mod tests {
         .unwrap();
 
         assert!(project.join("project.db").is_file());
-        assert!(ca_dir.join("hexora-ca.crt").is_file());
-        assert!(ca_dir.join("hexora-ca.key").is_file());
+        assert!(ca_dir.join("nullhawk-ca.crt").is_file());
+        assert!(ca_dir.join("nullhawk-ca.key").is_file());
     }
 
     #[test]

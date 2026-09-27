@@ -1,4 +1,4 @@
-//! # hexora-report
+//! # nullhawk-report
 //!
 //! The document at the end of the engagement.
 //!
@@ -27,7 +27,7 @@
 //! project the report *says so* rather than printing a reference that resolves to
 //! nothing — see [`Citation::Missing`].
 //!
-//! **The credentials Hexora sent do not travel.** Sensitive headers are redacted by
+//! **The credentials Nullhawk sent do not travel.** Sensitive headers are redacted by
 //! default under [`RedactionPolicy`], and the report states that it did so. A reader
 //! who cannot tell whether a blank `Authorization` header means "redacted" or "not
 //! sent" cannot reproduce anything.
@@ -38,7 +38,7 @@
 //! rewrote what a server sent would be citing something that never happened. The
 //! caveat block says so in as many words, so a reader deciding who may receive the
 //! document knows what is in it. The field-by-field comparison in
-//! [`hexora_types::structure`] withholds credential-named *values*; the transcript
+//! [`nullhawk_types::structure`] withholds credential-named *values*; the transcript
 //! below it does not, and the two are deliberately different.
 //!
 //! ## Excluded findings are counted, not hidden
@@ -58,15 +58,15 @@ pub mod sarif;
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::{FindingFilter, Project};
-use hexora_types::error::Result;
-use hexora_types::finding::{Confidence, Evidence, Finding, FindingStatus, Severity};
-use hexora_types::identity::{Credential, PrivilegeLevel};
-use hexora_types::ids::{IdentityId, RequestId, ResponseId};
-use hexora_types::programme::Programme;
-use hexora_types::redact::{is_sensitive_header, RedactionPolicy, REDACTED};
-use hexora_types::scope::{PathMatch, SchemeMatch, Scope};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_storage::{FindingFilter, Project};
+use nullhawk_types::error::Result;
+use nullhawk_types::finding::{Confidence, Evidence, Finding, FindingStatus, Severity};
+use nullhawk_types::identity::{Credential, PrivilegeLevel};
+use nullhawk_types::ids::{IdentityId, RequestId, ResponseId};
+use nullhawk_types::programme::Programme;
+use nullhawk_types::redact::{is_sensitive_header, RedactionPolicy, REDACTED};
+use nullhawk_types::scope::{PathMatch, SchemeMatch, Scope};
 use serde::Serialize;
 
 /// Which output a report is rendered as.
@@ -180,7 +180,7 @@ pub struct Engagement {
     pub started_at: Option<String>,
     /// When this document was produced.
     pub generated_at: String,
-    /// The version of Hexora that produced it.
+    /// The version of Nullhawk that produced it.
     pub tool_version: String,
 }
 
@@ -203,7 +203,7 @@ impl ScopeSummary {
 /// One identity, as a report may describe it.
 ///
 /// Built by hand rather than serialized from
-/// [`Identity`](hexora_types::identity::Identity), which has no `Serialize` impl
+/// [`Identity`](nullhawk_types::identity::Identity), which has no `Serialize` impl
 /// precisely so that a credential cannot reach a document by accident.
 #[derive(Debug, Clone, Serialize)]
 pub struct IdentitySummary {
@@ -632,8 +632,8 @@ impl Report {
 /// programme excludes classes of automated output, not a tester's own conclusions.
 fn detector_of(finding: &Finding) -> Option<&str> {
     match &finding.source {
-        hexora_types::finding::FindingSource::PassiveScan { detector, .. }
-        | hexora_types::finding::FindingSource::ActiveScan { detector, .. } => {
+        nullhawk_types::finding::FindingSource::PassiveScan { detector, .. }
+        | nullhawk_types::finding::FindingSource::ActiveScan { detector, .. } => {
             Some(detector.as_str())
         }
         _ => None,
@@ -808,7 +808,7 @@ fn scope_summary(scope: &Scope) -> ScopeSummary {
     }
 }
 
-fn rule_line(rule: &hexora_types::scope::ScopeRule) -> String {
+fn rule_line(rule: &nullhawk_types::scope::ScopeRule) -> String {
     let scheme = match rule.scheme {
         SchemeMatch::Any => "",
         SchemeMatch::HttpOnly => "http:// only, ",
@@ -835,7 +835,7 @@ fn rule_line(rule: &hexora_types::scope::ScopeRule) -> String {
 }
 
 fn cite(
-    traffic: &hexora_storage::TrafficStore,
+    traffic: &nullhawk_storage::TrafficStore,
     labels: &HashMap<IdentityId, String>,
     evidence: &Evidence,
     options: &ReportOptions,
@@ -886,7 +886,7 @@ fn cite(
 
 /// Reads one exchange back out of the project, or records why it could not be.
 fn transcribe(
-    traffic: &hexora_storage::TrafficStore,
+    traffic: &nullhawk_storage::TrafficStore,
     labels: &HashMap<IdentityId, String>,
     request: RequestId,
     options: &ReportOptions,
@@ -941,7 +941,7 @@ fn transcribe(
     }))
 }
 
-fn url_of(stored: &hexora_storage::StoredRequest) -> String {
+fn url_of(stored: &nullhawk_storage::StoredRequest) -> String {
     // Proxied requests are stored in absolute form; everything else needs the origin
     // putting back in front of the path.
     if stored.path.starts_with("http://") || stored.path.starts_with("https://") {
@@ -1026,8 +1026,8 @@ pub fn redacts(name: &str) -> bool {
 /// Names the check and, where the row records one, its version — which is what lets a
 /// later comparison tell "the application was fixed" from "the check was rewritten".
 /// A human's own finding says so rather than naming a detector.
-pub fn raised_by(source: &hexora_types::finding::FindingSource) -> String {
-    use hexora_types::finding::FindingSource as S;
+pub fn raised_by(source: &nullhawk_types::finding::FindingSource) -> String {
+    use nullhawk_types::finding::FindingSource as S;
     let versioned = |kind: &str, detector: &String, version: &String| {
         if version.is_empty() {
             format!("{kind} check {detector}")
@@ -1083,12 +1083,12 @@ pub fn status_word(status: FindingStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use hexora_storage::CapturedExchange;
-    use hexora_types::finding::{Evidence, FindingSource, Location, MessagePart, Severity};
-    use hexora_types::http::{
+    use nullhawk_storage::CapturedExchange;
+    use nullhawk_types::finding::{Evidence, FindingSource, Location, MessagePart, Severity};
+    use nullhawk_types::http::{
         Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion,
     };
-    use hexora_types::ids::{FindingId, TargetId};
+    use nullhawk_types::ids::{FindingId, TargetId};
 
     use super::*;
 
@@ -1152,8 +1152,8 @@ mod tests {
         target: TargetId,
         confidence: Confidence,
         evidence: Vec<Evidence>,
-    ) -> hexora_types::verify::Verified {
-        hexora_types::verify::Verified::from_trusted_finding(raw_finding(
+    ) -> nullhawk_types::verify::Verified {
+        nullhawk_types::verify::Verified::from_trusted_finding(raw_finding(
             target, confidence, evidence,
         ))
     }
@@ -1234,13 +1234,13 @@ mod tests {
             )
             .unwrap();
 
-        let mut programme = hexora_types::programme::Programme {
+        let mut programme = nullhawk_types::programme::Programme {
             name: Some("Wolt".into()),
             policy_url: Some("https://hackerone.com/wolt".into()),
             exclusions: Vec::new(),
             test_entities: Vec::new(),
         };
-        programme.exclude(hexora_types::programme::Exclusion::new(
+        programme.exclude(nullhawk_types::programme::Exclusion::new(
             "headers.security",
             "out of scope: missing security headers",
         ));
@@ -1289,7 +1289,7 @@ mod tests {
         };
         project
             .findings()
-            .record(&hexora_types::verify::Verified::from_trusted_finding(
+            .record(&nullhawk_types::verify::Verified::from_trusted_finding(
                 passive,
             ))
             .unwrap();
@@ -1299,8 +1299,8 @@ mod tests {
         assert_eq!(before.leads.len(), 1);
         assert_eq!(before.excluded.programme_excluded, 0);
 
-        let mut programme = hexora_types::programme::Programme::none();
-        programme.exclude(hexora_types::programme::Exclusion::new(
+        let mut programme = nullhawk_types::programme::Programme::none();
+        programme.exclude(nullhawk_types::programme::Exclusion::new(
             "headers.security",
             "out of scope: missing security headers",
         ));
@@ -1346,13 +1346,16 @@ mod tests {
             ))
             .unwrap();
 
-        let mut programme = hexora_types::programme::Programme::none();
+        let mut programme = nullhawk_types::programme::Programme::none();
         for id in [
             "headers.security",
             "authz.cross_identity",
             "authz.scheduled",
         ] {
-            programme.exclude(hexora_types::programme::Exclusion::new(id, "out of scope"));
+            programme.exclude(nullhawk_types::programme::Exclusion::new(
+                id,
+                "out of scope",
+            ));
         }
         project.settings().set_programme(&programme).unwrap();
 
@@ -1382,13 +1385,13 @@ mod tests {
             )
             .unwrap();
 
-        let mut programme = hexora_types::programme::Programme {
+        let mut programme = nullhawk_types::programme::Programme {
             name: Some("<script>alert(1)</script>".into()),
             policy_url: None,
             exclusions: Vec::new(),
             test_entities: Vec::new(),
         };
-        programme.exclude(hexora_types::programme::Exclusion::new(
+        programme.exclude(nullhawk_types::programme::Exclusion::new(
             "headers.security",
             "<img src=x onerror=alert(1)>",
         ));
@@ -1570,7 +1573,9 @@ mod tests {
         lead.title = "A lead".into();
         project
             .findings()
-            .save(&hexora_types::verify::Verified::from_trusted_finding(lead))
+            .save(&nullhawk_types::verify::Verified::from_trusted_finding(
+                lead,
+            ))
             .unwrap();
 
         let report = Report::build(&project, &options()).unwrap();
@@ -1658,7 +1663,7 @@ mod tests {
 
         assert_eq!(sarif["version"], "2.1.0");
         let run = &sarif["runs"][0];
-        assert_eq!(run["tool"]["driver"]["name"], "Hexora");
+        assert_eq!(run["tool"]["driver"]["name"], "Nullhawk");
 
         let result = &run["results"][0];
         // The authorization subsystem's fixed rule id, matching what the CLI reports.
@@ -1670,7 +1675,7 @@ mod tests {
         assert_eq!(result["properties"]["cwe"], "CWE-639");
         assert_eq!(result["properties"]["unverified"], false);
         // The finding's stable id is the fingerprint a re-run correlates against.
-        assert!(result["partialFingerprints"]["hexoraFindingId/v1"].is_string());
+        assert!(result["partialFingerprints"]["nullhawkFindingId/v1"].is_string());
         // The exchange's URL reached the location.
         assert_eq!(
             result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
@@ -1716,7 +1721,7 @@ mod tests {
         dismissed.status = FindingStatus::FalsePositive;
         project
             .findings()
-            .save(&hexora_types::verify::Verified::from_trusted_finding(
+            .save(&nullhawk_types::verify::Verified::from_trusted_finding(
                 dismissed,
             ))
             .unwrap();
@@ -1745,7 +1750,7 @@ mod tests {
         low.severity = Severity::Low;
         project
             .findings()
-            .save(&hexora_types::verify::Verified::from_trusted_finding(low))
+            .save(&nullhawk_types::verify::Verified::from_trusted_finding(low))
             .unwrap();
 
         let report = Report::build(
@@ -1882,7 +1887,7 @@ mod tests {
         let project = Project::in_memory().unwrap();
         project
             .identities()
-            .put(&hexora_types::identity::Identity::bearer(
+            .put(&nullhawk_types::identity::Identity::bearer(
                 "User B",
                 "sk-live-xyz",
             ))

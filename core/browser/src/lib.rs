@@ -1,4 +1,4 @@
-//! # hexora-browser
+//! # nullhawk-browser
 //!
 //! Driving the browser already on the machine over the **Chrome DevTools Protocol** (M18),
 //! rather than shipping a 150 MB Chromium. This is **M18.a — the CDP transport**: the socket
@@ -14,8 +14,8 @@
 //!
 //! ## It reuses the WebSocket client (WS.d)
 //!
-//! CDP rides a WebSocket, and Hexora already has a hand-rolled WebSocket client
-//! ([`hexora_http::ws::WsConnection`]). This layer is thin on purpose: endpoint discovery, an
+//! CDP rides a WebSocket, and Nullhawk already has a hand-rolled WebSocket client
+//! ([`nullhawk_http::ws::WsConnection`]). This layer is thin on purpose: endpoint discovery, an
 //! id counter, and the classify-and-route loop. Launching the browser is M18.b; navigating and
 //! capturing under the scope guard is M18.c.
 //!
@@ -38,12 +38,12 @@ pub mod launch;
 pub use domxss::{DomXssReport, SinkHit, Source};
 pub use launch::{attach, find_browser, Browser, BrowserKind, LaunchOptions};
 
-use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_http::ws::{self, Opcode, WsConnection};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::http::{HttpRequest, HttpService};
-use hexora_types::limits::Limits;
+use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+use nullhawk_http::ws::{self, Opcode, WsConnection};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_types::error::{NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::{HttpRequest, HttpService};
+use nullhawk_types::limits::Limits;
 
 /// How long a single CDP command waits for its response before giving up.
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -102,20 +102,20 @@ fn event_of(message: &Value) -> CdpEvent {
     }
 }
 
-/// Turns a CDP `error` object into a Hexora error.
-fn cdp_error(error: &Value) -> HexoraError {
+/// Turns a CDP `error` object into a Nullhawk error.
+fn cdp_error(error: &Value) -> NullhawkError {
     let message = error
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or("unknown CDP error");
-    HexoraError::Protocol(ProtocolError::Malformed {
+    NullhawkError::Protocol(ProtocolError::Malformed {
         protocol: "CDP",
         reason: message.to_string(),
     })
 }
 
-fn malformed(reason: impl Into<String>) -> HexoraError {
-    HexoraError::Protocol(ProtocolError::Malformed {
+fn malformed(reason: impl Into<String>) -> NullhawkError {
+    NullhawkError::Protocol(ProtocolError::Malformed {
         protocol: "CDP",
         reason: reason.into(),
     })
@@ -255,7 +255,7 @@ impl Cdp {
     ///
     /// Enables the `Page` domain, issues `Page.navigate` (a CDP error such as an invalid URL
     /// is returned), then waits for `Page.loadEventFired`. When the browser is pointed at
-    /// Hexora's proxy, the requests this triggers are captured and scope-checked there — this
+    /// Nullhawk's proxy, the requests this triggers are captured and scope-checked there — this
     /// only drives the browser; the proxy is the chokepoint.
     pub async fn navigate(&mut self, url: &str, timeout: Duration) -> Result<()> {
         self.call("Page.enable", serde_json::json!({})).await?;
@@ -398,12 +398,12 @@ mod tests {
     ///
     /// ```console
     /// $ msedge --headless=new --remote-debugging-port=9222 --user-data-dir=/tmp/hx &
-    /// $ HEXORA_CDP_PORT=9222 cargo test -p hexora-browser -- --ignored live_
+    /// $ NULLHAWK_CDP_PORT=9222 cargo test -p nullhawk-browser -- --ignored live_
     /// ```
     #[tokio::test]
-    #[ignore = "needs a DevTools-enabled browser on HEXORA_CDP_PORT"]
+    #[ignore = "needs a DevTools-enabled browser on NULLHAWK_CDP_PORT"]
     async fn live_browser_reports_its_version() {
-        let port: u16 = std::env::var("HEXORA_CDP_PORT")
+        let port: u16 = std::env::var("NULLHAWK_CDP_PORT")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(9222);

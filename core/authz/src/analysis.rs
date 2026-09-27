@@ -2,7 +2,7 @@
 //!
 //! A run produces outcomes. Deciding which of them are worth putting in a report, and
 //! how firmly each may be stated, used to happen here in one function that built a
-//! `Finding` directly. It now happens in the shape every check in Hexora has:
+//! `Finding` directly. It now happens in the shape every check in Nullhawk has:
 //!
 //! ```text
 //! Matrix ──▶ MatrixDetector ──▶ Hypothesis ──▶ ReplayVerifier ──▶ Verification
@@ -14,7 +14,7 @@
 //! mode that destroys trust in a security tool is not a missed bug, it is a confident
 //! wrong one. What changed is where they live: the confidence ladder is no longer
 //! prose applied by hand here, it is [`Verification::confidence`] in
-//! [`hexora_types::verify`], which every future check climbs too.
+//! [`nullhawk_types::verify`], which every future check climbs too.
 //!
 //! # The ladder, as this check uses it
 //!
@@ -55,15 +55,17 @@
 //! after looking at the endpoint, not a matrix's call after looking at one object.
 
 use async_trait::async_trait;
-use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
-use hexora_types::identity::{Identity, PrivilegeLevel};
-use hexora_types::ids::TargetId;
-use hexora_types::object::ObjectLocation;
-use hexora_types::verify::{
+use nullhawk_types::finding::{
+    Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
+};
+use nullhawk_types::identity::{Identity, PrivilegeLevel};
+use nullhawk_types::ids::TargetId;
+use nullhawk_types::object::ObjectLocation;
+use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Verified, Writeup,
 };
-use hexora_types::Result;
-use hexora_verify::{Detector, Lab, Verifier};
+use nullhawk_types::Result;
+use nullhawk_verify::{Detector, Lab, Verifier};
 
 use crate::compare::Baseline;
 use crate::construct::{Attempt, Construction};
@@ -162,7 +164,7 @@ pub struct CellCase {
 /// first one showed — which is still an experiment, just not a repeated one.
 pub struct ReplayVerifier<'a> {
     /// The request under test.
-    pub draft: &'a hexora_repeater::Draft,
+    pub draft: &'a nullhawk_repeater::Draft,
     /// The identity the captured request belonged to.
     pub owner: &'a Identity,
     /// The owner's response, to compare a second reply against.
@@ -170,7 +172,7 @@ pub struct ReplayVerifier<'a> {
     /// What an unauthenticated request established, if one was sent.
     pub control: AnonymousControl,
     /// The owner's own request, so a comparison cites both sides.
-    pub owner_request: Option<hexora_types::ids::RequestId>,
+    pub owner_request: Option<nullhawk_types::ids::RequestId>,
     /// Whether to perform the second experiment.
     pub repeat: bool,
 }
@@ -254,7 +256,7 @@ impl Verifier for ReplayVerifier<'_> {
 pub fn judge(
     cell: &Cell,
     owner_label: &str,
-    owner_request: Option<hexora_types::ids::RequestId>,
+    owner_request: Option<nullhawk_types::ids::RequestId>,
     control: AnonymousControl,
 ) -> Verification {
     supported(
@@ -342,7 +344,7 @@ fn supported(
 /// The traffic behind a cell.
 fn evidence_for(
     cell: &Cell,
-    baseline: Option<hexora_types::ids::RequestId>,
+    baseline: Option<nullhawk_types::ids::RequestId>,
     owner_label: &str,
 ) -> Vec<Evidence> {
     let Some(variant) = cell.request else {
@@ -819,7 +821,7 @@ fn construction_reproduction(construction: &Construction, attempt: &Attempt) -> 
     format!(
         "1. Send {} as {} — the unmodified request, recorded as {}.\n\
          2. Replace {} with {} ({}), and send that as {} — recorded as {}.\n\
-         3. Compare the two responses: `hexora repeat <project> {} --diff {}`.\n\
+         3. Compare the two responses: `nullhawk repeat <project> {} --diff {}`.\n\
          The second response answers a request for an object {} does not own.",
         construction.url,
         attempt.sender_label,
@@ -879,7 +881,7 @@ fn reproduction(matrix: &Matrix, cell: &Cell) -> String {
     format!(
         "1. Send {} as {} — recorded as {}.\n\
          2. Send the same request as {} — recorded as {}.\n\
-         3. Compare the two responses: `hexora repeat <project> {} --diff {}`.\n\
+         3. Compare the two responses: `nullhawk repeat <project> {} --diff {}`.\n\
          The second identity's response is the first identity's resource.",
         matrix.url,
         matrix.owner.label,
@@ -926,9 +928,9 @@ fn path_of(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::finding::{Confidence, Finding};
-    use hexora_types::ids::{IdentityId, RequestId};
-    use hexora_types::verify::Verified;
+    use nullhawk_types::finding::{Confidence, Finding};
+    use nullhawk_types::ids::{IdentityId, RequestId};
+    use nullhawk_types::verify::Verified;
 
     use super::*;
     use crate::Outcome;
@@ -955,10 +957,10 @@ mod tests {
     /// A cell carrying a real structural comparison of two bodies.
     fn compared(label: &str, verdict: Verdict, control: &str, variant: &str) -> Cell {
         let mut cell = cell(label, PrivilegeLevel::User, verdict);
-        cell.structure = Some(hexora_types::structure::Diff::of(
+        cell.structure = Some(nullhawk_types::structure::Diff::of(
             control.as_bytes(),
             variant.as_bytes(),
-            &hexora_types::structure::Policy::default(),
+            &nullhawk_types::structure::Policy::default(),
         ));
         cell
     }

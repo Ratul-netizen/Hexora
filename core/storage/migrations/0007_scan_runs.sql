@@ -30,7 +30,7 @@ CREATE TABLE scan_runs (
     -- How much traffic was read, and how much was deliberately not.
     exchanges_read  INTEGER NOT NULL DEFAULT 0,
     exchanges_skipped INTEGER NOT NULL DEFAULT 0,
-    -- The Hexora build. Same reasoning as `snapshots.tool_version`.
+    -- The Nullhawk build. Same reasoning as `snapshots.tool_version`.
     tool_version    TEXT NOT NULL
 );
 

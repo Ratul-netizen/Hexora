@@ -1,6 +1,6 @@
 [package]
-name = "hexora-engine"
-description = "Core engine boundaries for Hexora: HTTP transport, scope enforcement, extension and AI permissions"
+name = "nullhawk-engine"
+description = "Core engine boundaries for Nullhawk: HTTP transport, scope enforcement, extension and AI permissions"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-hexora-types.workspace = true
+nullhawk-types.workspace = true
 bytes.workspace = true
 async-trait.workspace = true
 serde.workspace = true

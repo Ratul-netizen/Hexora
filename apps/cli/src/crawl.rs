@@ -1,4 +1,4 @@
-//! `hexora crawl` — a bounded, scope-checked crawl that feeds the project.
+//! `nullhawk crawl` — a bounded, scope-checked crawl that feeds the project.
 //!
 //! The crawler is a producer of automated traffic, so it obeys the same discipline as the
 //! active scanner and is spelled out the same way:
@@ -19,14 +19,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hexora_crawl::{CrawlBudget, CrawlPolicy, CrawlReport, CrawlStop, Crawler, SkipReason};
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{HttpTransport, Origin};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::{CapturedExchange, Project, TrafficStore};
-use hexora_types::scope::Scope;
-use hexora_types::{HexoraError, Result};
+use nullhawk_crawl::{CrawlBudget, CrawlPolicy, CrawlReport, CrawlStop, Crawler, SkipReason};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{HttpTransport, Origin};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_storage::{CapturedExchange, Project, TrafficStore};
+use nullhawk_types::scope::Scope;
+use nullhawk_types::{NullhawkError, Result};
 
 /// The most seed URLs gathered from captured traffic. A crawl that started from ten
 /// thousand seeds would spend its budget before following a single link; past this the
@@ -36,7 +36,7 @@ const MAX_SEED_URLS: usize = 1000;
 /// How many history rows to read per page while gathering seeds.
 const SEED_PAGE: u32 = 500;
 
-/// Options for `hexora crawl`.
+/// Options for `nullhawk crawl`.
 pub struct Args {
     pub project: PathBuf,
     /// Explicit seed URLs. When present, captured traffic is not used for seeds.
@@ -115,7 +115,7 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
     if !args.yes && args.json {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "a crawl sends traffic, and --json cannot ask. Pass --yes to say that is \
              intended, or use --dry-run to see the plan",
@@ -141,7 +141,7 @@ pub fn run(args: Args) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
     let report = runtime.block_on(stoppable(&crawler, seeds));
 
     let store = Arc::new(project.traffic());
@@ -190,7 +190,7 @@ async fn stoppable<T: HttpTransport>(crawler: &Crawler<'_, T>, seeds: Vec<String
 fn record_fetched(
     store: &TrafficStore,
     report: &CrawlReport,
-    identity: Option<hexora_types::ids::IdentityId>,
+    identity: Option<nullhawk_types::ids::IdentityId>,
 ) -> Result<usize> {
     let mut recorded = 0;
     for exchange in &report.fetched {
@@ -243,7 +243,7 @@ fn gather_seeds(project: &Project, scope: &Scope) -> Result<Vec<String>> {
 
 /// Whether a captured URL is in the project's scope.
 fn in_scope(scope: &Scope, url: &str) -> bool {
-    match hexora_types::http::HttpService::parse_url(url) {
+    match nullhawk_types::http::HttpService::parse_url(url) {
         Ok((service, path)) => scope.contains(&service, &path),
         Err(_) => false,
     }

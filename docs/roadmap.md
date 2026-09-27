@@ -29,7 +29,7 @@ observations drive it:
 
 So: **usable proxy → manual toolkit → automation → scanner → extensibility.**
 
-A secondary rule: each milestone must leave Hexora *more usable than before*. No
+A secondary rule: each milestone must leave Nullhawk *more usable than before*. No
 milestone exists purely as scaffolding for a later one.
 
 ---
@@ -51,7 +51,7 @@ CLI shell, Tauri shell, CI, threat model, security invariants.
 Everything below still moves, but the *next several milestones* are fixed, and the
 reason is worth stating once because it decides what gets built and what does not:
 
-> **Hexora does not win by having more scanners. It wins by making every automated
+> **Nullhawk does not win by having more scanners. It wins by making every automated
 > result explainable, reproducible and safe.**
 
 A scanner that finds one more bug class than a competitor is a feature. A scanner whose
@@ -109,7 +109,7 @@ Split into small steps, because a single "HTTP engine" milestone is undebuggable
 
 ### What M1.1 delivered
 
-`hexora send <url>` issues a real request over a real socket and prints the exchange.
+`nullhawk send <url>` issues a real request over a real socket and prints the exchange.
 The engine lives in `core/http`:
 
 - A **wire-preserving parser** that is permissive but loud. It accepts input a strict
@@ -173,7 +173,7 @@ test of itself.
 Still open here: collections, and byte-exact raw sending for requests whose line
 endings are deliberately non-conforming.
 
-> **At M4 Hexora is a usable tool rather than a foundation.** Everything after this is
+> **At M4 Nullhawk is a usable tool rather than a foundation.** Everything after this is
 > making it a *better* tool than the alternatives.
 
 **M5 — Desktop UI** · DONE
@@ -200,7 +200,7 @@ exist, ALPN is configurable on both the client and the interception seam, the
 `intercept.rs` *asserts* that `h2` must not be advertised until the engine can parse it —
 so turning it on is a deliberate act, not an accident.
 
-**The tension that shapes the whole design.** Hexora's identity is wire preservation:
+**The tension that shapes the whole design.** Nullhawk's identity is wire preservation:
 send deliberately-malformed messages, keep casing, duplicates and bad framing exactly as
 written. HTTP/2 fights this — it is binary, HPACK-compressed, lowercases every header
 name, and a *conforming* library will not let a caller emit a protocol violation. But
@@ -279,7 +279,7 @@ bytes is essential, exactly like the HPACK fuzz that caught a panic in M5.1f.
 | Step | What it gives us | Depends on |
 | ---- | ---------------- | ---------- |
 | **WS.a** — pass the upgrade through, capture the session | The proxy detects `Upgrade: websocket`, stops stripping it, completes the `101` to both sides, then relays the bidirectional stream while parsing frames into `websocket_messages` — direction, opcode, payload, and the **observed** masking, because an unmasked client frame or a masked server frame is itself a finding. The Upgrade request and response are captured as an ordinary exchange. This is the headline "WebSocket interception". | proxy tunnel (M2.3), the existing WS table |
-| **WS.b** — the message timeline | History lists WebSocket sessions; opening one shows an ordered, both-directions timeline, and `hexora ws` does the same from the CLI. The storage read side for frames, the write side having landed in WS.a. | WS.a |
+| **WS.b** — the message timeline | History lists WebSocket sessions; opening one shows an ordered, both-directions timeline, and `nullhawk ws` does the same from the CLI. The storage read side for frames, the write side having landed in WS.a. | WS.a |
 | **WS.c** — intercept and edit in flight | Per-message forward / replace / drop, in either direction — the WebSocket analogue of the HTTP interceptor hooks, on the same seam. This is "intercept" in the sense of modifying live traffic. | WS.a |
 | **WS.d** — compose and send into a live session | Hold the session open and inject a composed or replayed message on demand, through the scope guard and captured like any frame — the WebSocket analogue of the repeater. | WS.a |
 | **WS.e** — frame-level / adversarial WebSocket | A hand-rolled codec that emits exactly what the tester wrote: bad masking, RSV bits, invalid opcodes, a lying length, a fragmented control frame. Plus `permessage-deflate` (RFC 7692) — decompressed to be intelligible, both forms kept, bounded against a decompression bomb. The WebSocket analogue of raw h1 and frame-level h2. | WS.d |
@@ -354,9 +354,9 @@ Done (M12.1–M12.5), in `core/authz`, `core/storage`, `core/report`, the `authz
   fail their own validation, keyed on what they claim so a re-run updates rather than
   duplicates — keeping triage decisions and letting confidence fall when the evidence
   no longer supports it.
-- `hexora findings`: list worst-first, show one in full, triage, filter to what is
+- `nullhawk findings`: list worst-first, show one in full, triage, filter to what is
   actually actionable.
-- Reports (`core/report`, `hexora report`): Markdown, self-contained HTML and JSON off
+- Reports (`core/report`, `nullhawk report`): Markdown, self-contained HTML and JSON off
   one model. Every claim quotes the request and response behind it; a citation the
   project cannot resolve is printed as missing rather than as a dead id. Scope,
   identities and coverage sit above the findings so a clean run reads as a record of
@@ -370,7 +370,7 @@ Done (M12.1–M12.5), in `core/authz`, `core/storage`, `core/report`, the `authz
   credential.
 
 - Constructed cross-identity attempts (M12.5): object identifiers and their owners
-  are declared by a human (`hexora object add`), and a run substitutes one into the
+  are declared by a human (`nullhawk object add`), and a run substitutes one into the
   object slot of a captured request and sends it as each identity. A control send per
   identity is what makes "the response looks like the object document" mean anything;
   a 200 with nothing identifiable in it is a lead, not a finding. Every generated
@@ -393,7 +393,7 @@ own.
 **M12.7 — Identifier suggestions** · DONE
 
 Every object identifier is declared by hand today, so constructed testing is exactly as
-broad as what somebody typed. Hexora can do better than that without pretending to know
+broad as what somebody typed. Nullhawk can do better than that without pretending to know
 more than it does: it can *point at* the values in captured traffic that look like
 identifiers, and let a human say yes.
 
@@ -422,7 +422,7 @@ Built as described, with three decisions worth recording:
 - **Suggestions persist.** An engagement is captured on Monday and worked on Friday.
   Re-analysis refreshes a proposed candidate and leaves a decided one alone.
 - **The score is explainable.** Each candidate carries the signed signals behind it
-  rather than a bare confidence, so a tester can answer "why did Hexora suggest this?"
+  rather than a bare confidence, so a tester can answer "why did Nullhawk suggest this?"
   — and, when it is wrong, see *which* reason was wrong.
 - **`IdentifierCandidate` has no owner field**, and neither does its table. Security
   invariant 10 records this, with the tests that hold it.
@@ -448,7 +448,7 @@ Four layers, and the third is the one that matters:
 3. **Classification.** `Appeared`, `Disappeared`, `Changed`, `TypeChanged`. A number
    becoming a string is a change of *shape*, kept apart from a value moving.
 4. **An explicit normalization policy.** Not automatic scrubbing of anything that
-   *looks* dynamic — that would recreate the exact problem Hexora exists not to have.
+   *looks* dynamic — that would recreate the exact problem Nullhawk exists not to have.
    A field set aside is still listed with both values and the reason, the policy
    prints itself into the report, and `Policy::strict()` sets nothing aside at all.
    `id`, `uuid` and `key` are never in the dynamic list, with a test saying so.
@@ -491,7 +491,7 @@ Reproductions reach the report for established findings only. A runnable block o
 unverified claim is the thing most likely to be forwarded without the sentence that
 qualified it.
 
-Deliberately not built: a reproduction that *runs itself*. Hexora can already re-run a
+Deliberately not built: a reproduction that *runs itself*. Nullhawk can already re-run a
 request — that is the repeater — and a button that replays an exploit against a client
 system on a reader's behalf is a different feature with a different threat model.
 
@@ -505,7 +505,7 @@ snapshot = scope + identities + configuration + traffic + declared objects
          + findings + detector versions + when
 ```
 
-With two of those, Hexora can answer "this finding existed in the previous assessment
+With two of those, Nullhawk can answer "this finding existed in the previous assessment
 and is now fixed", "this one is new", and "this one is unchanged". The findings store
 already keys a claim on what it claims and keeps triage across re-runs, which is half
 of it; the other half is being able to say which run a claim belonged to.
@@ -524,7 +524,7 @@ Built as described, with four decisions worth recording:
   the application was repaired, the matrix re-ran and raised nothing, and the old claim
   sat there looking like a current result — because a run that produces no claim never
   writes to the claim it did not produce.
-- **Detector versions are the tool version, honestly labelled.** Hexora has no registry
+- **Detector versions are the tool version, honestly labelled.** Nullhawk has no registry
   of which checks ran until M13.1, so "ran and found nothing" and "never ran" are
   reported as one inconclusive answer rather than guessed apart.
 
@@ -635,7 +635,7 @@ landed before the detectors that use it.
 
 ```text
 Plan::prepare(...)  →  Plan     synchronous; there is no await to send through
-run(plan, ...)      →  Outcome  the only function in Hexora that sends
+run(plan, ...)      →  Outcome  the only function in Nullhawk that sends
 ```
 
 `--dry-run` is the first without the second. Not a flag on a sending path — a flag can
@@ -693,7 +693,7 @@ exploitable depends on a CSP, a template that may re-encode, and a page somebody
 to look at. A test asserts the title names no vulnerability class.
 
 Deliberately not built: body inputs, which want a body model rather than a byte
-offset; path segments, because `hexora identifiers` tells a route from a value with
+offset; path segments, because `nullhawk identifiers` tells a route from a value with
 evidence and guessing here would undo it; and any attempt to render the page to see
 what a browser would do, which is a different tool.
 
@@ -782,10 +782,10 @@ applied to a copy of the request's own headers and compared byte for byte: an ex
 answer or none at all. An endpoint whose credential matches nothing declared is reported
 as untested with that reason.
 
-One implementation, two front doors. The check calls `hexora_authz::replay_once` and
+One implementation, two front doors. The check calls `nullhawk_authz::replay_once` and
 `analysis::judge`, made public rather than reimplemented — M13.1 built them to take a
 `Lab` precisely so this seam could open. A scheduled run that classified responses
-differently from `hexora authz` would be two sets of verdicts for one question.
+differently from `nullhawk authz` would be two sets of verdicts for one question.
 
 Against the IDOR demo it reached **Firm with no declared object identifiers**, through
 M12.10's same-document path behind a refused anonymous control. That is the payoff of
@@ -840,22 +840,22 @@ CR.f rather than being half-built here. -->
 | **CR.d** — authenticated crawling | Crawl as a declared identity, reusing the session model (M15.1–15.2), so the crawler reaches behind the login; each fetched exchange records which identity saw it, so coverage is attributable and a crawl as User A versus User B is two maps — feeding the cross-identity work. | CR.b, M15 |
 <!-- CR.d landed: `Crawler::crawling_as(identity)` authenticates every in-scope request
 with the identity's credential (after the programme headers, so the credential wins), and
-`hexora crawl --as <identity>` records each fetched page under that identity. The site map
+`nullhawk crawl --as <identity>` records each fetched page under that identity. The site map
 already renders the `as: <identity>` column per path, so a crawl as User A and one as User B
 are two attributable maps. Verified end to end: an authenticated crawl's pages show up in
-`hexora sitemap` attributed to the identity. -->
+`nullhawk sitemap` attributed to the identity. -->
 
 | **CR.e** — the site map | The coverage answer, made visible: a host → path tree in the CLI and the window showing what was fetched, what is out of scope, what forms were found but not submitted, and which identity reached each. And the scanner now has more to scan, because the crawl fed the project — the "empty scan" gap closed. | CR.b |
-<!-- CR.e landed (CLI): `hexora sitemap <project>` prints the host→path tree with methods,
+<!-- CR.e landed (CLI): `nullhawk sitemap <project>` prints the host→path tree with methods,
 statuses and the identity that reached each path, lists out-of-scope URLs seen, and with
 --forms lists forms discovered-but-never-submitted (reusing CR.a over captured HTML). The
-pure builder is `hexora_crawl::SiteMap::build(pages, scope)`, decoupled from storage so the
+pure builder is `nullhawk_crawl::SiteMap::build(pages, scope)`, decoupled from storage so the
 desktop window can reuse the same function. The window view itself is the remaining half,
 deferred to the desktop surface. Note: adding Origin::Crawler required 'crawler' in the
 requests.origin CHECK (migration 0001) — caught by the crawl→sitemap end-to-end run. -->
 
 | **CR.f** — hardening and JS-rendered discovery | The HTML/URL extractor fuzzed on hostile bytes (the panic surface, like the HPACK and WebSocket parsers), a per-host budget the scheduler enforces, and the decision on **JS-rendered endpoints**: a static extractor misses SPA routes and XHR that only exist after JavaScript runs, so this **merges with browser integration (M18)** — driving a real browser over CDP, the approach ZAP's Client Spider adopted in 2026 — rather than being built twice. A static crawl reports honestly that a JS app needs the browser. | CR.a–e, M18 |
-<!-- CR.f fuzzing landed: `hexora_crawl::fuzz_extract` drives the extractor over arbitrary
+<!-- CR.f fuzzing landed: `nullhawk_crawl::fuzz_extract` drives the extractor over arbitrary
 bytes (HTML/form/URL-string paths plus the hand-rolled resolver via a hostile base URL);
 a proptest in core/crawl/src/lib.rs asserts panic-free + bounded (stressed at 20k cases),
 and a `crawl_extract` cargo-fuzz target sits beside hpack_decode/ws_frame/ws_inflate. The
@@ -881,7 +881,7 @@ browser — it defers to M18.
 **M15 — Session handling** · IN PROGRESS
 
 ```text
-M15.1  Session adoption      a person logs in, Hexora notices  ✔
+M15.1  Session adoption      a person logs in, Nullhawk notices  ✔
 M15.2  Which cookie is you   attribution through a jar that changes  ✔
 M15.4  Renewal sequence      a stored sequence with holes where secrets go
 M15.3  What a credential says  expiry and subject, read from the token  ✔
@@ -923,9 +923,9 @@ CDP rather than shipping Chromium; the JS-rendered crawl CR.f deferred here, and
 Why this, and why now: a static extractor (CR.a) finds the links in the bytes as delivered,
 which a single-page app does not have — its routes and XHR endpoints only exist after
 JavaScript runs. Every serious crawler answered this by driving a real browser (ZAP's Client
-Spider, Burp's built-in Chromium). Hexora **drives the browser already on the machine** over
+Spider, Burp's built-in Chromium). Nullhawk **drives the browser already on the machine** over
 the **Chrome DevTools Protocol** rather than shipping a 150 MB Chromium: smaller, and it tests
-the engine the target's users actually run. The discipline is unchanged — a browser Hexora
+the engine the target's users actually run. The discipline is unchanged — a browser Nullhawk
 drives is a producer under the scope guard, and what it navigates to and submits is bounded
 the same way the crawler is.
 
@@ -933,8 +933,8 @@ the same way the crawler is.
 | ---- | ---------------- | ---------- |
 | **M18.a** — the CDP transport | Connect to a browser's DevTools endpoint (discover the WebSocket URL over its `/json` HTTP interface), speak CDP over that socket — **reusing the WS.d client** — with request/response id matching and an event stream. The foundation everything else rides. Testable against a local headless browser, no target needed. | WS.d (`WsConnection`) |
 | **M18.b** — launch and attach | Find the user's installed Chrome or Edge, launch it headless with a throwaway profile and a debugging port, or attach to one already running; clean shutdown that never leaves an orphan. No Chromium shipped. | M18.a |
-<!-- M18.a + M18.b DONE. hexora-browser::launch: find_browser() probes the known Chrome/Edge/
-Chromium locations (HEXORA_BROWSER overrides); Browser::launch() starts it headless with a
+<!-- M18.a + M18.b DONE. nullhawk-browser::launch: find_browser() probes the known Chrome/Edge/
+Chromium locations (NULLHAWK_BROWSER overrides); Browser::launch() starts it headless with a
 throwaway profile and --remote-debugging-port=0, reads the real port back from the
 DevToolsActivePort file, and connect()/version() drive it over the M18.a CDP client. Drop kills
 the process (children exit with it) and TempDir removes the profile — verified live against
@@ -942,7 +942,7 @@ Chrome 154 with zero orphaned processes left. attach(port) connects to an alread
 instance without owning its lifecycle. -->
 
 | **M18.c** — navigate and capture | Drive `Page.navigate`, wait for load, enable the `Network` domain, and capture the requests the page actually made — **through the scope guard**, recorded like proxy traffic so the scanner sees a SPA's real surface. | M18.b, scope guard |
-<!-- M18.c DONE. The architecture is browser → Hexora's proxy → scope guard + capture: the
+<!-- M18.c DONE. The architecture is browser → Nullhawk's proxy → scope guard + capture: the
 browser is launched routed through the proxy (`LaunchOptions::through_proxy`, adding
 --proxy-server + --ignore-certificate-errors), and CDP only DRIVES it (`Cdp::navigate` waits
 for Page.loadEventFired; `Cdp::eval`/`current_url` read the DOM). The proxy is the chokepoint
@@ -956,7 +956,7 @@ dropped. Quieting flags added too, but scope filtering is the definitive noise c
 
 **Ground rules.** The browser is a **producer under the scope guard**, never a second door
 onto the network: it navigates and submits only what scope and the crawler's safety policy
-allow. Chromium is **not shipped** — Hexora drives what the tester already has, and says so
+allow. Chromium is **not shipped** — Nullhawk drives what the tester already has, and says so
 honestly when neither Chrome nor Edge is found rather than pretending to a capability it lacks.
 The static crawl still reports what it could not reach; the browser is where a SPA's real
 surface is found, not a replacement for the honest static answer.
@@ -966,16 +966,16 @@ a capability neither Burp nor Caido ships natively.
 
 | Step | What it gives us | Depends on |
 | ---- | ---------------- | ---------- |
-| **LLM.a** — prompt injection | Send injection/jailbreak probes to an LLM endpoint, each carrying a **canary** — a random token the model would never emit — inside an instruction to output it. If the canary comes back, the application's system instructions were overridden by user input: prompt injection, *demonstrated with evidence*, the same shape as the reflected-input check. `hexora llm <url>`. | scope guard, HttpTransport |
+| **LLM.a** — prompt injection | Send injection/jailbreak probes to an LLM endpoint, each carrying a **canary** — a random token the model would never emit — inside an instruction to output it. If the canary comes back, the application's system instructions were overridden by user input: prompt injection, *demonstrated with evidence*, the same shape as the reflected-input check. `nullhawk llm <url>`. | scope guard, HttpTransport |
 | **LLM.b** — auto-discovery | A passive detector that recognises LLM-backed endpoints (a JSON body to a chat-shaped path) and surfaces them as a **lead**, so a crawl/proxy feeds discovery. | LLM.a, scan |
-| **LLM.c** — system-prompt & data leakage | DONE. Extraction probes + a control-baselined signal oracle: `hexora llm` now also reports likely system-prompt disclosure as leads (heuristic, framed for a human to verify). | LLM.a |
-| **LLM.d** — insecure output handling | DONE. A probe makes the model emit a marker with active characters (`<`,`>`); if they come back unencoded, its output is the XSS-via-LLM chain. `hexora llm` reports it with the response context (HTML / raw-in-JSON). | LLM.a |
+| **LLM.c** — system-prompt & data leakage | DONE. Extraction probes + a control-baselined signal oracle: `nullhawk llm` now also reports likely system-prompt disclosure as leads (heuristic, framed for a human to verify). | LLM.a |
+| **LLM.d** — insecure output handling | DONE. A probe makes the model emit a marker with active characters (`<`,`>`); if they come back unencoded, its output is the XSS-via-LLM chain. `nullhawk llm` reports it with the response context (HTML / raw-in-JSON). | LLM.a |
 
-<!-- LLM.a DONE. New `hexora-llm` crate: a canary-based prompt-injection tester. `probes()` is
+<!-- LLM.a DONE. New `nullhawk-llm` crate: a canary-based prompt-injection tester. `probes()` is
 the corpus (direct override, role confusion, jailbreak, delimiter escape), each rendering a
 random canary; `obeyed()` is the oracle (the canary came back); `test(guard, target)` sends
 every probe through the scope guard and reports confirmed injections with the canary as
-evidence. Body template uses a {{PROMPT}} placeholder, JSON-escaped. `hexora llm <url>
+evidence. Body template uses a {{PROMPT}} placeholder, JSON-escaped. `nullhawk llm <url>
 [--template|--template-file] [--method] [--header] [--insecure] [--yes]`, gated behind Pro,
 host auto-scoped. Verified live against a vulnerable local endpoint (all 4 probes confirmed
 with canaries) and by mock tests (vulnerable → confirmed, defended → refuted, out-of-scope →
@@ -986,14 +986,14 @@ versus Burp: confirming blind vulnerabilities by making a target reach a server 
 
 | Step | What it gives us | Depends on |
 | ---- | ---------------- | ---------- |
-| **OOB.a** — the HTTP collaborator | A self-hosted server that catches HTTP callbacks, records each with the unique token that provoked it, and answers polls; a client that mints payloads (`http://<token>.domain/` or `http://host/<token>`) and polls. A callback proves the target processed the payload out of band — the confirmation a blind SSRF, XXE or injection cannot give from its response. `hexora oob serve|mint|poll`. | — |
+| **OOB.a** — the HTTP collaborator | A self-hosted server that catches HTTP callbacks, records each with the unique token that provoked it, and answers polls; a client that mints payloads (`http://<token>.domain/` or `http://host/<token>`) and polls. A callback proves the target processed the payload out of band — the confirmation a blind SSRF, XXE or injection cannot give from its response. `nullhawk oob serve|mint|poll`. | — |
 | **OOB.b** — DNS interactions | DONE. A UDP DNS listener answers A queries and records token-bearing lookups into the same store, so a target that only *resolves* the payload is caught too. `oob serve --dns <addr>`. | OOB.a |
-| **OOB.c** — wired into the tools | DONE (parameter scanner). `hexora oob test <url>` injects a collaborator payload into each query parameter, sends, waits, and polls — a callback confirms blind SSRF / OOB injection, correlated to the parameter. | OOB.a |
+| **OOB.c** — wired into the tools | DONE (parameter scanner). `nullhawk oob test <url>` injects a collaborator payload into each query parameter, sends, waits, and polls — a callback confirms blind SSRF / OOB injection, correlated to the parameter. | OOB.a |
 
-<!-- OOB.a DONE. New hexora-oob crate: a self-hostable HTTP collaborator (server catches
-callbacks + a /_hexora/poll endpoint; client mints path- or subdomain-token payloads and
+<!-- OOB.a DONE. New nullhawk-oob crate: a self-hostable HTTP collaborator (server catches
+callbacks + a /_nullhawk/poll endpoint; client mints path- or subdomain-token payloads and
 polls; interactions drain per poll so each returns what is new). Nothing ships a public
-domain — the tester runs `hexora oob serve` on a host they control. Verified end to end
+domain — the tester runs `nullhawk oob serve` on a host they control. Verified end to end
 locally: served, minted a payload, a simulated target callback was caught and correlated back
 to its token via poll. DNS callbacks (OOB.b) and tool integration (OOB.c) are the remainder. -->
 
@@ -1014,7 +1014,7 @@ Montoya API surface        implemented / partial / unsupported / behaviourally i
 Extension compatibility    per extension, with what was actually run
 ```
 
-Which licenses the sentence *"Hexora supports Burp extensions through a compatibility
+Which licenses the sentence *"Nullhawk supports Burp extensions through a compatibility
 layer, with tested compatibility documented per API"* — and not the shorter, more
 appealing, unverifiable one. The ground rules are in
 [`compatibility/burp-montoya/README.md`](../compatibility/burp-montoya/README.md).
@@ -1057,7 +1057,7 @@ public key**, not a server check; and an expired licence **never locks a tester'
 | ---- | ---------------- | ---------- |
 | **LIC.0** — the split and the licence (decision, not code) | The open-core boundary (which features are commercial), the AGPL + commercial dual licence, and a CLA in place before external contributions. A prerequisite, recorded so it is not skipped. | — |
 | **LIC.a** — the entitlement model and gate | An `Entitlements` value (tier, expiry, feature set) read from an Ed25519-signed licence file with an embedded public key — offline, no phone-home. A gate mirroring the capability/scope-guard pattern: one chokepoint, explicit denials, and a missing or expired licence falling back to the free tier rather than failing. | permission.rs precedent |
-| **LIC.b** — gating applied, and the free/pro split | The gate wired into real features under a defined split — core interception, repeater and reporting free; the active scanner, intruder at scale, SARIF/CI export and retest snapshots as paid, say — each gated feature naming its tier. `hexora license show|activate` and a desktop licence panel. | LIC.a |
+| **LIC.b** — gating applied, and the free/pro split | The gate wired into real features under a defined split — core interception, repeater and reporting free; the active scanner, intruder at scale, SARIF/CI export and retest snapshots as paid, say — each gated feature naming its tier. `nullhawk license show|activate` and a desktop licence panel. | LIC.a |
 | **LIC.c** — trials, activation, and grace | A time-limited trial, in-app licence entry, an offline activation flow, and expiry handling that is loud before and graceful after — degrading to read-and-report, never locking evidence mid-engagement. | LIC.b |
 | **LIC.d** — signed, auto-updating installers | Authenticode-signed Windows installers, macOS notarization and Linux packages through the Tauri bundler; the Tauri updater with signature verification; and a release CI workflow — today CI only builds the CLI. Unsigned security tools do not get adopted (see Platform support). | Tauri bundle config |
 | **LIC.e** — supply-chain and release integrity | `cargo-audit` and `cargo-deny` in CI, an SBOM, and signed checksums on release artifacts — the things enterprise procurement asks for. `cargo-audit` is already installed locally; this wires it into the pipeline. | LIC.d |
@@ -1070,9 +1070,9 @@ signing key is the most sensitive thing this track introduces after the intercep
 storage and rotation get a runbook, not a line in a script.
 
 <!-- Release-blocker resolved: the licence key is no longer a placeholder. `EMBEDDED_LICENSE_KEY`
-is now set at build time from `HEXORA_LICENSE_PUBKEY` (64 hex), all-zeros (free tier) when
+is now set at build time from `NULLHAWK_LICENSE_PUBKEY` (64 hex), all-zeros (free tier) when
 unset — so dev and tests cannot grant a tier, and a release embeds the real key. The issuer
-tooling landed: `hexora license keygen` (Ed25519 keypair) and `hexora license sign` (mint a
+tooling landed: `nullhawk license keygen` (Ed25519 keypair) and `nullhawk license sign` (mint a
 signed licence). Shipping them is safe because signing needs the offline private key and the
 build verifies against the separately-embedded public key. The one-time key ceremony is in
 docs/licensing-keys.md. Proven end to end: keyed build + signed Pro licence unlocks a gated

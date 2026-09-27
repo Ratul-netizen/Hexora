@@ -1,10 +1,10 @@
 # Threat model
 
-Hexora is a security tool that holds a client's credentials, intercepts their traffic,
+Nullhawk is a security tool that holds a client's credentials, intercepts their traffic,
 and deliberately talks to systems that may be hostile. That combination makes it a
 high-value target and an unusually exposed one.
 
-This document states what Hexora defends against, how, and — equally important — what
+This document states what Nullhawk defends against, how, and — equally important — what
 it does not defend against.
 
 **Status:** written at M0, before the network stack exists. Sections marked
@@ -22,13 +22,13 @@ current behaviour.
 | The interception CA private key | Can forge certificates for any site the user visits |
 | Project databases | The engagement's findings and evidence |
 | The tester's machine | Compromise reaches every client they work with |
-| The client's systems | Hexora sends them traffic; a bug here damages a third party |
+| The client's systems | Nullhawk sends them traffic; a bug here damages a third party |
 
 ---
 
 ## Actor 1: A hostile target
 
-**The most important actor.** Hexora connects to systems chosen precisely because
+**The most important actor.** Nullhawk connects to systems chosen precisely because
 their security is unknown, and a target that detects a scanner has every incentive to
 attack back.
 
@@ -59,7 +59,7 @@ frames, parser-confusion payloads.
 
 **Defence.** Parsers return `ProtocolError` and never panic. The message model stores
 headers and bodies as raw bytes, so invalid input is *representable* rather than
-something the parser must reject or mangle — which is also what makes Hexora usable
+something the parser must reject or mangle — which is also what makes Nullhawk usable
 for smuggling research. `#![forbid(unsafe_code)]` in every crate means a parser bug
 cannot become memory corruption. Fuzz targets for the HTTP parsers are an M1
 deliverable.
@@ -73,7 +73,7 @@ cancellation on every operation.
 
 ### SSRF-by-proxy and scope escape
 
-The most Hexora-specific risk: a target redirects, or a payload generator mutates a
+The most Nullhawk-specific risk: a target redirects, or a payload generator mutates a
 path, such that automated traffic reaches somewhere it was never authorized.
 
 **Defence.** Invariant 1. Redirects are **not** followed by default, precisely because
@@ -122,15 +122,15 @@ go through the same `ScopeGuard` as everything else.
 Someone with access to the tester's machine, or to a project directory shared over
 Dropbox/Slack/a NAS.
 
-### What Hexora does
+### What Nullhawk does
 
 - Secrets are wrapped in `Secret<T>`, so they do not leak into logs or crash dumps.
 - Sensitive headers are redacted by default in exports and reports.
 - Blob integrity is verified on read, so tampered evidence is detected rather than
   silently used in a report.
-- A project written by a newer Hexora is refused rather than partially interpreted.
+- A project written by a newer Nullhawk is refused rather than partially interpreted.
 
-### What Hexora does not do — be clear about this
+### What Nullhawk does not do — be clear about this
 
 - **Project data is not encrypted at rest by default.** A project directory contains
   captured traffic and, if identities are configured, credentials. Anyone who can read
@@ -141,9 +141,9 @@ Dropbox/Slack/a NAS.
   the filesystem. A stolen CA key lets an attacker impersonate any site to that
   machine. The CA must be per-installation, never shipped, never shared, and easy to
   regenerate and remove. _(M2.)_
-- **Hexora does not defend against malware already running as your user.** Nothing at
+- **Nullhawk does not defend against malware already running as your user.** Nothing at
   application level can.
-- **Full-disk encryption and OS account hygiene are prerequisites**, not things Hexora
+- **Full-disk encryption and OS account hygiene are prerequisites**, not things Nullhawk
   can substitute for.
 
 ---
@@ -160,7 +160,7 @@ project directory or cause execution.
 
 ---
 
-## Actor 5: Hexora itself, misconfigured
+## Actor 5: Nullhawk itself, misconfigured
 
 The likeliest real-world incident is not an attacker. It is a scan aimed at the wrong
 host, or a fuzzer left running against production overnight.
@@ -175,12 +175,12 @@ tester can answer "what did this tool do, and when".
 
 ## Non-goals
 
-- Hexora does not try to be undetectable by a WAF or IDS. Evasion for evasion's sake
+- Nullhawk does not try to be undetectable by a WAF or IDS. Evasion for evasion's sake
   is not a design goal.
-- Hexora does not protect a client's systems from an authorized tester. That is what
+- Nullhawk does not protect a client's systems from an authorized tester. That is what
   the rules of engagement are for; scope enforcement supports them, it does not
   replace them.
-- Hexora sends no telemetry, so there is no telemetry threat surface. This is
+- Nullhawk sends no telemetry, so there is no telemetry threat surface. This is
   invariant 8 and is not configurable, because a tester's traffic patterns reveal who
   their client is.
 

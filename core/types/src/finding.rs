@@ -1,6 +1,6 @@
 //! The evidence-driven finding model.
 //!
-//! Hexora's central rule: **a heuristic match is not a finding.** A detector produces
+//! Nullhawk's central rule: **a heuristic match is not a finding.** A detector produces
 //! a [`Hypothesis`]; the verification engine turns it into a [`Finding`] only after
 //! attaching [`Evidence`] that a human — or a reviewer reading the report six months
 //! later — can independently re-run.

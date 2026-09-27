@@ -24,15 +24,15 @@
 //!
 //! Roots come from the **platform** store rather than a bundled copy. A tester behind
 //! a corporate TLS-inspecting proxy has that proxy's CA installed system-wide; a
-//! bundled root set would reject every connection and look like a Hexora bug. It also
-//! means an administrator's trust decisions apply to Hexora automatically.
+//! bundled root set would reject every connection and look like a Nullhawk bug. It also
+//! means an administrator's trust decisions apply to Nullhawk automatically.
 
 use std::fmt;
 use std::sync::Arc;
 
-use hexora_types::error::{HexoraError, NetworkError, Result, TimeoutPhase};
-use hexora_types::limits::Limits;
-use hexora_types::tls::{CertificateSummary, TlsInfo, Verification};
+use nullhawk_types::error::{NetworkError, NullhawkError, Result, TimeoutPhase};
+use nullhawk_types::limits::Limits;
+use nullhawk_types::tls::{CertificateSummary, TlsInfo, Verification};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
@@ -58,13 +58,13 @@ impl ClientIdentity {
     /// Loads a PEM certificate chain and private key from disk.
     pub fn from_pem_files(cert_path: &std::path::Path, key_path: &std::path::Path) -> Result<Self> {
         let cert_pem = std::fs::read(cert_path).map_err(|e| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "client-cert",
                 format!("cannot read {}: {e}", cert_path.display()),
             )
         })?;
         let key_pem = std::fs::read(key_path).map_err(|e| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "client-key",
                 format!("cannot read {}: {e}", key_path.display()),
             )
@@ -76,18 +76,18 @@ impl ClientIdentity {
     pub fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self> {
         let certs = rustls_pemfile::certs(&mut &cert_pem[..])
             .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| HexoraError::invalid_input("client-cert", e.to_string()))?;
+            .map_err(|e| NullhawkError::invalid_input("client-cert", e.to_string()))?;
         if certs.is_empty() {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "client-cert",
                 "no CERTIFICATE block found in the PEM file",
             ));
         }
 
         let key = rustls_pemfile::private_key(&mut &key_pem[..])
-            .map_err(|e| HexoraError::invalid_input("client-key", e.to_string()))?
+            .map_err(|e| NullhawkError::invalid_input("client-key", e.to_string()))?
             .ok_or_else(|| {
-                HexoraError::invalid_input(
+                NullhawkError::invalid_input(
                     "client-key",
                     "no PRIVATE KEY block found in the PEM file",
                 )
@@ -141,7 +141,7 @@ impl TlsConfig {
     /// Builds the rustls client configuration.
     pub fn build(&self) -> Result<Arc<ClientConfig>> {
         // The provider is passed explicitly rather than installed process-wide, so
-        // linking Hexora into another program cannot change that program's crypto.
+        // linking Nullhawk into another program cannot change that program's crypto.
         let provider = Arc::new(rustls::crypto::ring::default_provider());
 
         let builder = ClientConfig::builder_with_provider(provider.clone())
@@ -220,7 +220,7 @@ pub async fn handshake(
     let sni_source = settings.sni_override.as_deref().unwrap_or(host);
     let sni =
         ServerName::try_from(sni_source.trim_matches(['[', ']']).to_string()).map_err(|e| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "sni",
                 format!("{sni_source:?} is not a valid server name: {e}"),
             )
@@ -229,13 +229,13 @@ pub async fn handshake(
     let stream = tokio::time::timeout(limits.tls_timeout, connector.connect(sni, tcp))
         .await
         .map_err(|_| {
-            HexoraError::Network(NetworkError::Timeout {
+            NullhawkError::Network(NetworkError::Timeout {
                 phase: TimeoutPhase::TlsHandshake,
                 elapsed: limits.tls_timeout,
             })
         })?
         .map_err(|e| {
-            HexoraError::Network(NetworkError::Tls {
+            NullhawkError::Network(NetworkError::Tls {
                 peer: host.to_string(),
                 reason: e.to_string(),
             })
@@ -392,8 +392,8 @@ impl ServerCertVerifier for AcceptAnyCertificate {
     }
 }
 
-fn tls_setup_error(reason: String) -> HexoraError {
-    HexoraError::Network(NetworkError::Tls {
+fn tls_setup_error(reason: String) -> NullhawkError {
+    NullhawkError::Network(NetworkError::Tls {
         peer: "<local configuration>".to_string(),
         reason,
     })

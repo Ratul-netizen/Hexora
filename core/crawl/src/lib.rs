@@ -1,6 +1,6 @@
-//! # hexora-crawl
+//! # nullhawk-crawl
 //!
-//! Discovering endpoints from traffic Hexora already holds (CR.a), so the scanner has more
+//! Discovering endpoints from traffic Nullhawk already holds (CR.a), so the scanner has more
 //! than what a tester happened to proxy.
 //!
 //! ## This step sends nothing
@@ -24,7 +24,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
-use hexora_types::http::HttpService;
+use nullhawk_types::http::HttpService;
 
 pub mod frontier;
 pub mod robots;

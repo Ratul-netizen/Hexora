@@ -20,7 +20,7 @@
 //!
 //! No cache-poisoning tests are performed, and none could be: nothing here sends.
 
-use hexora_types::finding::Hypothesis;
+use nullhawk_types::finding::Hypothesis;
 
 use super::prelude::*;
 

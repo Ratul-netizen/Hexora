@@ -1,4 +1,4 @@
-//! User-defined scan checks (M15.5) — Hexora's answer to Burp's BChecks.
+//! User-defined scan checks (M15.5) — Nullhawk's answer to Burp's BChecks.
 //!
 //! A custom check is a saved query plus a finding template: when the query matches a captured
 //! exchange, the passive scanner records an observation with the check's name, severity and
@@ -32,7 +32,7 @@ pub struct CustomCheck {
     pub name: String,
     /// The severity the lead is filed at.
     pub severity: Severity,
-    /// The query that decides whether an exchange matches (see `hexora-query`).
+    /// The query that decides whether an exchange matches (see `nullhawk-query`).
     pub query: String,
     /// What a match means, shown as the observation's finding text.
     pub message: String,

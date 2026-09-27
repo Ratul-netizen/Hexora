@@ -1,6 +1,6 @@
-//! Structured error types shared across the Hexora engine.
+//! Structured error types shared across the Nullhawk engine.
 //!
-//! Every fallible boundary in the engine returns [`HexoraError`]. Errors carry enough
+//! Every fallible boundary in the engine returns [`NullhawkError`]. Errors carry enough
 //! structure for the UI and CLI to render them without string matching, and never
 //! embed credentials — see [`crate::redact`].
 
@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-/// The result type used throughout the Hexora core.
-pub type Result<T> = std::result::Result<T, HexoraError>;
+/// The result type used throughout the Nullhawk core.
+pub type Result<T> = std::result::Result<T, NullhawkError>;
 
 /// A structured engine error.
 ///
@@ -19,7 +19,7 @@ pub type Result<T> = std::result::Result<T, HexoraError>;
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum HexoraError {
+pub enum NullhawkError {
     /// A network-level failure while talking to a target.
     #[error("network error: {0}")]
     Network(#[from] NetworkError),
@@ -56,7 +56,7 @@ pub enum HexoraError {
     ///
     /// Not a failure of the tool — an explicit, honest boundary: the message names the
     /// feature and the tier it needs, so the caller can say "this needs Pro" rather than
-    /// failing mysteriously. See `hexora_engine::license`.
+    /// failing mysteriously. See `nullhawk_engine::license`.
     #[error("{feature} needs the {tier} tier")]
     NotLicensed {
         feature: &'static str,
@@ -67,7 +67,7 @@ pub enum HexoraError {
     #[error("operation cancelled")]
     Cancelled,
 
-    /// The target is outside the project scope. Hexora refuses to send traffic to
+    /// The target is outside the project scope. Nullhawk refuses to send traffic to
     /// out-of-scope hosts; this is a safety control, not a recoverable error.
     #[error("target {0} is out of scope")]
     OutOfScope(String),
@@ -85,8 +85,8 @@ pub enum HexoraError {
     Internal(String),
 }
 
-impl HexoraError {
-    /// Convenience constructor for [`HexoraError::InvalidInput`].
+impl NullhawkError {
+    /// Convenience constructor for [`NullhawkError::InvalidInput`].
     pub fn invalid_input(field: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::InvalidInput {
             field: field.into(),
@@ -94,7 +94,7 @@ impl HexoraError {
         }
     }
 
-    /// Convenience constructor for [`HexoraError::NotFound`].
+    /// Convenience constructor for [`NullhawkError::NotFound`].
     pub fn not_found(kind: &'static str, id: impl Into<String>) -> Self {
         Self::NotFound {
             kind,
@@ -105,7 +105,7 @@ impl HexoraError {
     /// Whether retrying the same operation could plausibly succeed.
     ///
     /// Used by the fuzzer and scanner to decide between retry and abort.
-    /// [`HexoraError::Cancelled`] is deliberately *not* retryable.
+    /// [`NullhawkError::Cancelled`] is deliberately *not* retryable.
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Network(e) => e.is_retryable(),
@@ -202,7 +202,7 @@ impl std::fmt::Display for TimeoutPhase {
 
 /// Malformed protocol data received from a peer.
 ///
-/// Hexora must stay stable when a hostile target returns deliberately broken data,
+/// Nullhawk must stay stable when a hostile target returns deliberately broken data,
 /// so these are ordinary errors rather than panics.
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
@@ -264,12 +264,12 @@ mod tests {
 
     #[test]
     fn cancellation_is_never_retryable() {
-        assert!(!HexoraError::Cancelled.is_retryable());
+        assert!(!NullhawkError::Cancelled.is_retryable());
     }
 
     #[test]
     fn transient_network_failures_are_retryable() {
-        let e = HexoraError::Network(NetworkError::ConnectionReset {
+        let e = NullhawkError::Network(NetworkError::ConnectionReset {
             peer: "1.2.3.4:443".into(),
         });
         assert!(e.is_retryable());
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn refused_connections_are_not_retryable() {
-        let e = HexoraError::Network(NetworkError::ConnectionRefused {
+        let e = NullhawkError::Network(NetworkError::ConnectionRefused {
             peer: "1.2.3.4:443".into(),
         });
         assert!(!e.is_retryable());
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn protocol_errors_are_not_retryable() {
-        let e = HexoraError::Protocol(ProtocolError::InvalidStatusLine("HTTP/9".into()));
+        let e = NullhawkError::Protocol(ProtocolError::InvalidStatusLine("HTTP/9".into()));
         assert!(!e.is_retryable());
         assert_eq!(e.code(), "protocol");
     }

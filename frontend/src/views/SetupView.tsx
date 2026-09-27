@@ -145,7 +145,7 @@ function CaCard() {
       <h2>2 · Certificate authority</h2>
       <p className="muted">
         Reading HTTPS requires a certificate authority this machine trusts.
-        Hexora generates one per installation and never ships it.
+        Nullhawk generates one per installation and never ships it.
       </p>
 
       {error && <p className="error-text">{error}</p>}
@@ -171,7 +171,7 @@ function CaCard() {
             // consequential thing this application asks anyone to do.
             <div className="confirm">
               <p>
-                <strong>This lets Hexora decrypt HTTPS on this machine.</strong>{" "}
+                <strong>This lets Nullhawk decrypt HTTPS on this machine.</strong>{" "}
                 Anyone who obtains the private key in {status.directory} could
                 impersonate any site to you. Install it only on a machine you
                 control, and remove it when you are done.
@@ -200,7 +200,7 @@ function CaCard() {
           <p className="muted small">
             Firefox keeps its own certificate store and ignores this one. If you
             use Firefox, import{" "}
-            <span className="mono">{status.directory}\hexora-ca.crt</span> under
+            <span className="mono">{status.directory}\nullhawk-ca.crt</span> under
             Settings → Privacy &amp; Security → Certificates → Authorities.
           </p>
         </>

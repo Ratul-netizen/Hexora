@@ -1,16 +1,16 @@
-//! `hexora license` — show the active licence, or activate one.
+//! `nullhawk license` — show the active licence, or activate one.
 //!
-//! The gate itself lives in `hexora_engine::license`; this is the CLI's window onto it and
+//! The gate itself lives in `nullhawk_engine::license`; this is the CLI's window onto it and
 //! the one place the CLI loads a licence. A feature that costs money asks [`gate`] for its
 //! entitlement at the command boundary, the way automated traffic asks the scope guard.
 
 use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
-use hexora_engine::license::{
+use nullhawk_engine::license::{
     default_license_path, EntitlementGate, LicenseClaims, Tier, EMBEDDED_LICENSE_KEY,
 };
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Lowercase hex, for printing a public key to embed.
 fn to_hex(bytes: &[u8]) -> String {
@@ -27,7 +27,7 @@ pub fn gate() -> EntitlementGate {
     EntitlementGate::from_default_location(chrono::Utc::now())
 }
 
-/// `hexora license show` — what tier this install is running at, and why.
+/// `nullhawk license show` — what tier this install is running at, and why.
 pub fn show(json: bool) -> Result<()> {
     let gate = gate();
     let entitlements = gate.entitlements();
@@ -79,7 +79,7 @@ pub fn show(json: bool) -> Result<()> {
         _ if entitlements.trial => println!("No signed licence — this tier is from a trial."),
         Some(path) => println!(
             "No licence file at {} — running at the free tier. Activate one with \
-             `hexora license activate <file>`, or start a trial with `hexora license trial`.",
+             `nullhawk license activate <file>`, or start a trial with `nullhawk license trial`.",
             path.display()
         ),
         None => println!("Running at the free tier."),
@@ -87,34 +87,34 @@ pub fn show(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `hexora license activate <file>` — verify a licence and install it for later runs.
+/// `nullhawk license activate <file>` — verify a licence and install it for later runs.
 ///
 /// A file that does not verify against this build's embedded key is refused rather than
 /// installed: a licence that would only ever read back as free is not worth storing, and
 /// installing it silently would hide why a paid feature is still unavailable.
 pub fn activate(file: &Path, json: bool) -> Result<()> {
     let bytes = std::fs::read(file)
-        .map_err(|e| HexoraError::invalid_input("licence", format!("{}: {e}", file.display())))?;
+        .map_err(|e| NullhawkError::invalid_input("licence", format!("{}: {e}", file.display())))?;
 
     let gate = EntitlementGate::from_license(&bytes, &EMBEDDED_LICENSE_KEY, chrono::Utc::now());
     if gate.entitlements().tier == Tier::Free {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "licence",
-            "this file did not verify as a Hexora licence signed for this build; it was not \
+            "this file did not verify as a Nullhawk licence signed for this build; it was not \
              installed",
         ));
     }
 
     let path = default_license_path().ok_or_else(|| {
-        HexoraError::Internal("could not determine where to store the licence".into())
+        NullhawkError::Internal("could not determine where to store the licence".into())
     })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            HexoraError::invalid_input("licence", format!("{}: {e}", parent.display()))
+            NullhawkError::invalid_input("licence", format!("{}: {e}", parent.display()))
         })?;
     }
     std::fs::write(&path, &bytes)
-        .map_err(|e| HexoraError::invalid_input("licence", format!("{}: {e}", path.display())))?;
+        .map_err(|e| NullhawkError::invalid_input("licence", format!("{}: {e}", path.display())))?;
 
     let entitlements = gate.entitlements();
     if json {
@@ -140,9 +140,9 @@ pub fn activate(file: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `hexora license trial` — start a time-limited Pro trial.
+/// `nullhawk license trial` — start a time-limited Pro trial.
 pub fn trial(json: bool) -> Result<()> {
-    let entitlements = hexora_engine::license::start_trial(chrono::Utc::now())?;
+    let entitlements = nullhawk_engine::license::start_trial(chrono::Utc::now())?;
     let expires = entitlements
         .expires
         .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
@@ -157,7 +157,7 @@ pub fn trial(json: bool) -> Result<()> {
     } else {
         println!(
             "Started a {}-day {} trial{}.",
-            hexora_engine::license::TRIAL_DAYS,
+            nullhawk_engine::license::TRIAL_DAYS,
             entitlements.tier.label(),
             expires
                 .map(|at| format!(", through {at}"))
@@ -170,17 +170,17 @@ pub fn trial(json: bool) -> Result<()> {
 // ---- Issuer tools ----
 //
 // `keygen` and `sign` are the vendor's, not a customer's: signing needs the private key, and
-// the key a build verifies against is embedded separately at build time (HEXORA_LICENSE_PUBKEY).
+// the key a build verifies against is embedded separately at build time (NULLHAWK_LICENSE_PUBKEY).
 // A customer running these without the private key can produce nothing that any real build honours.
 
-/// `hexora license keygen` — generate an Ed25519 issuing keypair.
+/// `nullhawk license keygen` — generate an Ed25519 issuing keypair.
 ///
 /// Writes the private key (PKCS#8) to `out`, and prints the public key as hex for embedding.
 /// Refuses to overwrite an existing key file: clobbering an issuing key invalidates every
 /// licence ever signed with it.
 pub fn keygen(out: &Path, json: bool) -> Result<()> {
     if out.exists() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "out",
             format!(
                 "{} already exists; refusing to overwrite an issuing key",
@@ -189,9 +189,9 @@ pub fn keygen(out: &Path, json: bool) -> Result<()> {
         ));
     }
 
-    let (private_key, public_key) = hexora_engine::license::generate_keypair()?;
+    let (private_key, public_key) = nullhawk_engine::license::generate_keypair()?;
     std::fs::write(out, &private_key)
-        .map_err(|e| HexoraError::invalid_input("out", format!("{}: {e}", out.display())))?;
+        .map_err(|e| NullhawkError::invalid_input("out", format!("{}: {e}", out.display())))?;
     let public_hex = to_hex(&public_key);
 
     if json {
@@ -211,11 +211,11 @@ pub fn keygen(out: &Path, json: bool) -> Result<()> {
     println!("Public key (embed in a release build):");
     println!("  {public_hex}");
     println!();
-    println!("  HEXORA_LICENSE_PUBKEY={public_hex} cargo build --release -p hexora-cli");
+    println!("  NULLHAWK_LICENSE_PUBKEY={public_hex} cargo build --release -p nullhawk-cli");
     Ok(())
 }
 
-/// Arguments for `hexora license sign`.
+/// Arguments for `nullhawk license sign`.
 pub struct SignArgs<'a> {
     /// The issuing private key (PKCS#8) from `keygen`.
     pub key: &'a Path,
@@ -232,16 +232,16 @@ pub struct SignArgs<'a> {
     pub json: bool,
 }
 
-/// `hexora license sign` — mint a signed licence file.
+/// `nullhawk license sign` — mint a signed licence file.
 pub fn sign(args: SignArgs<'_>) -> Result<()> {
     let private_key = std::fs::read(args.key)
-        .map_err(|e| HexoraError::invalid_input("key", format!("{}: {e}", args.key.display())))?;
+        .map_err(|e| NullhawkError::invalid_input("key", format!("{}: {e}", args.key.display())))?;
 
     let tier = match args.tier.trim().to_ascii_lowercase().as_str() {
         "pro" => Tier::Pro,
         "enterprise" => Tier::Enterprise,
         other => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "tier",
                 format!("unknown tier {other:?}; use `pro` or `enterprise`"),
             ))
@@ -250,7 +250,7 @@ pub fn sign(args: SignArgs<'_>) -> Result<()> {
 
     let expires = match (args.expires, args.days) {
         (Some(_), Some(_)) => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "expires",
                 "pass --expires or --days, not both",
             ))
@@ -258,7 +258,7 @@ pub fn sign(args: SignArgs<'_>) -> Result<()> {
         (Some(text), None) => Some(
             DateTime::parse_from_rfc3339(text.trim())
                 .map_err(|_| {
-                    HexoraError::invalid_input("expires", "not a valid RFC 3339 timestamp")
+                    NullhawkError::invalid_input("expires", "not a valid RFC 3339 timestamp")
                 })?
                 .with_timezone(&Utc),
         ),
@@ -271,12 +271,12 @@ pub fn sign(args: SignArgs<'_>) -> Result<()> {
         licensee: args.licensee.unwrap_or_default().to_string(),
         expires,
     };
-    let licence = hexora_engine::license::sign_license(&private_key, &claims)?;
+    let licence = nullhawk_engine::license::sign_license(&private_key, &claims)?;
 
     match args.out {
         Some(path) => {
             std::fs::write(path, &licence).map_err(|e| {
-                HexoraError::invalid_input("out", format!("{}: {e}", path.display()))
+                NullhawkError::invalid_input("out", format!("{}: {e}", path.display()))
             })?;
             if args.json {
                 println!(
@@ -310,7 +310,7 @@ mod tests {
         let out = dir.path().join("acme.hexlic");
 
         // Generate a key straight from the engine so the test also holds the public half.
-        let (private_key, public_key) = hexora_engine::license::generate_keypair().unwrap();
+        let (private_key, public_key) = nullhawk_engine::license::generate_keypair().unwrap();
         std::fs::write(&key, &private_key).unwrap();
 
         sign(SignArgs {
@@ -343,7 +343,7 @@ mod tests {
     fn signing_with_an_unknown_tier_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let key = dir.path().join("issuer.key");
-        let (private_key, _) = hexora_engine::license::generate_keypair().unwrap();
+        let (private_key, _) = nullhawk_engine::license::generate_keypair().unwrap();
         std::fs::write(&key, &private_key).unwrap();
 
         let error = sign(SignArgs {

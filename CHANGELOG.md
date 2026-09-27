@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Hexora are documented here.
+All notable changes to Nullhawk are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: SemVer.
 
 ## [Unreleased]
@@ -33,7 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: Se
 - AI tool-permission gate; credential access forbidden outright.
 
 **Applications**
-- `hexora` CLI: `project init`, `project info`, `version`.
+- `nullhawk` CLI: `project init`, `project info`, `version`.
 - Tauri + React desktop shell reporting engine status and checking IPC contract version.
 
 **Project**
@@ -47,8 +47,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: Se
 
 First run of the code against an actual compiler. Six defects that static review missed:
 
-- `hexora-storage`: pooled connection could not coerce to `&Connection` through `?` (E0308).
-- `hexora-cli`: a helper returned an array of references to its own parameters (E0515);
+- `nullhawk-storage`: pooled connection could not coerce to `&Connection` through `?` (E0308).
+- `nullhawk-cli`: a helper returned an array of references to its own parameters (E0515);
   replaced with `rusqlite::params!` at the call site.
 - `clippy::if_same_then_else` in path normalization; two branches merged.
 - `clippy::manual_range_contains` in a storage test.
@@ -81,7 +81,7 @@ every blob looked like a leftover. Now matches file names only.
 
 ### Added — M1.1, HTTP/1.x over TCP
 
-**Hexora now sends real requests.**
+**Nullhawk now sends real requests.**
 
 - New crate `core/http`: a wire-preserving HTTP/1.x parser and a TCP transport.
 - The parser is deliberately permissive but loud — it accepts what a strict parser
@@ -92,11 +92,11 @@ every blob looked like a leftover. Now matches file names only.
 - Framing per RFC 9112 §6.3. Conflicting `Content-Length` values are refused rather
   than guessed.
 - Per-phase timeouts and incrementally-enforced limits.
-- `hexora send <url>` — like `curl`, except nothing you wrote is rewritten on the way
+- `nullhawk send <url>` — like `curl`, except nothing you wrote is rewritten on the way
   out: header order, casing and duplicates are all preserved, and a deliberately
   ambiguous request stays ambiguous.
 
-Sensitive response headers are redacted in `hexora send` output unless
+Sensitive response headers are redacted in `nullhawk send` output unless
 `--show-secrets` is passed, and out-of-scope targets are flagged rather than blocked,
 since a typed URL is a human decision.
 
@@ -108,7 +108,7 @@ since a typed URL is a human decision.
   time it is relaxed — not a global "ignore TLS errors" switch.
 - TLS observations (deprecated protocol versions, expired or self-signed leaves)
   surfaced as observations, never as findings.
-- `TlsInfo`, `CertificateSummary` and `Verification` live in `hexora-types`: domain
+- `TlsInfo`, `CertificateSummary` and `Verification` live in `nullhawk-types`: domain
   vocabulary that storage and the UI both need, kept free of `rustls` so the record
   outlives the implementation.
 
@@ -169,19 +169,19 @@ since a typed URL is a human decision.
   failure logs rather than propagating: a full disk must not break a browsing session.
   Out-of-scope traffic is captured by default — the proxy has to see a host before a
   tester can decide it is in scope.
-- `hexora proxy --project DIR` records; `hexora history DIR` reads back, newest first,
+- `nullhawk proxy --project DIR` records; `nullhawk history DIR` reads back, newest first,
   with keyset pagination that stays stable while capture continues appending.
-- `hexora history DIR --body ID` writes one response body to stdout unmodified,
+- `nullhawk history DIR --body ID` writes one response body to stdout unmodified,
   `--wire` asks for the form that arrived.
 
 ### Fixed
 
-- `hexora project info` printed `@1789041608` where a timestamp belonged; it is now
+- `nullhawk project info` printed `@1789041608` where a timestamp belonged; it is now
   RFC 3339, matching what the traffic store writes.
 
 ### Added — M4, the repeater
 
-- **`hexora repeat`**: load a request from history, optionally open it in `$EDITOR`,
+- **`nullhawk repeat`**: load a request from history, optionally open it in `$EDITOR`,
   send it, and see what changed. The editing loop is the shell's, not a bespoke one —
   a tester already has an editor they are fast in.
 - **Nothing is auto-corrected.** A `Content-Length` that disagrees with the body is
@@ -202,7 +202,7 @@ since a typed URL is a human decision.
 - A byte-identical response that arrived seconds later **is** flagged — that is the
   entire signal in a time-based blind injection, and a diff that called it "identical"
   would hide the finding.
-- `hexora repeat --diff` compares two stored exchanges without sending anything, and
+- `nullhawk repeat --diff` compares two stored exchanges without sending anything, and
   `--dry-run` prints exactly what would leave the machine.
 - Storage grew `TrafficStore::request`, `response_head` and `children`, so a stored
   exchange can be reconstituted and resent. Header casing, order and duplicates
@@ -218,10 +218,10 @@ since a typed URL is a human decision.
 
 ### Added — M2.5, trust installation and first run
 
-- **`hexora setup`**: one command creates a project, generates the CA, installs it and
+- **`nullhawk setup`**: one command creates a project, generates the CA, installs it and
   says what is left to do. Every step is also available on its own, and the output
   names the command for each.
-- **`hexora ca --install`** installs into the *user* trust store on every platform that
+- **`nullhawk ca --install`** installs into the *user* trust store on every platform that
   has one — the Windows user Root store, the macOS login keychain, the per-user NSS
   database on Linux. No administrator rights, and the blast radius is one account.
 - **`--status`** asks the platform whether the certificate is trusted instead of
@@ -274,7 +274,7 @@ since a typed URL is a human decision.
   because a smuggling signal is worth noticing while scrolling.
 - Installing the CA from the window states the consequences at the moment of the
   decision and requires a second confirmation.
-- `hexora_proxy::Fanout` replaces the CLI's private observer fan-out and is now shared.
+- `nullhawk_proxy::Fanout` replaces the CLI's private observer fan-out and is now shared.
   An observer that panics no longer stops the ones after it: a UI event channel that
   has gone away must not take down the capture producing the evidence.
 
@@ -289,7 +289,7 @@ since a typed URL is a human decision.
 
 ### Added — M12.1, authorization testing
 
-- **`hexora authz`**: take one captured request and replay it as every identity in the
+- **`nullhawk authz`**: take one captured request and replay it as every identity in the
   project, then say what the differences prove. The highest-value manual work in most
   engagements, and the part testers most often run out of time for.
 - **The baseline is replayed, never reused.** The captured response may be weeks old
@@ -314,28 +314,28 @@ since a typed URL is a human decision.
 - **Every replay is recorded as the identity that sent it**, with `origin = authz` and
   a parent pointing at the request it derived from, so a finding cites two request ids
   somebody else can open months later.
-- **`hexora identity`**: add, list and remove the principals a project tests as.
+- **`nullhawk identity`**: add, list and remove the principals a project tests as.
   Credentials are read from an environment variable or a file, never from an argument —
   `ps` and shell history both capture those — and are never printed back.
-- **`hexora scope`**: the project scope is now persisted (`project.scope_json`) and read
+- **`nullhawk scope`**: the project scope is now persisted (`project.scope_json`) and read
   by every command. It had been accepted at the API boundary and thrown away, which
   meant no automated subsystem could run twice in a row. An authorization matrix is
   automated traffic, so it refuses to start against a host nobody declared, once,
   before it sends anything.
 - **History says who a request was sent as.** The `requests.identity_id` column has
   been in the schema since M0 and nothing wrote it; authorization replays now do, and
-  both `hexora history` and the desktop table show the label beside the row. A replay
+  both `nullhawk history` and the desktop table show the label beside the row. A replay
   the project cannot attribute is not evidence.
 - The engine RPC contract goes to version 2: `HistoryRow` gained the identity field.
 
 - A state-changing method is refused without `--yes`, naming how many times the request
-  would be sent. Hexora will still replay `DELETE` if told to — a tool that quietly
+  would be sent. Nullhawk will still replay `DELETE` if told to — a tool that quietly
   declined to test destructive endpoints would be hiding the worst authorization bugs
   there are.
 
 ### Added — M12.2, the findings store
 
-- **Findings are written into the project.** `hexora authz` files what it finds; the
+- **Findings are written into the project.** `nullhawk authz` files what it finds; the
   `findings` and `finding_evidence` tables have been in the schema since M0 with
   nothing writing to them. A conclusion that lives only in a terminal cannot be cited
   six months later, which is the entire point of keeping a project file.
@@ -349,19 +349,19 @@ since a typed URL is a human decision.
   stays marked; and confidence follows the evidence currently attached in *both*
   directions, so a re-run without `--verify` brings a `Confirmed` finding back down to
   what the stored comparison actually supports.
-- **`hexora findings`** lists them worst first — severity, then how firmly established,
+- **`nullhawk findings`** lists them worst first — severity, then how firmly established,
   which is the order they get worked through rather than the order they were found.
   `--show` prints one in full with its evidence, `--triage … --status` records a human
   judgement, and `--actionable` hides what is still only a lead. Listing is keyset-paged
   on the same ordering, so a page boundary never repeats or skips a row.
-- **`hexora authz --no-save`** reports without writing, for a run somebody wants to look
+- **`nullhawk authz --no-save`** reports without writing, for a run somebody wants to look
   at before committing to.
 - Findings name the target the base request was actually sent to (`TrafficStore::target_of`),
   rather than a fresh id that would point at a target the project has never heard of.
 
 ### Fixed
 
-- **`hexora repeat --diff` printed nothing when the two responses matched.** It reads
+- **`nullhawk repeat --diff` printed nothing when the two responses matched.** It reads
   as a command that failed, and "identical" is the whole answer for an authorization
   comparison — two principals served byte-for-byte the same response *is* the finding.
   The headline is now always printed. M12's reproduction steps tell a reader to run
@@ -373,7 +373,7 @@ since a typed URL is a human decision.
 
 ### Added — M12.3, the report
 
-- **`hexora report`** turns a project into a document somebody can be handed: Markdown
+- **`nullhawk report`** turns a project into a document somebody can be handed: Markdown
   for a ticket or a repository, a self-contained HTML page for a client, JSON for
   whatever consumes it next. All three render the same model, so the page and the file
   cannot claim different things.
@@ -406,8 +406,8 @@ since a typed URL is a human decision.
 
 ### Changed
 
-- `hexora report` was exercised end to end against a local application with a
-  deliberate IDOR: proxy capture → `hexora authz --verify` → `hexora findings` →
+- `nullhawk report` was exercised end to end against a local application with a
+  deliberate IDOR: proxy capture → `nullhawk authz --verify` → `nullhawk findings` →
   Markdown and HTML. The document names the leaked account id, quotes both sides of the
   comparison, keeps the public endpoint as a separate unverified lead, and carries no
   credential.
@@ -451,23 +451,23 @@ since a typed URL is a human decision.
   stretching the findings filter checkbox across a third of the screen, and a `select`
   in a card ran the full 1600px width of the window.
 - **The documented way to run the desktop shell did not work.** A debug Tauri build
-  loads `devUrl`, not `frontendDist`, so `pnpm build && cargo run -p hexora-desktop`
+  loads `devUrl`, not `frontendDist`, so `pnpm build && cargo run -p nullhawk-desktop`
   opened a window showing `ERR_CONNECTION_REFUSED` — indistinguishable, to anyone
-  trying Hexora for the first time, from a broken application. `STATUS.md` and
+  trying Nullhawk for the first time, from a broken application. `STATUS.md` and
   `docs/development.md` now say to run the dev server alongside it, and why.
 
 ### Added — M12.5, constructed cross-identity attempts
 
 A replay answers "can User B reach this URL?". It cannot answer "can User B reach
 **User A's** invoice?" when the only captured traffic is User B asking for their own —
-the request that would answer it has never existed. Hexora now builds it.
+the request that would answer it has never existed. Nullhawk now builds it.
 
-- **`hexora object add`** declares which identifiers are objects and who owns them
+- **`nullhawk object add`** declares which identifiers are objects and who owns them
   (`core/types/src/object.rs`, `core/storage/src/objects.rs`). Given a request the
   value appears in, the location is *discovered* — path segment, query parameter,
   header or byte offset in the body — so nobody counts path segments by hand.
   Declaring sends nothing: it is data entry, and running the test is a separate act.
-- **`hexora authz --construct`** substitutes a declared identifier into the object
+- **`nullhawk authz --construct`** substitutes a declared identifier into the object
   slot of a captured request and sends the result as each identity. `--max-attempts`
   bounds it; the default is 12 and the ceiling is 100.
 - **Nothing is guessed.** Both facts that make this possible — which value is an
@@ -484,7 +484,7 @@ the request that would answer it has never existed. Hexora now builds it.
   identifiable in it, and a bare 200 all produce a lead or nothing at all.
 - **The substitution is recorded, not inferred.** `constructed_attempts` holds the
   source request, the declaration, the sender, the location, and both values. The
-  generated request also carries `parent_id`, so `hexora repeat --tree` and the
+  generated request also carries `parent_id`, so `nullhawk repeat --tree` and the
   desktop history answer "where did this come from?" without knowing anything about
   declarations.
 - **The substitution touches nothing else.** Path segments are encoded so an
@@ -556,8 +556,8 @@ whole time. Twenty requests at somebody's production API to learn something writ
 down, and a run that then reported "tested 20" and established nothing, which reads like
 coverage.
 
-`hexora_types::expiry` reads it. Nothing is queued while every credential the project
-holds has expired by its own reckoning, and `hexora identity list` says
+`nullhawk_types::expiry` reads it. Nothing is queued while every credential the project
+holds has expired by its own reckoning, and `nullhawk identity list` says
 `expired 89 minute(s) ago` before anybody starts.
 
 It answers one question only: *has the stated lifetime ended?* An unexpired token can
@@ -621,7 +621,7 @@ only against this specific venue test account, whose venue_id is 670e7897e3c56dc
 ```
 
 A tester reading forty identifiers cannot hold that line on their own, and nothing in
-Hexora was helping. `hexora programme permit <project> <id> --what "venue test account"`
+Nullhawk was helping. `nullhawk programme permit <project> <id> --what "venue test account"`
 records the entities a programme allows; `programme forbid` removes one.
 
 **A closed list, and it refuses rather than warns.** Empty means the programme has not
@@ -631,7 +631,7 @@ real customer's id cannot be unsent, and *"I did not realise which venue that wa
 not an explanation anybody wants to write to a programme.
 
 **Enforced where it matters and only there.** A constructed attempt is the one place
-Hexora *chooses* an identifier and puts it in somebody's request; everything else
+Nullhawk *chooses* an identifier and puts it in somebody's request; everything else
 replays what a person already sent. So that is where the check lives, applied once per
 identifier rather than once per sender, with the refusal and the permitted list printed.
 
@@ -755,7 +755,7 @@ DECODED SIGNATURE BYTES IDENTICAL: True
 ```
 
 The "tampered" token was cryptographically **the same token**. The application accepted
-it, correctly. Hexora read that as acceptance of a forged signature and filed
+it, correctly. Nullhawk read that as acceptance of a forged signature and filed
 `high · firm`: *"Session accepted without being verified"* — on eight authenticated
 endpoints of a company that verifies signatures perfectly well, including its **wallet
 balance** and **order history**.
@@ -792,7 +792,7 @@ request. Compared whole, no captured request ever matched a declared identity, a
 best check in this tool reported *"there is nobody to say whose session it was"* on every
 endpoint it tried.
 
-`hexora identity add --session-cookie <name>` names the cookie that identifies the
+`nullhawk identity add --session-cookie <name>` names the cookie that identifies the
 caller. It is compared exactly; the rest of the jar is ignored.
 
 **Not matched loosely, and that is the point.** Two identities driven from one browser
@@ -815,7 +815,7 @@ checks run twice. **Not one captured request carried a credential.** Every check
 reported its own local reason, one endpoint at a time, and none of them said the thing
 that mattered.
 
-`hexora identity list` now ends with what the traffic actually supports:
+`nullhawk identity list` now ends with what the traffic actually supports:
 
 ```text
 No authenticated traffic. None of the last 300 captured request(s) carries an
@@ -913,7 +913,7 @@ is established either way
 ```
 
 Cross-identity testing is the best thing this tool does, and a stale session makes it
-worthless. `hexora identity refresh <project> <who>` adopts a newer session out of
+worthless. `nullhawk identity refresh <project> <who>` adopts a newer session out of
 traffic **a person generated**, and nothing else.
 
 **Why not a recorded login sequence, which is what Burp and AppScan do.** Two reasons,
@@ -933,7 +933,7 @@ and the second was decided by the target rather than by taste:
 **Only proxy traffic is eligible, and that is the whole safety argument.** The
 `auth.enforcement` check deliberately sends a request whose JWT signature has one
 character changed, and that request lands in history like any other. Under a "newest
-credential wins" rule Hexora would adopt a credential **it broke on purpose**, replacing
+credential wins" rule Nullhawk would adopt a credential **it broke on purpose**, replacing
 a working session with an invalid one — and every later result would be wrong in a way
 that reads like a finding. A test is named for it.
 
@@ -954,14 +954,14 @@ machine-to-machine APIs and CI. It is the wrong shape for anything with a captch
 
 ### Added — M14.4, the header on your own traffic
 
-M14.2 put a programme's required headers on every request *Hexora* sends. It did
+M14.2 put a programme's required headers on every request *Nullhawk* sends. It did
 nothing for the requests a **browser** makes, and during a bug bounty engagement those
 are the overwhelming majority. Wolt's rule is "add the following headers to requests" —
 not "to your scanner's requests". As shipped, a day of manual hunting would have
 breached the terms on every request while the tester believed they were covered. That is
 the same failure as the silent no-op fixed in M14.3, one layer up.
 
-`hexora proxy --project DIR --attach-headers`, built on the M2.4 interceptor seam.
+`nullhawk proxy --project DIR --attach-headers`, built on the M2.4 interceptor seam.
 
 **Rewriting a browser's traffic is not a small thing**, so it is bounded three ways and
 each bound is the point:
@@ -985,7 +985,7 @@ actually went out rather than what the browser originally wrote.
 **And now one rule, in every door.** Attached headers were previously applied by the
 repeater to *any* host. They name a real person, so a resend of a captured request to
 somebody else's server would have put that name in a stranger's logs. The repeater now
-applies the same scope rule the proxy does, `hexora repeat --dry-run` says plainly when
+applies the same scope rule the proxy does, `nullhawk repeat --dry-run` says plainly when
 it is **not** attaching, and a test holds the line.
 
 Verified on the wire: through the proxy, `httpbin.org` (in scope) received
@@ -993,7 +993,7 @@ Verified on the wire: through the proxy, `httpbin.org` (in scope) received
 
 ### Fixed — every repeat was reported as out of scope
 
-`hexora repeat` built its scope guard with an **empty** scope, so
+`nullhawk repeat` built its scope guard with an **empty** scope, so
 `ScopeGuard::decide` had nothing to compare against and every resend printed *"Note:
 this target is not in the project scope"* — including the ones that were in it. A
 warning that fires on everything is a warning nobody reads, which is worse than not
@@ -1044,7 +1044,7 @@ from "it was looked at and this programme does not take them" — the two leave 
 empty space in a findings list and mean opposite things about coverage. Invariant 15 by
 another road.
 
-- `hexora programme show|set|exclude|allow`. A detector id this build does not have is
+- `nullhawk programme show|set|exclude|allow`. A detector id this build does not have is
   refused with the list of the ones it does: a typo in an exclusion fails in the worst
   direction, with the class still reported, the tester believing otherwise, and the
   programme the one who tells them.
@@ -1066,14 +1066,14 @@ each with the reason it was not filed.
 
 ### Fixed — a setting could be reported as saved and stored nowhere
 
-`hexora header add` on a directory that was never `hexora project init`-ed printed
+`nullhawk header add` on a directory that was never `nullhawk project init`-ed printed
 **"Attached X-HackerOne-Research: …"** and stored nothing. Project settings live on the
 `project` row; the `UPDATE` matched no rows and said so to nobody.
 
 This is the worst possible direction for this particular bug: a researcher believes the
 header a programme requires is on every request, it is on none of them, and they find
 out when the report is rejected. Storage now refuses the write, and the CLI turns the
-refusal into `hexora project init <path>`. Both M14.2 setters and the new one are
+refusal into `nullhawk project init <path>`. Both M14.2 setters and the new one are
 covered by a test.
 
 ### Added — M14.2, the headers a programme requires
@@ -1097,15 +1097,15 @@ not the anonymous control, which is precisely the request a target is most likel
 read as an attack. A requirement that holds for *every* request has to live where every
 request can see it, so it lives on the project.
 
-- `hexora header list|add|remove <project>`, stored in the project row beside the scope,
+- `nullhawk header list|add|remove <project>`, stored in the project row beside the scope,
   because a project file should record the terms an engagement was conducted under.
 - Applied in `Repeater::send_as`, which every structured send passes through: the
-  repeater, `hexora authz`, the scheduler's active checks, `hexora fuzz`, every replay
+  repeater, `nullhawk authz`, the scheduler's active checks, `nullhawk fuzz`, every replay
   and every anonymous control.
 - **Applied before the identity's credential**, so a project setting can never displace
   the thing that decides who a request is from. A test holds that line.
 - **Not applied to a raw send.** Raw is byte-exact and that promise is worth more than
-  the convenience — but `hexora repeat --raw --dry-run` now prints what it is *not*
+  the convenience — but `nullhawk repeat --raw --dry-run` now prints what it is *not*
   sending, so the omission is visible at the moment it matters rather than discovered in
   a forfeited report.
 - `--dry-run` prints attached headers under the request bytes. A dry run exists to
@@ -1113,10 +1113,10 @@ request can see it, so it lives on the project.
   that costs a researcher their bounty.
 - A value containing CR or LF is refused: this one is spliced into every request the
   project sends, so a value that could split a request could split all of them.
-- Migration 9. `hexora send` is unaffected — it takes no project, and its `-H` is the
+- Migration 9. `nullhawk send` is unaffected — it takes no project, and its `-H` is the
   whole point of it.
 
-**Not yet covered: the proxy.** Traffic through the proxy is the browser's, and Hexora
+**Not yet covered: the proxy.** Traffic through the proxy is the browser's, and Nullhawk
 does not rewrite it. Manual browsing still needs the header set in the browser.
 
 Verified end to end against `httpbin.org/headers`, which echoed
@@ -1126,7 +1126,7 @@ from the same request sent raw.
 ### Added — M14.1, the intruder
 
 The tool a tester reaches for between the repeater and the scanner, and the biggest
-thing Hexora was missing against Burp and Caido. Take a request that already works,
+thing Nullhawk was missing against Burp and Caido. Take a request that already works,
 vary one thing in it, read the row that does not match:
 
 ```text
@@ -1158,13 +1158,13 @@ it that way is what stops it becoming a second scanner with worse evidence.
 **It will replay a POST, and says so first.** Invariant 18 is a rule about what a
 *queue* may decide on its own; a tester who types the command has decided, and the
 method and request count are printed before anything goes out — the same bargain
-`hexora authz` makes. It still borrows the budget, the pause and the Ctrl-C stop,
+`nullhawk authz` makes. It still borrows the budget, the pause and the Ctrl-C stop,
 because a payload list can generate more traffic in a minute than every automated check
 in this build put together.
 
-- `hexora fuzz <project> <request> --at <name> --payloads <file> [--dry-run] [--yes]`,
+- `nullhawk fuzz <project> <request> --at <name> --payloads <file> [--dry-run] [--yes]`,
   or `--replacing <value>` to put the payload wherever a value currently appears.
-- Payloads go through `hexora_types::inject::substitute` — the same addressing M12.5
+- Payloads go through `nullhawk_types::inject::substitute` — the same addressing M12.5
   uses for object identifiers and M13.4 for markers. There is one substitution in this
   codebase and everything goes through it.
 - `--at` with a name the request does not have lists what it *does* have, rather than
@@ -1193,11 +1193,11 @@ replayed:  the same request          as User B   →  200  the *same document*
 cross-identity test concludes rests on the answer. So the credential is the evidence:
 each declared credential is applied to a copy of the request's own headers and compared
 byte for byte. An exact match or none at all — an endpoint whose captured credential
-matches nothing the project declares is reported as untested with that reason. Hexora
+matches nothing the project declares is reported as untested with that reason. Nullhawk
 will not decide that a session belongs to somebody.
 
-**One implementation, two front doors.** The check calls `hexora_authz::replay_once` and
-`analysis::judge` — the same functions `hexora authz` uses, made public rather than
+**One implementation, two front doors.** The check calls `nullhawk_authz::replay_once` and
+`analysis::judge` — the same functions `nullhawk authz` uses, made public rather than
 reimplemented. A scheduled run that classified responses differently from the on-demand
 one would be two sets of verdicts for one question. M13.1 built those to take a `Lab`
 precisely so this seam could open.
@@ -1234,7 +1234,7 @@ against them and the experiment is skipped with the reason rather than run.
 `requests.identity_id` has a foreign key, so an anonymous replay failed at the last step
 with a database constraint and the cell read `Anonymous (failed)` — which quietly took
 `appears_public` and M12.10's same-document upgrade off the table for every scheduled
-run. `Plan::prepare` now ensures the anonymous principal exists, the way `hexora authz`
+run. `Plan::prepare` now ensures the anonymous principal exists, the way `nullhawk authz`
 always has.
 
 Verified live against the IDOR demo, scheduled rather than pointed at one request:
@@ -1275,14 +1275,14 @@ answered 200 looks like — and also what a partly populated view of the real re
 looks like. M12.10's structural comparison names the fields so a reader can tell which,
 and its normalization policy is what stops a timestamp turning acceptance into a lead.
 
-**A credential Hexora breaks is still a credential** — new invariant 17. `Credential`
+**A credential Nullhawk breaks is still a credential** — new invariant 17. `Credential`
 and `Tampered` have no `Display` and a redacting `Debug`; the bytes leave through one
 named accessor; evidence notes say what was done rather than what was sent. Verified
 live: neither the real signature nor the one-character-different one appears in the
 Markdown report, the HTML report or the scan JSON.
 
 **Scope.** This milestone's roadmap line named two things. What shipped is the
-anonymous and broken-credential half — the part nothing else in Hexora could do. The
+anonymous and broken-credential half — the part nothing else in Nullhawk could do. The
 multi-identity differential is M12.1, which does it on demand today, and scheduling it
 is M13.7. Recorded in STATUS.md so nobody reads `auth.enforcement` as covering
 cross-identity access.
@@ -1304,7 +1304,7 @@ as the request ceiling being enforced by the `Lab` a check is handed rather than
 each author's memory. A method nobody recognises is treated as unsafe. New invariant
 18, with a scheduler-level regression test.
 
-This is a *scheduler* rule, not a tool rule: `hexora authz` will still replay a
+This is a *scheduler* rule, not a tool rule: `nullhawk authz` will still replay a
 `DELETE` if a tester asks, after telling them what it is about to do. A person deciding
 is different from a queue deciding for them.
 
@@ -1415,11 +1415,11 @@ and saying so is cheaper than being wrong.
   as a value), **not** credential headers ever, **not** headers that decide delivery,
   and **not** bodies yet — that wants a body model rather than a byte offset, and the
   gap is stated rather than papered over.
-- `hexora_types::inject` is new: `locate`, `value_at`, `substitute` and now `inputs`
+- `nullhawk_types::inject` is new: `locate`, `value_at`, `substitute` and now `inputs`
   moved out of `core/authz`, where M12.5 had left them. None of it was ever about
   authorization, and an active check reaching into the authorization crate for it would
   have been the wrong dependency direction.
-- `hexora_active::standing` is the one function the CLI and the window both ask what is
+- `nullhawk_active::standing` is the one function the CLI and the window both ask what is
   testable. They each had their own, which is how two surfaces of one tool come to
   disagree.
 
@@ -1453,7 +1453,7 @@ environment — see STATUS.md.
 
 ### Added — M13.3, the active scheduler
 
-The first thing in Hexora that sends traffic nobody typed. M13.2's passive checks
+The first thing in Nullhawk that sends traffic nobody typed. M13.2's passive checks
 raise hypotheses they structurally cannot settle; this is what picks them up.
 
 ```text
@@ -1496,16 +1496,16 @@ because scope can be narrowed while a queue is draining.
 
 **The first active check: `cors.reflection`.** It settles `cors.configuration`'s
 suspicion with the one thing that can — an `Origin` that cannot be on anybody's
-allowlist (`https://hexora-probe.invalid`, reserved by RFC 2606 and never resolvable).
+allowlist (`https://nullhawk-probe.invalid`, reserved by RFC 2606 and never resolvable).
 Reflected twice with two unrelated origins is `Reproduced`; answered with a fixed
 origin is `Refuted`; answered without the CORS headers the capture had is
 `Inconclusive`, because an expired session looks exactly like a fixed application and
 reporting one as the other is the mistake this check is most likely to make.
 
-- `hexora scan active <project> [--dry-run] [--max-requests N] [--delay MS]
+- `nullhawk scan active <project> [--dry-run] [--max-requests N] [--delay MS]
   [--hosts-at-once N] [--yes]`. A non-interactive stdin answers *no*.
 - An **Active scan** panel in the window: a plan, then a separate button to send it.
-- `hexora detectors` now says which suspicions have somebody to answer them and which
+- `nullhawk detectors` now says which suspicions have somebody to answer them and which
   are still dead ends.
 - RPC contract version 10; migration 8 adds `requests_sent` and `stopped_because`.
 
@@ -1575,7 +1575,7 @@ gate, and `NotTried` does not clear it: a run that did not look has not shown th
 resource is non-public. Verdicts are unchanged; only the confidence of a claim already
 being made can rise.
 
-Surfaced in the `hexora authz` output, in the matrix JSON, in the evidence line that
+Surfaced in the `nullhawk authz` output, in the matrix JSON, in the evidence line that
 reaches the report, and in a **Compared field by field** section in the window. RPC
 contract version 9.
 
@@ -1617,7 +1617,7 @@ bare-LF header block — and each is a thing a real finding is sometimes about.
 that quietly recomputed a deliberately wrong length would undo `RequestSource::Raw` at
 the last step.
 
-- `hexora poc <project> <finding> [--format raw|curl|markdown] [--save FILE]`.
+- `nullhawk poc <project> <finding> [--format raw|curl|markdown] [--save FILE]`.
 - The report carries a **Run it** block for established findings, above the evidence:
   a triager who can reproduce the behaviour in thirty seconds rarely needs the
   transcripts, and one who cannot is exactly the one who will. `--no-poc` leaves them
@@ -1626,7 +1626,7 @@ the last step.
   from every step to the exchange behind it.
 - Reproductions are compiled for actionable findings only. A runnable block attached to
   an unverified claim is the thing most likely to be forwarded without the sentence
-  that qualified it; `hexora poc` prints that sentence on the artefact when asked for
+  that qualified it; `nullhawk poc` prints that sentence on the artefact when asked for
   one anyway.
 
 Verified against the IDOR demo end to end: the generated commands were run with the
@@ -1689,12 +1689,12 @@ response therefore produces one observation where a naive check would produce fi
 three exchanges, with the count. The fingerprint is detector, host and condition —
 never a URL, and never a value.
 
-**`hexora scan passive <project>`**, with `--detector`, `--host`, `--since`,
+**`nullhawk scan passive <project>`**, with `--detector`, `--host`, `--since`,
 `--limit`, `--everything` and `--no-save`. It prints exchanges analysed, detectors
 executed, observations, hypotheses and findings as separate counts, and prints a row
 for every detector including the ones that saw nothing.
 
-**`hexora detectors`** now lists mode (passive/active), version, and what each check
+**`nullhawk detectors`** now lists mode (passive/active), version, and what each check
 can produce. A **Scan** tab in the desktop window runs the pass and opens the exchange
 behind any result.
 
@@ -1780,7 +1780,7 @@ than a hypothetical one:
 - An out-of-scope or unrunnable second experiment is `Inconclusive`, not a failure and
   not a quiet pass.
 
-**`hexora detectors`** lists what this build checks for, each check's version, and
+**`nullhawk detectors`** lists what this build checks for, each check's version, and
 **whether it sends** — the difference between something safe to run against production
 at 3pm and something that is not. The registry is assembled from the crates the binary
 links rather than discovered; there is no plugin mechanism and the docs say so.
@@ -1815,12 +1815,12 @@ method, which is what makes the summary columns on the row safe: they are comput
 from the contents at insert time and nothing can change one without the other.
 
 **It never says *fixed*.** A finding is what a test produced; its absence from a later
-snapshot is the absence of a result. `hexora snapshot diff` reports the claim as
+snapshot is the absence of a result. `nullhawk snapshot diff` reports the claim as
 **gone**, with a reason, and only one of the three reasons is about the application:
 
 ```text
 tool changed    the two snapshots were taken by different builds
-source silent   nothing from that check appears in the later snapshot, and Hexora
+source silent   nothing from that check appears in the later snapshot, and Nullhawk
                 cannot tell "ran and found nothing" from "never ran"
 not reproduced  the same build ran, the same check raised other claims, and this one
                 did not come back — which is still not proof it is fixed
@@ -1843,7 +1843,7 @@ differently from silence.
 tested, and the output says so), identities, declared objects, and the exchange,
 suggestion and finding counts.
 
-- `hexora snapshot take|list|show|diff|remove`. With one id, `diff` compares a
+- `nullhawk snapshot take|list|show|diff|remove`. With one id, `diff` compares a
   snapshot with the project as it stands — the comparison a retest actually asks, and
   it does not require saving a second snapshot first.
 - A **Snapshots** tab in the desktop window with the same comparison.
@@ -1869,7 +1869,7 @@ watched the same claim move to *re-tested and unchanged*.
 ### Added — M12.7, persisted identifier suggestions
 
 Every object identifier was declared by hand, so constructed authorization testing was
-exactly as broad as what somebody typed. Hexora now reads a project's own traffic and
+exactly as broad as what somebody typed. Nullhawk now reads a project's own traffic and
 *offers* the values that behave like object identifiers — and stops there, because the
 gap between "this looks like an id" and "this id belongs to User A" is the gap the
 whole evidence model stands on.
@@ -1898,7 +1898,7 @@ observations; re-analysis refreshes a proposed candidate's signals in place and 
 a decided one alone, the same way re-running a test keeps triage.
 
 **The score is an argument, not a number.** A confidence of `0.87` cannot be
-disagreed with. Each candidate carries the signed signals behind it, so `hexora
+disagreed with. Each candidate carries the signed signals behind it, so `nullhawk
 identifiers --show` and the window print the reasoning and its total:
 
 ```text
@@ -1930,7 +1930,7 @@ takes no transport at all, mutates no captured request or response, and creates 
 finding. Reading a project is safe at any point in an engagement, including after the
 client has gone home.
 
-- `hexora identifiers <project> [--analyze] [--status <s>] [--show <id>] [--accept
+- `nullhawk identifiers <project> [--analyze] [--status <s>] [--show <id>] [--accept
   <id>] [--reject <id>] [--json]`.
 - An **Identifiers** tab in the desktop window: the suggestions, their reasons on
   demand, and explicit Accept / Reject. It says in three places that accepting names no
@@ -1951,7 +1951,7 @@ the bytes it is supposed to be showing you.
 
 **Encoded response bodies are kept.** The transport now hands back the body twice — the
 transfer-decoded bytes as they arrived, and the application bytes they decode to — and
-both are stored. `hexora history --body --wire` returns the gzip stream; `--body`
+both are stored. `nullhawk history --body --wire` returns the gzip stream; `--body`
 returns the JSON inside it. `encoded_body` was written as NULL since M3, which meant
 `--wire` silently returned the decoded body for exactly the responses where the
 distinction mattered.
@@ -1976,13 +1976,13 @@ what used to be implicit. A structured request is serialized from the message mo
 which normalizes line endings and can add framing headers. A raw request is written
 byte for byte:
 
-- `hexora repeat --raw`, and a Structured/Raw switch in the desktop repeater. Nothing
+- `nullhawk repeat --raw`, and a Structured/Raw switch in the desktop repeater. Nothing
   changes mode on its own: a request captured raw reloads raw, and converting is an
   explicit operation with a visible result.
 - Bare LF stays bare LF, header casing and order survive, duplicates survive, a
   `Content-Length` that disagrees with the body is sent wrong, and non-UTF-8 and NUL
   bytes pass through. Proven against a real socket by asserting what the server
-  received, not what Hexora believed it sent.
+  received, not what Nullhawk believed it sent.
 - **Raw mode does not bypass scope.** `ScopeGuard::send_raw` decides on the service the
   request is addressed to and the target read out of its request line; an absolute-form
   line contributes its path, never its authority, so rewriting it cannot point the
@@ -2012,7 +2012,7 @@ byte for byte:
 
 ### Not implemented
 
-There are no attack chains. Object identifiers must be declared by hand: Hexora does
+There are no attack chains. Object identifiers must be declared by hand: Nullhawk does
 not suggest which values in a request look like one, and until it does, constructed
 testing is only as broad as what a tester has told it. Credentials are stored in
 cleartext; encryption under a project passphrase is still only in the threat model.

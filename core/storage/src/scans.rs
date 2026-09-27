@@ -13,8 +13,8 @@
 //! start and an end. Queues, concurrency and retries belong to the active scheduler,
 //! where the requirements will be real.
 
-use hexora_types::ids::ScanRunId;
-use hexora_types::verify::DetectorMode;
+use nullhawk_types::ids::ScanRunId;
+use nullhawk_types::verify::DetectorMode;
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Result, StorageError};
@@ -40,7 +40,7 @@ pub struct DetectorRun {
     /// The detector still ran, and its observations are still listed. What it did not
     /// do is produce a finding. A run record that omitted this would leave a reader
     /// unable to tell "nobody looked" from "it was looked at and this programme does
-    /// not take them" — see `hexora_types::programme`.
+    /// not take them" — see `nullhawk_types::programme`.
     pub excluded: Option<String>,
 }
 
@@ -72,7 +72,7 @@ pub struct ScanRun {
     /// `None` means it finished. Anything else means the run is *unfinished*, and a
     /// reader must not take its silence for a clean result.
     pub stopped_because: Option<String>,
-    /// The Hexora build that ran it.
+    /// The Nullhawk build that ran it.
     pub tool_version: String,
     /// What each detector did.
     pub detectors: Vec<DetectorRun>,

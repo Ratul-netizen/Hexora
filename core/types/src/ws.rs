@@ -1,6 +1,6 @@
 //! WebSocket domain types shared across crates.
 //!
-//! The frame codec lives in `hexora-http`; this is the small vocabulary the storage and
+//! The frame codec lives in `nullhawk-http`; this is the small vocabulary the storage and
 //! capture layers need without depending on the HTTP engine.
 
 use serde::{Deserialize, Serialize};

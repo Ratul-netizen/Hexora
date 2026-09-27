@@ -1,18 +1,18 @@
-//! The `hexora` command-line interface.
+//! The `nullhawk` command-line interface.
 //!
 //! The CLI and the desktop application share one engine. There is no second scanner,
 //! no second proxy and no CLI-only code path that behaves differently from the GUI —
 //! a result reproduced in CI must be the same result a tester sees on their machine.
 //!
 //! Commands that are not implemented are not registered at all, rather than
-//! registered as stubs that fail at runtime: `hexora --help` lists what genuinely
+//! registered as stubs that fail at runtime: `nullhawk --help` lists what genuinely
 //! works today and nothing else.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use hexora_storage::{migrations, Project};
+use nullhawk_storage::{migrations, Project};
 
 mod active;
 mod authz;
@@ -50,13 +50,13 @@ mod sitemap;
 mod snapshot;
 mod ws;
 
-/// Hexora — the modern offensive security workbench.
+/// Nullhawk — the modern offensive security workbench.
 #[derive(Debug, Parser)]
 #[command(
-    name = "hexora",
+    name = "nullhawk",
     version,
-    about = "Hexora — the modern offensive security workbench",
-    long_about = "Hexora is a web and API security testing platform for AUTHORIZED \
+    about = "Nullhawk — the modern offensive security workbench",
+    long_about = "Nullhawk is a web and API security testing platform for AUTHORIZED \
                   penetration testing and security research.\n\n\
                   Development status: M15.4. The proxy, HTTP/1.x engine with TLS, \
                   projects, traffic capture, the repeater, authorization testing, the \
@@ -125,7 +125,7 @@ enum Command {
 
     /// Run the intercepting proxy.
     ///
-    /// Point a browser at it, install the CA, and Hexora sees the traffic. Every
+    /// Point a browser at it, install the CA, and Nullhawk sees the traffic. Every
     /// exchange is printed as it happens.
     Proxy {
         /// Record every exchange into this project.
@@ -166,7 +166,7 @@ enum Command {
         /// Do not verify upstream certificates.
         ///
         /// Needed for staging targets with self-signed certificates. Applies to the
-        /// connection between Hexora and the target, not the one your browser sees.
+        /// connection between Nullhawk and the target, not the one your browser sees.
         #[arg(short = 'k', long)]
         insecure_upstream: bool,
 
@@ -194,7 +194,7 @@ enum Command {
 
         /// Install the CA into this user's trust store.
         ///
-        /// Asks first. This is the most consequential thing Hexora will ask you to
+        /// Asks first. This is the most consequential thing Nullhawk will ask you to
         /// do, and it never happens as a side effect of anything else.
         #[arg(long, conflicts_with_all = ["delete", "untrust", "status"])]
         install: bool,
@@ -255,7 +255,7 @@ enum Command {
         after: Option<String>,
 
         /// Filter with a query, e.g. `status>=500 AND host:api`. Scans the whole project and
-        /// shows matches up to --limit. See the fields in `hexora help history`.
+        /// shows matches up to --limit. See the fields in `nullhawk help history`.
         #[arg(short, long, value_name = "QUERY", conflicts_with = "body")]
         query: Option<String>,
 
@@ -276,7 +276,7 @@ enum Command {
         /// Project directory.
         path: PathBuf,
 
-        /// The request to resend, from `hexora history`.
+        /// The request to resend, from `nullhawk history`.
         id: String,
 
         /// Open the request in $EDITOR before sending.
@@ -341,7 +341,7 @@ enum Command {
 
         /// Record that this value is an identifier.
         ///
-        /// Says nothing about who owns it. Declaring that is `hexora object add`.
+        /// Says nothing about who owns it. Declaring that is `nullhawk object add`.
         #[arg(long, value_name = "ID", conflicts_with_all = ["show", "reject"])]
         accept: Option<String>,
 
@@ -353,7 +353,7 @@ enum Command {
     /// Declare which identifiers are objects, and who owns them.
     ///
     /// Data entry, not a test: declaring sends nothing. It is what lets
-    /// `hexora authz --construct` build the request nobody captured — one identity
+    /// `nullhawk authz --construct` build the request nobody captured — one identity
     /// asking for another's object.
     #[command(subcommand)]
     Object(ObjectCommand),
@@ -403,9 +403,9 @@ enum Command {
     #[command(subcommand)]
     Matchreplace(MatchReplaceCommand),
 
-    /// User-defined scan checks — Hexora's answer to Burp's BChecks.
+    /// User-defined scan checks — Nullhawk's answer to Burp's BChecks.
     ///
-    /// A check is a query plus a finding template; it runs during `hexora scan passive`
+    /// A check is a query plus a finding template; it runs during `nullhawk scan passive`
     /// and files a lead when it matches. Checks match on metadata and headers, and can
     /// only ever produce a lead — never an actionable finding.
     #[command(subcommand)]
@@ -447,7 +447,7 @@ enum Command {
     Race {
         /// Project directory.
         path: PathBuf,
-        /// The request to replay, from `hexora history`.
+        /// The request to replay, from `nullhawk history`.
         id: String,
         /// How many copies to send at once.
         #[arg(long, default_value_t = 20)]
@@ -501,7 +501,7 @@ enum Command {
         /// Project directory.
         path: PathBuf,
 
-        /// The request to replay, from `hexora history`.
+        /// The request to replay, from `nullhawk history`.
         id: String,
 
         /// The identity the captured request belongs to, by label or id.
@@ -547,7 +547,7 @@ enum Command {
         /// A replay asks "can this identity reach this URL?". Substituting an
         /// identifier somebody else owns asks "can it reach *their* object?", which
         /// is the question a captured request usually cannot answer. Declare who owns
-        /// what with `hexora object add` first.
+        /// what with `nullhawk object add` first.
         #[arg(long)]
         construct: bool,
 
@@ -609,7 +609,7 @@ enum Command {
         /// Project directory.
         path: PathBuf,
 
-        /// The request to vary, from `hexora history`.
+        /// The request to vary, from `nullhawk history`.
         id: String,
 
         /// Where a payload goes: a query parameter or header name. Repeat for several
@@ -661,7 +661,7 @@ enum Command {
         /// Project directory.
         path: PathBuf,
 
-        /// The finding, from `hexora findings`.
+        /// The finding, from `nullhawk findings`.
         id: String,
 
         /// raw, curl, or markdown.
@@ -859,7 +859,7 @@ enum Command {
     Version,
 }
 
-/// `hexora ws` subcommands.
+/// `nullhawk ws` subcommands.
 #[derive(Debug, Subcommand)]
 enum WsCommand {
     /// List the captured WebSocket sessions.
@@ -895,7 +895,7 @@ enum WsCommand {
     },
 }
 
-/// `hexora license` subcommands.
+/// `nullhawk license` subcommands.
 #[derive(Debug, Subcommand)]
 enum LicenseCommand {
     /// Show the tier this install is running at, and the licence behind it.
@@ -911,10 +911,10 @@ enum LicenseCommand {
     /// Issuer tool: generate an Ed25519 keypair for signing licences.
     ///
     /// You do this once. The private key stays offline and signs licences (`license sign`);
-    /// the printed public key is embedded in release builds via HEXORA_LICENSE_PUBKEY.
+    /// the printed public key is embedded in release builds via NULLHAWK_LICENSE_PUBKEY.
     Keygen {
         /// Where to write the private key (PKCS#8). Refuses to overwrite an existing file.
-        #[arg(long, value_name = "PATH", default_value = "hexora-issuer.key")]
+        #[arg(long, value_name = "PATH", default_value = "nullhawk-issuer.key")]
         out: PathBuf,
     },
 
@@ -1062,7 +1062,7 @@ enum IdentityCommand {
         /// The identity, by label or id.
         who: String,
 
-        /// The captured login/refresh request to replay, from `hexora history`.
+        /// The captured login/refresh request to replay, from `nullhawk history`.
         #[arg(long, value_name = "ID")]
         from: String,
 
@@ -1172,7 +1172,7 @@ enum ObjectCommand {
 
         /// A captured request the value appears in.
         ///
-        /// Given one, Hexora finds the value and records where it actually sat, so
+        /// Given one, Nullhawk finds the value and records where it actually sat, so
         /// nobody has to count path segments. Without one the declaration records the
         /// value alone, and a run substitutes it wherever the sender's own object is.
         #[arg(long, value_name = "ID")]
@@ -1202,7 +1202,7 @@ enum ScanCommand {
         /// Project directory.
         path: PathBuf,
 
-        /// Run only this check, by id. `hexora detectors` lists them.
+        /// Run only this check, by id. `nullhawk detectors` lists them.
         #[arg(long, value_name = "ID")]
         detector: Option<String>,
 
@@ -1239,7 +1239,7 @@ enum ScanCommand {
     /// typo apart.
     ///
     /// Nothing is invented. An active run only tests hypotheses a passive pass
-    /// raised, so `hexora scan passive` comes first. Use --dry-run to see exactly
+    /// raised, so `nullhawk scan passive` comes first. Use --dry-run to see exactly
     /// what would be sent, to which hosts, and how much.
     Active {
         /// Project directory.
@@ -1383,7 +1383,7 @@ enum ProgrammeCommand {
     Exclude {
         /// Project directory.
         path: PathBuf,
-        /// The detector id, as `hexora detectors` lists it.
+        /// The detector id, as `nullhawk detectors` lists it.
         detector: String,
         /// Why, in the programme's own words where possible.
         #[arg(long)]
@@ -1433,7 +1433,7 @@ enum HeaderCommand {
         /// Project directory.
         path: PathBuf,
     },
-    /// Put a header on every request Hexora sends.
+    /// Put a header on every request Nullhawk sends.
     ///
     /// For a programme that requires researchers to identify their traffic — the usual
     /// shape is `X-HackerOne-Research: <username>`, and a programme that cannot tell a
@@ -1552,7 +1552,7 @@ enum CheckCommand {
     },
     /// Add a custom check.
     ///
-    /// The query matches on metadata and headers (see `hexora history --query` for the
+    /// The query matches on metadata and headers (see `nullhawk history --query` for the
     /// fields); body fields are refused. A match files a lead at the given severity.
     Add {
         /// Project directory.
@@ -1733,12 +1733,12 @@ fn main() -> ExitCode {
     // The `Command` enum is large (dozens of subcommands, each with its own fields), and
     // an unoptimized build lays a value of it out on the stack during `Cli::parse`. On
     // Windows the default main-thread stack is 1 MiB, which a debug build overflows
-    // before `main` does anything at all — `hexora version` and `hexora --help` both
+    // before `main` does anything at all — `nullhawk version` and `nullhawk --help` both
     // crash with "overflowed its stack". Release builds shrink the frames and are fine,
     // which is why this only ever bit a developer running a debug binary. An 8 MiB worker
     // stack removes the cliff without changing anything about how the program runs.
     std::thread::Builder::new()
-        .name("hexora-main".into())
+        .name("nullhawk-main".into())
         .stack_size(8 * 1024 * 1024)
         .spawn(real_main)
         .expect("spawn main worker thread")
@@ -1769,7 +1769,7 @@ fn real_main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli) -> hexora_types::Result<()> {
+fn run(cli: &Cli) -> nullhawk_types::Result<()> {
     match &cli.command {
         Command::Crawl {
             path,
@@ -1788,7 +1788,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         } => {
             // The crawler sends automated traffic on its own, like the active scanner, so
             // it sits behind the same entitlement.
-            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             crawl::run(crawl::Args {
                 project: path.clone(),
                 seeds: url.clone(),
@@ -1826,7 +1826,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             insecure,
             yes,
         }) => {
-            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             oob::test_cmd(oob::TestArgs {
                 url,
                 server,
@@ -1847,7 +1847,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             insecure,
             yes,
         } => {
-            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             llm::run(llm::Args {
                 url,
                 template: template.as_deref(),
@@ -1956,7 +1956,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             // Replaying a login is automated traffic; gate it like the active scanner unless
             // it is only a dry run.
             if !*dry_run {
-                license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+                license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             }
             identity::renew(identity::RenewArgs {
                 project: path,
@@ -1986,13 +1986,13 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             (_, Some(id), _) => identifiers::decide(
                 path,
                 id,
-                hexora_types::candidate::CandidateStatus::Accepted,
+                nullhawk_types::candidate::CandidateStatus::Accepted,
                 cli.json,
             ),
             (_, _, Some(id)) => identifiers::decide(
                 path,
                 id,
-                hexora_types::candidate::CandidateStatus::Rejected,
+                nullhawk_types::candidate::CandidateStatus::Rejected,
                 cli.json,
             ),
             (None, None, None) => identifiers::list(identifiers::ListArgs {
@@ -2074,7 +2074,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             no_save,
             refresh,
         }) => {
-            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             active::active(active::Args {
                 project: path,
                 host: host.as_deref(),
@@ -2103,7 +2103,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             yes,
             insecure,
         } => {
-            license::gate().require(hexora_engine::license::Feature::Intruder)?;
+            license::gate().require(nullhawk_engine::license::Feature::Intruder)?;
             fuzz::fuzz(fuzz::Args {
                 project: path,
                 id,
@@ -2133,7 +2133,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }),
         Command::Detectors => detectors::list(cli.json),
         Command::Snapshot(SnapshotCommand::Take { path, label, note }) => {
-            license::gate().require(hexora_engine::license::Feature::RetestSnapshots)?;
+            license::gate().require(nullhawk_engine::license::Feature::RetestSnapshots)?;
             snapshot::take(path, label.as_deref(), note.as_deref(), cli.json)
         }
         Command::Snapshot(SnapshotCommand::List { path }) => snapshot::list(path, cli.json),
@@ -2143,7 +2143,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             from,
             against,
         }) => {
-            license::gate().require(hexora_engine::license::Feature::RetestSnapshots)?;
+            license::gate().require(nullhawk_engine::license::Feature::RetestSnapshots)?;
             snapshot::diff(path, from, against.as_deref(), cli.json)
         }
         Command::Snapshot(SnapshotCommand::Remove { path, id }) => {
@@ -2225,7 +2225,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }) => {
             // Sending is automated traffic, gated like the crawler; a dry run is free.
             if *send {
-                license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+                license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             }
             import::openapi(import::Args {
                 project: path,
@@ -2250,7 +2250,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             yes,
         }) => {
             if *send {
-                license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+                license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             }
             import::graphql(import::GraphqlArgs {
                 project: path,
@@ -2270,7 +2270,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             timeout,
             yes,
         } => {
-            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             domxss::run(domxss::Args {
                 url,
                 headed: *headed,
@@ -2286,7 +2286,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             insecure,
             yes,
         } => {
-            license::gate().require(hexora_engine::license::Feature::Intruder)?;
+            license::gate().require(nullhawk_engine::license::Feature::Intruder)?;
             race::run(race::Args {
                 project: path,
                 id,
@@ -2367,7 +2367,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             (Some(id), _) => findings::show(path, id, cli.json),
             (_, Some(id)) => {
                 let status = status.as_deref().ok_or_else(|| {
-                    hexora_types::HexoraError::invalid_input(
+                    nullhawk_types::NullhawkError::invalid_input(
                         "--status",
                         "--triage needs the state to set, e.g. --status false-positive",
                     )
@@ -2543,7 +2543,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
 fn print_version(json: bool) {
     let version = env!("CARGO_PKG_VERSION");
     let schema = migrations::target_version();
-    let rpc = hexora_types::RPC_CONTRACT_VERSION;
+    let rpc = nullhawk_types::RPC_CONTRACT_VERSION;
     if json {
         let payload = serde_json::json!({
             "version": version,
@@ -2553,7 +2553,7 @@ fn print_version(json: bool) {
         });
         println!("{payload}");
     } else {
-        println!("hexora {version}");
+        println!("nullhawk {version}");
         println!("  project schema revision: {schema}");
         println!("  rpc contract version:    {rpc}");
         println!("  milestone:               M15.4 (a run that outlives its session)");
@@ -2568,9 +2568,9 @@ fn init_tracing(verbosity: u8) {
         _ => "trace",
     };
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("hexora={level}")));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("nullhawk={level}")));
     // Secrets never reach a log because credentials are wrapped in
-    // `hexora_types::redact::Secret`, whose Debug output is a placeholder. See
+    // `nullhawk_types::redact::Secret`, whose Debug output is a placeholder. See
     // docs/security-invariants.md, invariant 2.
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -2581,15 +2581,15 @@ fn init_tracing(verbosity: u8) {
 /// Refuses a project that was never created, before a setting is written into it.
 ///
 /// `open_project` opens or creates the database; the `project` row is written by
-/// `hexora project init`. A setting is stored on that row, so writing one into a
-/// directory nobody initialised used to succeed and store nothing — `hexora header add`
+/// `nullhawk project init`. A setting is stored on that row, so writing one into a
+/// directory nobody initialised used to succeed and store nothing — `nullhawk header add`
 /// printed "Attached" over a header that would never be sent. Storage refuses that now,
 /// and this turns the refusal into an instruction.
-fn require_initialised(project: &Project, path: &std::path::Path) -> hexora_types::Result<()> {
+fn require_initialised(project: &Project, path: &std::path::Path) -> nullhawk_types::Result<()> {
     let exists: bool = project
         .metadata()
         .connection()
-        .map_err(hexora_types::HexoraError::from)?
+        .map_err(nullhawk_types::NullhawkError::from)?
         .query_row("SELECT count(*) FROM project", [], |row| {
             row.get::<_, i64>(0)
         })
@@ -2599,11 +2599,11 @@ fn require_initialised(project: &Project, path: &std::path::Path) -> hexora_type
     if exists {
         return Ok(());
     }
-    Err(hexora_types::HexoraError::invalid_input(
+    Err(nullhawk_types::NullhawkError::invalid_input(
         "path",
         format!(
-            "{} is not a Hexora project yet, so there is nowhere to keep this. \
-             Create it with `hexora project init {}`",
+            "{} is not a Nullhawk project yet, so there is nowhere to keep this. \
+             Create it with `nullhawk project init {}`",
             path.display(),
             path.display()
         ),
@@ -2611,11 +2611,11 @@ fn require_initialised(project: &Project, path: &std::path::Path) -> hexora_type
 }
 
 /// Confirms that a project directory really is one before acting on it.
-fn open_project(path: &std::path::Path) -> hexora_types::Result<Project> {
+fn open_project(path: &std::path::Path) -> nullhawk_types::Result<Project> {
     if path.exists() && !path.join("project.db").exists() {
-        return Err(hexora_types::HexoraError::invalid_input(
+        return Err(nullhawk_types::NullhawkError::invalid_input(
             "path",
-            format!("{} exists but is not a Hexora project", path.display()),
+            format!("{} exists but is not a Nullhawk project", path.display()),
         ));
     }
     Ok(Project::open(path)?)

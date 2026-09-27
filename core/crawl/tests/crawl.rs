@@ -10,14 +10,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hexora_crawl::{CrawlBudget, CrawlPolicy, CrawlStop, Crawler, SkipReason};
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
-use hexora_types::error::Result;
-use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpVersion};
-use hexora_types::identity::Identity;
-use hexora_types::raw::{RawH2Request, RawRequest};
-use hexora_types::scope::{Scope, ScopeRule};
+use nullhawk_crawl::{CrawlBudget, CrawlPolicy, CrawlStop, Crawler, SkipReason};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{Exchange, HttpTransport, SendOptions};
+use nullhawk_types::error::Result;
+use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpVersion};
+use nullhawk_types::identity::Identity;
+use nullhawk_types::raw::{RawH2Request, RawRequest};
+use nullhawk_types::scope::{Scope, ScopeRule};
 
 /// An in-memory site: request path → (content-type, body). A path that is not present
 /// answers 404 with an empty body, the way a real crawl meets dead links.
@@ -103,7 +103,7 @@ fn no_delay(budget: CrawlBudget) -> CrawlBudget {
     }
 }
 
-fn fetched_paths(report: &hexora_crawl::CrawlReport) -> Vec<String> {
+fn fetched_paths(report: &nullhawk_crawl::CrawlReport) -> Vec<String> {
     report
         .fetched
         .iter()

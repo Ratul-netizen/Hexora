@@ -1,5 +1,5 @@
 [package]
-name = "hexora-wasm"
+name = "nullhawk-wasm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-hexora-ext.workspace = true
+nullhawk-ext.workspace = true
 # A pure-Rust WASM interpreter: no native code generation, so the supply chain stays small and
 # a module cannot reach outside the bytes we hand it — the sandbox is the absence of imports.
 wasmi = "0.36"

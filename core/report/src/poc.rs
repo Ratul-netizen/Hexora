@@ -43,11 +43,11 @@
 
 use std::collections::BTreeMap;
 
-use hexora_storage::{Project, StoredRequest};
-use hexora_types::finding::{Confidence, Evidence, Finding};
-use hexora_types::ids::{FindingId, RequestId};
-use hexora_types::redact::is_sensitive_header;
-use hexora_types::Result;
+use nullhawk_storage::{Project, StoredRequest};
+use nullhawk_types::finding::{Confidence, Evidence, Finding};
+use nullhawk_types::ids::{FindingId, RequestId};
+use nullhawk_types::redact::is_sensitive_header;
+use nullhawk_types::Result;
 use serde::Serialize;
 
 /// A reproduction, compiled from a finding's evidence.
@@ -175,7 +175,7 @@ pub struct Placeholder {
 /// Compiles a finding's evidence into a reproduction.
 ///
 /// Reads the project. Sends nothing — the same shape as every other read in this
-/// crate, and the reason `hexora report` and `hexora poc` are safe to run against a
+/// crate, and the reason `nullhawk report` and `nullhawk poc` are safe to run against a
 /// finished engagement.
 pub fn reproduce(project: &Project, finding: &Finding) -> Result<Reproduction> {
     let traffic = project.traffic();
@@ -288,7 +288,7 @@ pub fn reproduce(project: &Project, finding: &Finding) -> Result<Reproduction> {
         // thing somebody forwards without the paragraph that qualified it.
         caveats.push(
             "This finding is a lead rather than an established issue: running the \
-             steps below shows what Hexora saw, not that the application is \
+             steps below shows what Nullhawk saw, not that the application is \
              exploitable."
                 .into(),
         );
@@ -577,16 +577,16 @@ fn url_of(stored: &StoredRequest) -> String {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use hexora_storage::{CapturedExchange, TrafficStore};
-    use hexora_types::finding::{
+    use nullhawk_storage::{CapturedExchange, TrafficStore};
+    use nullhawk_types::finding::{
         FindingSource, FindingStatus, Hypothesis, Location, MessagePart, Severity,
     };
-    use hexora_types::http::{
+    use nullhawk_types::http::{
         Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion,
     };
-    use hexora_types::identity::Identity;
-    use hexora_types::ids::TargetId;
-    use hexora_types::verify::{Verification, Verified, Writeup};
+    use nullhawk_types::identity::Identity;
+    use nullhawk_types::ids::TargetId;
+    use nullhawk_types::verify::{Verification, Verified, Writeup};
 
     struct Fixture {
         project: Project,

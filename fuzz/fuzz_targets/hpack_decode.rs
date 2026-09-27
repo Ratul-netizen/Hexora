@@ -12,5 +12,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    hexora_http::h2raw::fuzz_decode_header_block(data);
+    nullhawk_http::h2raw::fuzz_decode_header_block(data);
 });

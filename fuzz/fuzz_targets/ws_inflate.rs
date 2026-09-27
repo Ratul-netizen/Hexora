@@ -10,5 +10,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    hexora_http::ws::fuzz_inflate(data);
+    nullhawk_http::ws::fuzz_inflate(data);
 });

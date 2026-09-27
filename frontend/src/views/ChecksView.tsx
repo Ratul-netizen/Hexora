@@ -10,7 +10,7 @@ import {
 } from "../ipc";
 
 /**
- * Custom scan checks — Hexora's answer to Burp's BChecks.
+ * Custom scan checks — Nullhawk's answer to Burp's BChecks.
  *
  * A check is a query plus a finding template. It runs during a passive scan and files a lead
  * when its query matches a captured exchange. Checks match on request/response metadata and

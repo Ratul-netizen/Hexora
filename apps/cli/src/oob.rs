@@ -1,4 +1,4 @@
-//! `hexora oob` — the out-of-band collaborator: run it, mint payloads, poll for callbacks.
+//! `nullhawk oob` — the out-of-band collaborator: run it, mint payloads, poll for callbacks.
 //!
 //! Confirms blind vulnerabilities (SSRF, XXE, blind injection) by making the target reach out
 //! to a server you control and watching it arrive. You run `oob serve` on a host you control,
@@ -7,23 +7,23 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_oob::{poll, serve, serve_all, Collaborator, PayloadMode};
-use hexora_types::http::{HttpRequest, HttpService};
-use hexora_types::scope::{Scope, ScopeRule};
-use hexora_types::{HexoraError, Result};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_oob::{poll, serve, serve_all, Collaborator, PayloadMode};
+use nullhawk_types::http::{HttpRequest, HttpService};
+use nullhawk_types::scope::{Scope, ScopeRule};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Runtime for the blocking CLI to drive async OOB calls.
 fn runtime() -> Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))
 }
 
-/// `hexora oob serve` — run the collaborator, catching HTTP (and optionally DNS) callbacks.
+/// `nullhawk oob serve` — run the collaborator, catching HTTP (and optionally DNS) callbacks.
 pub fn serve_cmd(listen: &str, dns: Option<&str>, answer_ip: &str) -> Result<()> {
     println!(
         "Collaborator listening on {listen} (HTTP). Payloads that call back here are recorded."
@@ -32,7 +32,7 @@ pub fn serve_cmd(listen: &str, dns: Option<&str>, answer_ip: &str) -> Result<()>
     match dns {
         Some(dns_addr) => {
             let ip = answer_ip.parse().map_err(|_| {
-                HexoraError::invalid_input(
+                NullhawkError::invalid_input(
                     "answer-ip",
                     format!("{answer_ip:?} is not an IPv4 address"),
                 )
@@ -42,13 +42,13 @@ pub fn serve_cmd(listen: &str, dns: Option<&str>, answer_ip: &str) -> Result<()>
             runtime.block_on(serve_all(listen, dns_addr, ip))
         }
         None => {
-            println!("Mint one with `hexora oob mint --server <this host>`; Ctrl-C to stop.");
+            println!("Mint one with `nullhawk oob mint --server <this host>`; Ctrl-C to stop.");
             runtime.block_on(serve(listen))
         }
     }
 }
 
-/// `hexora oob mint` — print a fresh payload URL and its token.
+/// `nullhawk oob mint` — print a fresh payload URL and its token.
 pub fn mint_cmd(server: &str, subdomain: bool, https: bool, json: bool) -> Result<()> {
     let mode = if subdomain {
         PayloadMode::Subdomain
@@ -69,11 +69,11 @@ pub fn mint_cmd(server: &str, subdomain: bool, https: bool, json: bool) -> Resul
     println!("token:   {token}");
     println!();
     println!("Place the payload in a field you suspect is processed out of band, then:");
-    println!("  hexora oob poll --server {server} --token {token}");
+    println!("  nullhawk oob poll --server {server} --token {token}");
     Ok(())
 }
 
-/// `hexora oob poll` — fetch the interactions recorded for a token.
+/// `nullhawk oob poll` — fetch the interactions recorded for a token.
 pub fn poll_cmd(server: &str, token: &str, json: bool) -> Result<()> {
     let interactions = runtime()?.block_on(poll(server, token))?;
 
@@ -111,7 +111,7 @@ pub fn poll_cmd(server: &str, token: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Options for `hexora oob test`.
+/// Options for `nullhawk oob test`.
 pub struct TestArgs<'a> {
     /// The target URL, with the query parameters to test (e.g. `?url=…`).
     pub url: &'a str,
@@ -130,7 +130,7 @@ pub struct TestArgs<'a> {
     pub json: bool,
 }
 
-/// `hexora oob test` — inject an OOB payload into each query parameter and poll for callbacks.
+/// `nullhawk oob test` — inject an OOB payload into each query parameter and poll for callbacks.
 ///
 /// A callback proves the target used the parameter value to make an out-of-band request — a
 /// blind SSRF, or an injection that fetched a URL. Blind by nature: the response says nothing,
@@ -139,7 +139,7 @@ pub fn test_cmd(args: TestArgs<'_>) -> Result<()> {
     let (service, path) = HttpService::parse_url(args.url)?;
     let params = query_params(&path);
     if params.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "url",
             "no query parameters to test; give a URL with a ?parameter=value to inject into",
         ));
@@ -166,7 +166,7 @@ pub fn test_cmd(args: TestArgs<'_>) -> Result<()> {
         }
     }
     if args.json && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "an OOB test sends traffic, and --json cannot ask; pass --yes to confirm",
         ));
@@ -203,7 +203,7 @@ pub fn test_cmd(args: TestArgs<'_>) -> Result<()> {
         // Give the target time to make its out-of-band request, then poll each token.
         tokio::time::sleep(Duration::from_secs(args.wait)).await;
 
-        let mut hits: Vec<(String, Vec<hexora_oob::Interaction>)> = Vec::new();
+        let mut hits: Vec<(String, Vec<nullhawk_oob::Interaction>)> = Vec::new();
         for (token, param) in &probes {
             let interactions = collaborator.poll(token).await.unwrap_or_default();
             if !interactions.is_empty() {
@@ -309,7 +309,7 @@ fn parse_headers(raw: &[String]) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
     for item in raw {
         let (name, value) = item.split_once(':').ok_or_else(|| {
-            HexoraError::invalid_input("header", format!("{item:?} is not `Name: value`"))
+            NullhawkError::invalid_input("header", format!("{item:?} is not `Name: value`"))
         })?;
         out.push((name.trim().to_string(), value.trim().to_string()));
     }

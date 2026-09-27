@@ -247,7 +247,7 @@ impl BlobStore for FsBlobStore {
     }
 }
 
-/// An in-memory blob store, for tests and for `hexora replay`, which does not
+/// An in-memory blob store, for tests and for `nullhawk replay`, which does not
 /// persist anything.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryBlobStore {

@@ -53,7 +53,7 @@ export function ProgrammeView({ hasProject }: { hasProject: boolean }) {
       <section className="card">
         <h2>Attached headers</h2>
         <p className="muted">
-          Put on every request Hexora sends — the scanner's probes, the intruder, every replay.
+          Put on every request Nullhawk sends — the scanner's probes, the intruder, every replay.
           Bug-bounty programmes require researchers to identify their traffic (e.g.{" "}
           <code>X-HackerOne-Research: username</code>); traffic that cannot be told from an
           attacker's is treated like one.

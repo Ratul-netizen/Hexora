@@ -16,10 +16,10 @@
 //!
 //! # Why not a recorded login sequence
 //!
-//! Burp and AppScan record the login and replay it. Two reasons Hexora starts elsewhere:
+//! Burp and AppScan record the login and replay it. Two reasons Nullhawk starts elsewhere:
 //!
 //! **A recorded login has to hold the password.** Everything else in this codebase goes
-//! the other way — `hexora identity add` refuses a credential as an argument and takes
+//! the other way — `nullhawk identity add` refuses a credential as an argument and takes
 //! `--from-env` or `--from-file`, because `ps` and shell history both capture arguments.
 //! Storing a replayable password to avoid retyping a token is a poor trade.
 //!
@@ -28,12 +28,12 @@
 //! a rejected login, and MFA, device checks and SSO all fail the same way. A recorded
 //! sequence works on targets that have none of those, which is not the interesting set.
 //!
-//! So the human logs in — through the proxy, as they already do — and Hexora *notices*.
+//! So the human logs in — through the proxy, as they already do — and Nullhawk *notices*.
 //! The person solves the captcha, because that is what captchas are for.
 //!
 //! # What must not happen
 //!
-//! **Hexora must never adopt its own traffic.** This codebase has made that mistake
+//! **Nullhawk must never adopt its own traffic.** This codebase has made that mistake
 //! twice already in other forms, and here it would be worse than confusing: the
 //! `auth.enforcement` check deliberately sends a request whose JWT signature has one
 //! character changed. Adopting *that* would replace a working session with a
@@ -44,11 +44,11 @@
 //! The caller is told the host, the time and the size, which is enough to decide whether
 //! to accept it and nothing like enough to use.
 
-use hexora_storage::TrafficStore;
-use hexora_types::identity::{Credential, Identity};
-use hexora_types::ids::RequestId;
-use hexora_types::scope::Scope;
-use hexora_types::Result;
+use nullhawk_storage::TrafficStore;
+use nullhawk_types::identity::{Credential, Identity};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::scope::Scope;
+use nullhawk_types::Result;
 
 /// A newer credential found in traffic, offered for a declared identity.
 ///
@@ -174,7 +174,7 @@ pub fn find_renewal(
     loop {
         let page = traffic.history(
             cursor.as_ref(),
-            hexora_storage::repository::Limit::new(hexora_storage::repository::Limit::MAX),
+            nullhawk_storage::repository::Limit::new(nullhawk_storage::repository::Limit::MAX),
         )?;
         let next = page.next.clone();
 
@@ -205,8 +205,8 @@ pub fn find_renewal(
                 Ok(stored) => stored,
                 Err(_) => continue,
             };
-            // The line that matters. See the module docs: adopting Hexora's own
-            // traffic would mean adopting a credential Hexora broke on purpose.
+            // The line that matters. See the module docs: adopting Nullhawk's own
+            // traffic would mean adopting a credential Nullhawk broke on purpose.
             if stored.origin != "proxy" {
                 continue;
             }
@@ -248,7 +248,7 @@ pub fn find_renewal(
 }
 
 /// Splits a stored absolute URL back into a service and a path.
-fn service_of(url: &str, secure: bool) -> Option<(hexora_types::http::HttpService, String)> {
+fn service_of(url: &str, secure: bool) -> Option<(nullhawk_types::http::HttpService, String)> {
     let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
     let (authority, path) = match rest.find('/') {
         Some(at) => (&rest[..at], rest[at..].to_string()),
@@ -262,7 +262,7 @@ fn service_of(url: &str, secure: bool) -> Option<(hexora_types::http::HttpServic
         return None;
     }
     Some((
-        hexora_types::http::HttpService::new(host, port, secure),
+        nullhawk_types::http::HttpService::new(host, port, secure),
         path,
     ))
 }
@@ -492,7 +492,7 @@ impl Coverage {
             return format!(
                 "{} of the last {} captured request(s) carry an `Authorization` header, \
                  but none matches a declared identity, so no cross-identity test can say \
-                 whose session it was. Declare it with `hexora identity add`.",
+                 whose session it was. Declare it with `nullhawk identity add`.",
                 self.with_authorization, self.examined
             );
         }
@@ -500,7 +500,7 @@ impl Coverage {
             (true, 0) => {
                 " Those matched on the whole cookie header, which is weak: a jar of \
                  analytics and consent cookies matches exactly and carries no session \
-                 at all. Name the cookie that identifies you with `hexora identity add \
+                 at all. Name the cookie that identifies you with `nullhawk identity add \
                  --session-cookie <name>`."
             }
             _ => "",
@@ -516,8 +516,8 @@ impl Coverage {
 
 /// Counts how much captured traffic carries a credential, and how much is attributable.
 ///
-/// Human-driven traffic only, for the same reason [`find_renewal`] uses it: Hexora's
-/// own replays carry credentials Hexora chose, and counting those would answer a
+/// Human-driven traffic only, for the same reason [`find_renewal`] uses it: Nullhawk's
+/// own replays carry credentials Nullhawk chose, and counting those would answer a
 /// question about itself.
 pub fn coverage(traffic: &TrafficStore, identities: &[Identity], limit: usize) -> Result<Coverage> {
     let mut found = Coverage::default();
@@ -526,7 +526,7 @@ pub fn coverage(traffic: &TrafficStore, identities: &[Identity], limit: usize) -
     loop {
         let page = traffic.history(
             cursor.as_ref(),
-            hexora_storage::repository::Limit::new(hexora_storage::repository::Limit::MAX),
+            nullhawk_storage::repository::Limit::new(nullhawk_storage::repository::Limit::MAX),
         )?;
         let next = page.next.clone();
 

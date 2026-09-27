@@ -73,7 +73,7 @@ function Reproduce({
       {poc.placeholders.length > 0 && (
         <>
           <p className="muted small">
-            Supply these first — Hexora never puts a real credential in a
+            Supply these first — Nullhawk never puts a real credential in a
             reproduction:
           </p>
           <ul className="delta">

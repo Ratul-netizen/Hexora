@@ -1,13 +1,13 @@
 //! Adopting a fresh session from traffic a person generated — and refusing to adopt
-//! one from traffic Hexora generated itself.
+//! one from traffic Nullhawk generated itself.
 
 use std::sync::Arc;
 
-use hexora_authz::session::find_renewal;
-use hexora_storage::{CapturedExchange, MemoryBlobStore, Project, TrafficStore};
-use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
-use hexora_types::scope::{Scope, ScopeRule};
+use nullhawk_authz::session::find_renewal;
+use nullhawk_storage::{CapturedExchange, MemoryBlobStore, Project, TrafficStore};
+use nullhawk_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use nullhawk_types::identity::{Credential, Identity, PrivilegeLevel};
+use nullhawk_types::scope::{Scope, ScopeRule};
 
 fn store(project: &Project) -> Arc<TrafficStore> {
     Arc::new(TrafficStore::new(
@@ -22,7 +22,7 @@ fn scope() -> Scope {
 
 fn identity(cookie: &str) -> Identity {
     Identity {
-        id: hexora_types::ids::IdentityId::new(),
+        id: nullhawk_types::ids::IdentityId::new(),
         label: "Me".into(),
         privilege: PrivilegeLevel::User,
         credential: Credential::Cookie {
@@ -110,7 +110,7 @@ fn a_newer_session_from_the_proxy_is_offered() {
 }
 
 #[test]
-fn a_credential_hexora_broke_on_purpose_is_never_adopted() {
+fn a_credential_nullhawk_broke_on_purpose_is_never_adopted() {
     // The one that would be a disaster. `auth.enforcement` sends the captured request
     // with the JWT signature altered by one character, to see whether the application
     // checks it. That request is in the project's history like any other. Adopting it
@@ -142,7 +142,7 @@ fn a_credential_hexora_broke_on_purpose_is_never_adopted() {
     assert_eq!(
         found.length,
         "session=REAL".len(),
-        "adopted something Hexora sent rather than what the browser sent"
+        "adopted something Nullhawk sent rather than what the browser sent"
     );
 }
 

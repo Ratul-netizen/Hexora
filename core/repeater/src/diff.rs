@@ -15,7 +15,7 @@
 //! [`ResponseDiff::is_interesting`] exists for the same reason: a fuzzer that renders
 //! 5 000 diffs needs something to sort by.
 
-use hexora_types::http::{Headers, HttpResponse};
+use nullhawk_types::http::{Headers, HttpResponse};
 
 /// What changed between two responses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,7 +238,7 @@ fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use hexora_types::http::{Header, HttpVersion};
+    use nullhawk_types::http::{Header, HttpVersion};
 
     use super::*;
 

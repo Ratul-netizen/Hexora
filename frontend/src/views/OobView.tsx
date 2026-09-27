@@ -14,7 +14,7 @@ import {
  * A callback carrying the payload's token proves the target used the parameter value to make
  * an out-of-band request — a blind SSRF, or an injection that fetched a URL. Blind by nature:
  * the response says nothing, so the collaborator is the only witness. Run the collaborator
- * with `hexora oob serve` on a host the target can reach, and give its authority below.
+ * with `nullhawk oob serve` on a host the target can reach, and give its authority below.
  */
 export function OobView({ license }: { license: LicenseStatus | null }) {
   const [url, setUrl] = useState("");

@@ -29,8 +29,8 @@
 
 use std::collections::BTreeSet;
 
-use hexora_types::http::HttpResponse;
-use hexora_types::structure::{Diff, Policy};
+use nullhawk_types::http::HttpResponse;
+use nullhawk_types::structure::{Diff, Policy};
 
 /// A response reduced to the parts a cross-identity comparison can use.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,7 +271,7 @@ fn mask(token: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::{Headers, HttpVersion};
+    use nullhawk_types::http::{Headers, HttpVersion};
 
     use super::*;
 

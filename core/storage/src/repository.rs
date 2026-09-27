@@ -1,7 +1,7 @@
 //! Backend-agnostic persistence interfaces.
 //!
 //! The domain model must not know whether it is being persisted into a local SQLite
-//! file or a shared PostgreSQL instance, because Hexora ships in two shapes:
+//! file or a shared PostgreSQL instance, because Nullhawk ships in two shapes:
 //!
 //! ```text
 //! Desktop / CLI   →  SQLite file + filesystem blob store   (offline, portable)
@@ -22,11 +22,11 @@
 //! * **Pagination is mandatory** on anything that can grow with traffic volume. A
 //!   project with five million exchanges must never be loaded into a `Vec`.
 
-use hexora_types::finding::Finding;
-use hexora_types::http::HttpService;
-use hexora_types::ids::{FindingId, RequestId, TargetId};
-use hexora_types::scope::Scope;
-use hexora_types::verify::Verified;
+use nullhawk_types::finding::Finding;
+use nullhawk_types::http::HttpService;
+use nullhawk_types::ids::{FindingId, RequestId, TargetId};
+use nullhawk_types::scope::Scope;
+use nullhawk_types::verify::Verified;
 
 use crate::blob::BlobRef;
 use crate::error::Result;
@@ -128,7 +128,7 @@ pub trait FindingStore: Send + Sync {
     /// Persists a verified finding.
     ///
     /// Takes a [`Verified`], which only a
-    /// [`Verification`](hexora_types::verify::Verification) produces, so a detector's
+    /// [`Verification`](nullhawk_types::verify::Verification) produces, so a detector's
     /// suspicion cannot reach a report by going around the verification engine — the
     /// call does not compile rather than being rejected at runtime. See
     /// `docs/security-invariants.md`, invariant 6.

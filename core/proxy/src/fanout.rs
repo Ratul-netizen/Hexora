@@ -11,8 +11,8 @@
 //! others — a UI event channel that has gone away must not take the capture that is
 //! producing evidence down with it.
 
-use hexora_engine::guard::ScopeDecision;
-use hexora_engine::transport::Exchange;
+use nullhawk_engine::guard::ScopeDecision;
+use nullhawk_engine::transport::Exchange;
 
 use crate::server::ExchangeObserver;
 
@@ -82,7 +82,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+    use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
 
     use super::*;
 

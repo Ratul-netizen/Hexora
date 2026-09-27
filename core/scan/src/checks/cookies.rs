@@ -211,7 +211,7 @@ impl PassiveCheck for CookieAttributes {
                     "the attribute is absent",
                     "The name says this is a session, and script can read it. That \
                      turns any script injection anywhere on the origin into session \
-                     theft. Hexora has not looked for an injection — this is about \
+                     theft. Nullhawk has not looked for an injection — this is about \
                      what one would be worth."
                         .to_string(),
                     Severity::Medium,

@@ -1,6 +1,6 @@
 //! Installing and removing the interception CA from platform trust stores.
 //!
-//! # This is the most dangerous thing Hexora does
+//! # This is the most dangerous thing Nullhawk does
 //!
 //! Trusting a root CA means the holder of its private key can impersonate *any* site
 //! to this machine — every bank, every mail provider, every internal system. The CA
@@ -18,7 +18,7 @@
 //! 3. **Verify, do not assume.** [`status`] asks the platform whether the certificate
 //!    is actually trusted rather than remembering that a command exited zero.
 //! 4. **Removal must be as easy as installation.** [`uninstall`] exists, works without
-//!    the CA files still being present, and is what `hexora ca --delete` calls first.
+//!    the CA files still being present, and is what `nullhawk ca --delete` calls first.
 //!
 //! # Why shelling out
 //!
@@ -27,13 +27,13 @@
 //! The platform's own CLI (`certutil`, `security`, `update-ca-certificates`) is
 //! already installed, already audited, and does exactly this job. Nothing
 //! user-controlled reaches a shell — arguments are passed as an argv array, never
-//! through `sh -c`, and the only variable parts are a path Hexora wrote and a
-//! fingerprint of Hexora's own certificate.
+//! through `sh -c`, and the only variable parts are a path Nullhawk wrote and a
+//! fingerprint of Nullhawk's own certificate.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use hexora_types::error::{HexoraError, Result};
+use nullhawk_types::error::{NullhawkError, Result};
 
 /// Whether the platform believes the certificate is trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,11 +95,11 @@ pub struct Installed {
 
 /// Installs a CA certificate into the current user's trust store.
 ///
-/// `certificate` must be a PEM file that Hexora wrote. The `fingerprint` is used only
+/// `certificate` must be a PEM file that Nullhawk wrote. The `fingerprint` is used only
 /// to verify afterwards, never to locate the file.
 pub fn install(certificate: &Path, fingerprint: &Fingerprints) -> Result<Installed> {
     if !certificate.is_file() {
-        return Err(HexoraError::not_found(
+        return Err(NullhawkError::not_found(
             "certificate",
             certificate.display().to_string(),
         ));
@@ -159,7 +159,7 @@ pub struct Fingerprints {
 impl Fingerprints {
     /// Checks both digests before either reaches a command line.
     ///
-    /// Not because the values are untrusted today — they come from Hexora's own
+    /// Not because the values are untrusted today — they come from Nullhawk's own
     /// certificate — but because this is the one module where an argument reaching a
     /// platform tool is worth being certain about, and a caller a year from now may
     /// pass something else.
@@ -171,7 +171,7 @@ impl Fingerprints {
 
 fn check_hex(value: &str, length: usize, field: &'static str) -> Result<()> {
     if value.len() != length || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             field,
             format!("expected {length} hexadecimal characters"),
         ));
@@ -296,7 +296,7 @@ fn platform_install(certificate: &Path) -> Result<Store> {
         ],
     )
     .map_err(|e| {
-        HexoraError::Internal(format!(
+        NullhawkError::Internal(format!(
             "installing the CA into the Windows user Root store failed: {e}"
         ))
     })?;
@@ -316,10 +316,10 @@ fn platform_uninstall(fingerprint: &Fingerprints) -> Result<()> {
         &["-user", "-delstore", "Root", &fingerprint.sha1],
     ) {
         Ok(_) => Ok(()),
-        // Already absent is success: `hexora ca --delete` must not fail because the
+        // Already absent is success: `nullhawk ca --delete` must not fail because the
         // certificate was removed by hand first.
         Err(e) if e.means_absent() => Ok(()),
-        Err(e) => Err(HexoraError::Internal(format!(
+        Err(e) => Err(NullhawkError::Internal(format!(
             "removing the CA from the Windows user Root store failed: {e}"
         ))),
     }
@@ -367,7 +367,7 @@ fn platform_install(certificate: &Path) -> Result<Store> {
         ],
     )
     .map_err(|e| {
-        HexoraError::Internal(format!(
+        NullhawkError::Internal(format!(
             "installing the CA into the macOS login keychain failed: {e}. \
              macOS asks for your password the first time; declining that prompt \
              produces this error."
@@ -390,7 +390,7 @@ fn platform_uninstall(fingerprint: &Fingerprints) -> Result<()> {
     ) {
         Ok(_) => Ok(()),
         Err(e) if e.means_absent() => Ok(()),
-        Err(e) => Err(HexoraError::Internal(format!(
+        Err(e) => Err(NullhawkError::Internal(format!(
             "removing the CA from the macOS keychain failed: {e}"
         ))),
     }
@@ -417,7 +417,7 @@ fn platform_status(fingerprint: &Fingerprints) -> TrustState {
 #[cfg(target_os = "macos")]
 fn login_keychain() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| {
-        HexoraError::Internal("cannot determine a home directory for the keychain".to_string())
+        NullhawkError::Internal("cannot determine a home directory for the keychain".to_string())
     })?;
     let base = PathBuf::from(home).join("Library").join("Keychains");
     // The name changed in Sierra; both are accepted so this works on old and new.
@@ -441,9 +441,9 @@ fn platform_install(certificate: &Path) -> Result<Store> {
     // root, so it is offered as a manual step rather than attempted with sudo —
     // a tool that silently escalates is a tool nobody should trust with a root CA.
     let db = nss_database().ok_or_else(|| {
-        HexoraError::Internal(
+        NullhawkError::Internal(
             "no NSS database found at ~/.pki/nssdb. Install the CA into the system \
-             bundle instead:\n  sudo cp <cert> /usr/local/share/ca-certificates/hexora.crt\n\
+             bundle instead:\n  sudo cp <cert> /usr/local/share/ca-certificates/nullhawk.crt\n\
              \x20 sudo update-ca-certificates"
                 .to_string(),
         )
@@ -458,13 +458,13 @@ fn platform_install(certificate: &Path) -> Result<Store> {
             "-t",
             "C,,",
             "-n",
-            "Hexora Interception CA",
+            "Nullhawk Interception CA",
             "-i",
             &certificate.display().to_string(),
         ],
     )
     .map_err(|e| {
-        HexoraError::Internal(format!(
+        NullhawkError::Internal(format!(
             "installing the CA into the NSS database failed: {e}. \
              On Debian and Ubuntu, certutil comes from the libnss3-tools package."
         ))
@@ -490,12 +490,12 @@ fn platform_uninstall(_fingerprint: &Fingerprints) -> Result<()> {
             &format!("sql:{}", db.display()),
             "-D",
             "-n",
-            "Hexora Interception CA",
+            "Nullhawk Interception CA",
         ],
     ) {
         Ok(_) => Ok(()),
         Err(e) if e.means_absent() => Ok(()),
-        Err(e) => Err(HexoraError::Internal(format!(
+        Err(e) => Err(NullhawkError::Internal(format!(
             "removing the CA from the NSS database failed: {e}"
         ))),
     }
@@ -513,7 +513,7 @@ fn platform_status(fingerprint: &Fingerprints) -> TrustState {
             &format!("sql:{}", db.display()),
             "-L",
             "-n",
-            "Hexora Interception CA",
+            "Nullhawk Interception CA",
         ],
     ) {
         Ok(output) => {
@@ -576,7 +576,7 @@ fn manual_steps(certificate: &Path) -> Vec<ManualStep> {
             application: "System bundle".to_string(),
             instruction: format!(
                 "For curl, wget and anything else using the system bundle (needs root):\n\
-                 \x20 sudo cp {} /usr/local/share/ca-certificates/hexora.crt\n\
+                 \x20 sudo cp {} /usr/local/share/ca-certificates/nullhawk.crt\n\
                  \x20 sudo update-ca-certificates",
                 certificate.display()
             ),
@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn a_fingerprint_that_could_carry_a_command_is_refused() {
-        // The values are Hexora's own today. The check is here so it stays safe when a
+        // The values are Nullhawk's own today. The check is here so it stays safe when a
         // future caller passes something that is not.
         for bad in [
             "",
@@ -717,15 +717,15 @@ mod tests {
 
     #[test]
     fn installing_a_missing_certificate_says_which_file() {
-        let err = install(Path::new("/nonexistent/hexora-ca.crt"), &valid()).unwrap_err();
+        let err = install(Path::new("/nonexistent/nullhawk-ca.crt"), &valid()).unwrap_err();
         assert_eq!(err.code(), "not_found");
-        assert!(err.to_string().contains("hexora-ca.crt"), "{err}");
+        assert!(err.to_string().contains("nullhawk-ca.crt"), "{err}");
     }
 
     #[test]
     fn installing_refuses_a_bad_fingerprint_before_touching_the_platform() {
         let dir = tempfile::tempdir().unwrap();
-        let cert = dir.path().join("hexora-ca.crt");
+        let cert = dir.path().join("nullhawk-ca.crt");
         std::fs::write(&cert, "-----BEGIN CERTIFICATE-----\n").unwrap();
 
         let err = install(
@@ -839,11 +839,11 @@ mod tests {
     #[test]
     fn manual_steps_always_name_the_certificate_path() {
         // A step that does not say which file to import is not an instruction.
-        let cert = Path::new("/tmp/hexora-ca.crt");
+        let cert = Path::new("/tmp/nullhawk-ca.crt");
         for step in manual_steps(cert) {
             assert!(
-                step.instruction.contains("hexora-ca.crt")
-                    || step.instruction.contains("hexora.crt"),
+                step.instruction.contains("nullhawk-ca.crt")
+                    || step.instruction.contains("nullhawk.crt"),
                 "{step:?}"
             );
         }
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     fn linux_is_honest_about_needing_root_for_the_system_bundle() {
-        let steps = manual_steps(Path::new("/tmp/hexora-ca.crt"));
+        let steps = manual_steps(Path::new("/tmp/nullhawk-ca.crt"));
         if cfg!(not(any(windows, target_os = "macos"))) {
             assert!(
                 steps.iter().any(|s| s.instruction.contains("sudo")),

@@ -7,7 +7,7 @@
 //!
 //! # The proxy is a task, not an object
 //!
-//! [`hexora_proxy::ProxyServer::serve`] consumes the server and loops until the
+//! [`nullhawk_proxy::ProxyServer::serve`] consumes the server and loops until the
 //! process ends, which is right for a CLI and wrong for a window with a stop button.
 //! So the server is moved into a task and [`RunningProxy`] holds the handle; stopping
 //! aborts the task, which drops the listener and closes the port.
@@ -20,8 +20,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use hexora_storage::{Project, TrafficStore};
-use hexora_types::error::{HexoraError, Result};
+use nullhawk_storage::{Project, TrafficStore};
+use nullhawk_types::error::{NullhawkError, Result};
 
 /// An open project, and anything running against it.
 pub struct AppState {
@@ -32,7 +32,7 @@ pub struct AppState {
 struct Inner {
     project: Option<OpenProject>,
     proxy: Option<RunningProxy>,
-    scan: Option<hexora_active::Cancel>,
+    scan: Option<nullhawk_active::Cancel>,
 }
 
 /// A project the window is working in.
@@ -193,9 +193,9 @@ impl AppState {
     /// Held here rather than in the command, because the whole point is that a
     /// *different* command — the one the stop button calls — has to be able to reach
     /// it while the run is still going.
-    pub fn begin_scan(&self) -> Result<hexora_active::Cancel> {
+    pub fn begin_scan(&self) -> Result<nullhawk_active::Cancel> {
         let mut inner = self.lock()?;
-        let cancel = hexora_active::Cancel::new();
+        let cancel = nullhawk_active::Cancel::new();
         inner.scan = Some(cancel.clone());
         Ok(cancel)
     }
@@ -213,7 +213,7 @@ impl AppState {
 
     /// Stops a running scan before its next request. Returns whether there was one.
     ///
-    /// What it can promise is exactly what [`hexora_active::Cancel`] promises: no
+    /// What it can promise is exactly what [`nullhawk_active::Cancel`] promises: no
     /// further request is sent. A request already on the wire completes, because
     /// nothing can recall one.
     pub fn stop_scan(&self) -> Result<bool> {
@@ -250,13 +250,13 @@ impl AppState {
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>> {
         self.inner.lock().map_err(|_| {
-            HexoraError::Internal("the application state lock was poisoned".to_string())
+            NullhawkError::Internal("the application state lock was poisoned".to_string())
         })
     }
 }
 
-fn no_project() -> HexoraError {
-    HexoraError::invalid_input("project", "no project is open")
+fn no_project() -> NullhawkError {
+    NullhawkError::invalid_input("project", "no project is open")
 }
 
 #[cfg(test)]

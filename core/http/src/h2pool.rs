@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use hexora_types::tls::TlsInfo;
+use nullhawk_types::tls::TlsInfo;
 
 /// A connection is keyed by the host and port it reaches. The TLS settings are fixed for
 /// the transport that owns the pool, so they are not part of the key.

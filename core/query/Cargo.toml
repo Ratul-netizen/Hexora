@@ -1,5 +1,5 @@
 [package]
-name = "hexora-query"
+name = "nullhawk-query"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,5 +7,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-hexora-types.workspace = true
+nullhawk-types.workspace = true
 regex.workspace = true

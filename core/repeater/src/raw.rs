@@ -27,17 +27,17 @@
 //! byte-for-byte needs a raw send path that bypasses the message model, which does not
 //! exist yet.
 
-use hexora_http::{find_head_end, parse_request_head, Quirk, RequestTarget};
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::http::{HttpRequest, HttpService};
-use hexora_types::limits::Limits;
+use nullhawk_http::{find_head_end, parse_request_head, Quirk, RequestTarget};
+use nullhawk_types::error::{NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::{HttpRequest, HttpService};
+use nullhawk_types::limits::Limits;
 
 /// Renders a request as the bytes that will go on the wire.
 ///
-/// This is exactly what [`hexora_http::serialize_request`] sends, so what the tester
+/// This is exactly what [`nullhawk_http::serialize_request`] sends, so what the tester
 /// edits is what the target receives — not a pretty-printed approximation of it.
 pub fn render(request: &HttpRequest) -> Vec<u8> {
-    hexora_http::serialize_request(request)
+    nullhawk_http::serialize_request(request)
 }
 
 /// Parses edited bytes back into a request aimed at `service`.
@@ -49,7 +49,7 @@ pub fn render(request: &HttpRequest) -> Vec<u8> {
 /// destination.
 pub fn parse(bytes: &[u8], service: HttpService, limits: &Limits) -> Result<ParsedRequest> {
     let head_len = find_head_end(bytes).ok_or_else(|| {
-        HexoraError::Protocol(ProtocolError::Malformed {
+        NullhawkError::Protocol(ProtocolError::Malformed {
             protocol: "HTTP/1.1",
             // Named precisely, because this is the mistake every editor makes: the
             // blank line separating head from body is easy to delete by accident.
@@ -132,7 +132,7 @@ pub enum Warning {
     /// The draft is in raw mode: these bytes go out untouched.
     ///
     /// Not a complaint. It is here because the other warnings on this list describe
-    /// things Hexora would normally correct, and in raw mode it will not correct any
+    /// things Nullhawk would normally correct, and in raw mode it will not correct any
     /// of them — which is the single most important thing a tester can know about the
     /// request they are about to send.
     RawMode,
@@ -240,7 +240,7 @@ fn host_header(request: &HttpRequest) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::Header;
+    use nullhawk_types::http::Header;
 
     use super::*;
 

@@ -651,7 +651,7 @@ export const raceRun = (args: {
 
 // --- Attached headers (M14.2) -------------------------------------------
 
-/** A header put on every request Hexora sends. */
+/** A header put on every request Nullhawk sends. */
 export interface AttachedHeader {
   name: string;
   value: string;
@@ -775,7 +775,7 @@ export const untrustCa = (): Promise<CaStatus> => invoke<CaStatus>("ca_untrust")
 export const onTraffic = (
   handler: (event: TrafficEvent) => void,
 ): Promise<UnlistenFn> =>
-  listen<TrafficEvent>("hexora://traffic", (event) => handler(event.payload));
+  listen<TrafficEvent>("nullhawk://traffic", (event) => handler(event.payload));
 
 /**
  * Turns whatever a rejected `invoke` produced into a sentence.
@@ -1356,7 +1356,7 @@ export interface SignalView {
 /**
  * A value that *might* be an object identifier.
  *
- * Note what is not here: an owner. A suggestion is Hexora saying "this looks like
+ * Note what is not here: an owner. A suggestion is Nullhawk saying "this looks like
  * an identifier"; who it belongs to is an assertion only a tester can make, and it
  * is made by declaring an {@link ObjectView}. Accepting a suggestion does not
  * declare anything.

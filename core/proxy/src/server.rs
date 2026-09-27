@@ -25,18 +25,18 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use hexora_engine::guard::{ScopeDecision, ScopeGuard};
-use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
-use hexora_http::parse::find_head_end;
-use hexora_http::request::{parse_request_head, RequestHead};
-use hexora_http::ws::{encode, Frame, FrameParser};
-use hexora_http::{BodyStream, TcpTransport, TlsConfig};
-use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result};
-use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-use hexora_types::ids::RequestId;
-use hexora_types::limits::Limits;
-use hexora_types::scope::Scope;
-use hexora_types::ws::WsDirection;
+use nullhawk_engine::guard::{ScopeDecision, ScopeGuard};
+use nullhawk_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
+use nullhawk_http::parse::find_head_end;
+use nullhawk_http::request::{parse_request_head, RequestHead};
+use nullhawk_http::ws::{encode, Frame, FrameParser};
+use nullhawk_http::{BodyStream, TcpTransport, TlsConfig};
+use nullhawk_types::error::{NetworkError, NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::limits::Limits;
+use nullhawk_types::scope::Scope;
+use nullhawk_types::ws::WsDirection;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -54,7 +54,7 @@ const READ_CHUNK: usize = 16 * 1024;
 /// `Proxy-Connection` is not in the RFC — it is a de-facto header from the HTTP/1.0
 /// era that clients still send when they are configured to use a proxy. It is listed
 /// because it is addressed to *this* proxy: forwarding it means the origin sees a
-/// header the client never intended it to see, and Hexora's whole claim is that the
+/// header the client never intended it to see, and Nullhawk's whole claim is that the
 /// target receives what the tester meant to send. Every other proxy strips it too.
 const HOP_BY_HOP: &[&str] = &[
     "connection",
@@ -181,7 +181,7 @@ impl ProxyServer {
         }
 
         let listener = TcpListener::bind(config.bind).await.map_err(|e| {
-            HexoraError::Internal(format!("cannot bind the proxy to {}: {e}", config.bind))
+            NullhawkError::Internal(format!("cannot bind the proxy to {}: {e}", config.bind))
         })?;
 
         let upstream_tls = transport.tls_config().clone();
@@ -208,7 +208,7 @@ impl ProxyServer {
     pub fn local_addr(&self) -> Result<SocketAddr> {
         self.listener
             .local_addr()
-            .map_err(|e| HexoraError::Internal(format!("proxy has no local address: {e}")))
+            .map_err(|e| NullhawkError::Internal(format!("proxy has no local address: {e}")))
     }
 
     /// Serves connections until the task is dropped or cancelled.
@@ -280,7 +280,7 @@ async fn forward<S: AsyncWrite + Unpin>(
         Err(e) => {
             // The browser is waiting. Telling it what went wrong is far more useful
             // than dropping the connection and leaving a spinner.
-            let message = format!("Hexora could not reach the target: {e}");
+            let message = format!("Nullhawk could not reach the target: {e}");
             write_simple(client, 502, "Bad Gateway", message.as_bytes()).await?;
             Err(e)
         }
@@ -481,7 +481,7 @@ where
                 write
                     .write_all(&out)
                     .await
-                    .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+                    .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
                 write.flush().await.ok();
                 if let Some(id) = request_id {
                     observer.observe_websocket_message(
@@ -498,7 +498,7 @@ where
             write
                 .write_all(&chunk)
                 .await
-                .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+                .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
             write.flush().await.ok();
             parser.push(&chunk);
             while let Ok(Some(frame)) = parser.next_frame() {
@@ -516,7 +516,7 @@ where
         let n = read
             .read(&mut buf)
             .await
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+            .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
         if n == 0 {
             return Ok(()); // the peer closed this half
         }
@@ -559,11 +559,15 @@ where
 
     let tcp = TcpStream::connect((service.host.as_str(), service.port))
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     let mut upstream: Box<dyn Duplex> = if service.secure {
-        let (stream, _tls) =
-            hexora_http::tls::handshake(tcp, &service.host, &context.upstream_tls, &context.limits)
-                .await?;
+        let (stream, _tls) = nullhawk_http::tls::handshake(
+            tcp,
+            &service.host,
+            &context.upstream_tls,
+            &context.limits,
+        )
+        .await?;
         Box::new(stream)
     } else {
         Box::new(tcp)
@@ -572,7 +576,7 @@ where
     upstream
         .write_all(&handshake)
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     upstream.flush().await.ok();
 
     let (response_head, upstream_prefix) =
@@ -584,7 +588,7 @@ where
     client
         .write_all(&response_head)
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     client.flush().await.ok();
 
     if status != Some(101) {
@@ -687,15 +691,15 @@ async fn read_response_head<S: AsyncRead + Unpin>(
         let read = tokio::time::timeout_at(deadline, stream.read(&mut buf[before..]))
             .await
             .map_err(|_| {
-                HexoraError::Network(hexora_types::error::NetworkError::Timeout {
-                    phase: hexora_types::error::TimeoutPhase::ReadResponseHead,
+                NullhawkError::Network(nullhawk_types::error::NetworkError::Timeout {
+                    phase: nullhawk_types::error::TimeoutPhase::ReadResponseHead,
                     elapsed: limits.read_head_timeout,
                 })
             })?
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+            .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
         buf.truncate(before + read);
         if read == 0 {
-            return Err(HexoraError::Protocol(ProtocolError::Malformed {
+            return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
                 reason: "the origin closed the connection during the WebSocket handshake"
                     .to_string(),
@@ -835,7 +839,7 @@ async fn handle_connect(
     let service = head
         .target
         .service()
-        .ok_or_else(|| HexoraError::invalid_input("connect", "CONNECT without an authority"))?;
+        .ok_or_else(|| NullhawkError::invalid_input("connect", "CONNECT without an authority"))?;
 
     // The 200 goes out first either way: it is what tells the client to begin its
     // handshake, and until it arrives there is nothing to intercept.
@@ -857,10 +861,10 @@ async fn handle_connect(
     let mut tls = acceptor.accept(client).await.map_err(|e| {
         // Usually the CA not being trusted yet, or certificate pinning. Both are
         // situations a tester needs named rather than left to guess at.
-        HexoraError::Network(hexora_types::error::NetworkError::Tls {
+        NullhawkError::Network(nullhawk_types::error::NetworkError::Tls {
             peer: service.host.clone(),
             reason: format!(
-                "the client rejected Hexora's certificate ({e}); the CA may not be \
+                "the client rejected Nullhawk's certificate ({e}); the CA may not be \
                  installed, or the client may pin certificates"
             ),
         })
@@ -914,7 +918,7 @@ where
 {
     let mut connection = ::h2::server::handshake(tls)
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 handshake: {e}"))))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(format!("http/2 handshake: {e}"))))?;
 
     let context = Arc::new(context);
     let service = Arc::new(service);
@@ -961,13 +965,13 @@ async fn serve_h2_stream(
             Ok(())
         }
         Err(e) => {
-            let message = format!("Hexora could not reach the target: {e}");
+            let message = format!("Nullhawk could not reach the target: {e}");
             let response = HttpResponse {
                 status: 502,
                 reason: None,
                 version: HttpVersion::Http2,
                 headers: {
-                    let mut headers = hexora_types::http::Headers::new();
+                    let mut headers = nullhawk_types::http::Headers::new();
                     headers.set("Content-Type", "text/plain; charset=utf-8");
                     headers
                 },
@@ -999,7 +1003,7 @@ async fn build_h2_upstream_request(
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| "/".to_string());
 
-    let mut headers = hexora_types::http::Headers::new();
+    let mut headers = nullhawk_types::http::Headers::new();
     for (name, value) in parts.headers.iter() {
         if HOP_BY_HOP
             .iter()
@@ -1007,7 +1011,7 @@ async fn build_h2_upstream_request(
         {
             continue;
         }
-        headers.append(hexora_types::http::Header {
+        headers.append(nullhawk_types::http::Header {
             name: name.as_str().to_string(),
             value: bytes::Bytes::copy_from_slice(value.as_bytes()),
         });
@@ -1023,7 +1027,7 @@ async fn build_h2_upstream_request(
     let mut truncated = false;
     while let Some(chunk) = body.data().await {
         let chunk = chunk.map_err(|e| {
-            HexoraError::Network(NetworkError::Io(format!("http/2 request body: {e}")))
+            NullhawkError::Network(NetworkError::Io(format!("http/2 request body: {e}")))
         })?;
         let _ = body.flow_control().release_capacity(chunk.len());
         let remaining = limits.max_body_bytes.saturating_sub(buf.len() as u64);
@@ -1077,19 +1081,19 @@ fn send_h2_response(
     }
 
     let http_response = builder.body(()).map_err(|e| {
-        HexoraError::Network(NetworkError::Io(format!("http/2 response head: {e}")))
+        NullhawkError::Network(NetworkError::Io(format!("http/2 response head: {e}")))
     })?;
 
     let has_body = !response.body.is_empty();
     let mut stream = responder
         .send_response(http_response, !has_body)
         .map_err(|e| {
-            HexoraError::Network(NetworkError::Io(format!("http/2 send response: {e}")))
+            NullhawkError::Network(NetworkError::Io(format!("http/2 send response: {e}")))
         })?;
 
     if has_body {
         stream.send_data(response.body.clone(), true).map_err(|e| {
-            HexoraError::Network(NetworkError::Io(format!("http/2 send body: {e}")))
+            NullhawkError::Network(NetworkError::Io(format!("http/2 send body: {e}")))
         })?;
     }
     Ok(())
@@ -1104,7 +1108,7 @@ fn report_request_signals(head: &RequestHead) {
         .quirks
         .iter()
         .filter(|q| q.is_smuggling_signal())
-        .map(hexora_http::Quirk::explanation)
+        .map(nullhawk_http::Quirk::explanation)
         .collect();
     tracing::warn!(
         method = %head.method,
@@ -1137,18 +1141,18 @@ async fn read_request_head<S: AsyncRead + Unpin>(
         let read = tokio::time::timeout_at(deadline, stream.read(&mut buf[before..]))
             .await
             .map_err(|_| {
-                HexoraError::Network(hexora_types::error::NetworkError::Timeout {
-                    phase: hexora_types::error::TimeoutPhase::ReadResponseHead,
+                NullhawkError::Network(nullhawk_types::error::NetworkError::Timeout {
+                    phase: nullhawk_types::error::TimeoutPhase::ReadResponseHead,
                     elapsed: limits.read_head_timeout,
                 })
             })?
             .map_err(|e| {
-                HexoraError::Network(hexora_types::error::NetworkError::Io(e.to_string()))
+                NullhawkError::Network(nullhawk_types::error::NetworkError::Io(e.to_string()))
             })?;
         buf.truncate(before + read);
 
         if read == 0 {
-            return Err(HexoraError::Protocol(ProtocolError::Malformed {
+            return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
                 reason: "client closed the connection before completing a request".to_string(),
             }));
@@ -1156,7 +1160,7 @@ async fn read_request_head<S: AsyncRead + Unpin>(
     }
 }
 
-/// Turns a proxied request into the request Hexora will send upstream.
+/// Turns a proxied request into the request Nullhawk will send upstream.
 async fn build_upstream_request<S: AsyncRead + Send + Unpin>(
     head: &RequestHead,
     client: &mut S,
@@ -1165,7 +1169,7 @@ async fn build_upstream_request<S: AsyncRead + Send + Unpin>(
 ) -> Result<HttpRequest> {
     let service = head.destination(false)?;
 
-    let mut headers = hexora_types::http::Headers::new();
+    let mut headers = nullhawk_types::http::Headers::new();
     for header in head.headers.iter() {
         if HOP_BY_HOP.iter().any(|h| header.is(h)) {
             continue;
@@ -1201,7 +1205,7 @@ async fn read_request_body<S: AsyncRead + Send + Unpin>(
     prefix: BytesMut,
     limits: &Limits,
 ) -> Result<bytes::Bytes> {
-    use hexora_http::BodyFraming;
+    use nullhawk_http::BodyFraming;
 
     if matches!(head.framing, BodyFraming::None) {
         return Ok(bytes::Bytes::new());
@@ -1266,10 +1270,9 @@ async fn write_response<S: AsyncWrite + Unpin>(
     out.extend_from_slice(b"Connection: close\r\n\r\n");
     out.extend_from_slice(&response.body);
 
-    client
-        .write_all(&out)
-        .await
-        .map_err(|e| HexoraError::Network(hexora_types::error::NetworkError::Io(e.to_string())))?;
+    client.write_all(&out).await.map_err(|e| {
+        NullhawkError::Network(nullhawk_types::error::NetworkError::Io(e.to_string()))
+    })?;
     client.flush().await.ok();
     Ok(())
 }
@@ -1286,14 +1289,12 @@ async fn write_simple<S: AsyncWrite + Unpin>(
          Content-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    client
-        .write_all(head.as_bytes())
-        .await
-        .map_err(|e| HexoraError::Network(hexora_types::error::NetworkError::Io(e.to_string())))?;
-    client
-        .write_all(body)
-        .await
-        .map_err(|e| HexoraError::Network(hexora_types::error::NetworkError::Io(e.to_string())))?;
+    client.write_all(head.as_bytes()).await.map_err(|e| {
+        NullhawkError::Network(nullhawk_types::error::NetworkError::Io(e.to_string()))
+    })?;
+    client.write_all(body).await.map_err(|e| {
+        NullhawkError::Network(nullhawk_types::error::NetworkError::Io(e.to_string()))
+    })?;
     client.flush().await.ok();
     Ok(())
 }
@@ -1302,7 +1303,7 @@ async fn write_simple<S: AsyncWrite + Unpin>(
 mod tests {
     use std::sync::Mutex;
 
-    use hexora_types::scope::ScopeRule;
+    use nullhawk_types::scope::ScopeRule;
 
     use super::*;
 
@@ -1352,7 +1353,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_relay_forwards_both_ways_verbatim_and_captures_each_frame() {
-        use hexora_http::ws::{encode, Frame, Opcode};
+        use nullhawk_http::ws::{encode, Frame, Opcode};
 
         let (mut client_test, client_relay) = tokio::io::duplex(8192);
         let (upstream_relay, mut upstream_test) = tokio::io::duplex(8192);
@@ -1465,7 +1466,7 @@ mod tests {
 
     #[tokio::test]
     async fn interception_replaces_a_client_frame_and_drops_a_server_frame() {
-        use hexora_http::ws::{encode, Frame, FrameParser, Opcode};
+        use nullhawk_http::ws::{encode, Frame, FrameParser, Opcode};
 
         let (mut client_test, client_relay) = tokio::io::duplex(8192);
         let (upstream_relay, mut upstream_test) = tokio::io::duplex(8192);
@@ -1640,7 +1641,7 @@ mod tests {
         port
     }
 
-    /// Speaks CONNECT to the proxy, then TLS, trusting only Hexora's CA — which is
+    /// Speaks CONNECT to the proxy, then TLS, trusting only Nullhawk's CA — which is
     /// exactly what a browser with the CA installed does.
     async fn through_tunnel(
         proxy_port: u16,
@@ -1675,7 +1676,7 @@ mod tests {
         let mut tls = connector
             .connect(name, socket)
             .await
-            .map_err(|e| HexoraError::Internal(format!("client handshake failed: {e}")))?;
+            .map_err(|e| NullhawkError::Internal(format!("client handshake failed: {e}")))?;
 
         tls.write_all(request.as_bytes()).await.unwrap();
         tls.flush().await.unwrap();
@@ -1767,7 +1768,7 @@ mod tests {
         // The upstream authority is what the proxy connects to; the CONNECT names a host
         // whose leaf the CA can mint and whose name the upstream cert carries.
         let interception = InterceptionPolicy::intercept_all();
-        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any());
+        let transport = TcpTransport::with_tls(nullhawk_http::TlsConfig::accept_any());
         let (port, recorder, ca) = proxy_with(Scope::new(), interception, Some(transport)).await;
 
         // The CONNECT authority (localhost:<upstream port>) is where the proxy forwards;
@@ -1857,7 +1858,7 @@ mod tests {
 
         // A header value with an embedded CR/LF is a request-splitting primitive.
         let mut splitting = HttpRequest::get(HttpService::new("localhost", 443, true), "/");
-        splitting.headers.append(hexora_types::http::Header {
+        splitting.headers.append(nullhawk_types::http::Header {
             name: "X-Note".to_string(),
             value: bytes::Bytes::from_static(b"a\r\nInjected: 1"),
         });
@@ -1883,7 +1884,7 @@ mod tests {
         let target = h2_upstream(b"hello").await;
 
         // Upstream h2 is enabled, as it is for the real proxy since M5.1d.
-        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any()).http2(true);
+        let transport = TcpTransport::with_tls(nullhawk_http::TlsConfig::accept_any()).http2(true);
         let (port, recorder, ca) = proxy_with(
             Scope::new(),
             InterceptionPolicy::intercept_all(),
@@ -1908,7 +1909,7 @@ mod tests {
     async fn an_h2_request_to_an_h1_origin_is_recorded_as_a_downgrade() {
         let target = https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello").await;
 
-        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any()).http2(true);
+        let transport = TcpTransport::with_tls(nullhawk_http::TlsConfig::accept_any()).http2(true);
         let (port, recorder, ca) = proxy_with(
             Scope::new(),
             InterceptionPolicy::intercept_all(),
@@ -2052,12 +2053,12 @@ mod tests {
     #[tokio::test]
     async fn an_https_tunnel_is_intercepted_and_captured() {
         // The whole point of the proxy: see inside TLS, with the client none the
-        // wiser because it trusts Hexora's CA.
+        // wiser because it trusts Nullhawk's CA.
         let target = https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecret").await;
 
         // The upstream uses a throwaway certificate, so verification is relaxed for
         // it exactly as a tester would for a staging box.
-        let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any());
+        let transport = TcpTransport::with_tls(nullhawk_http::TlsConfig::accept_any());
         let (port, recorder, ca) = proxy_with(
             Scope::new(),
             InterceptionPolicy::intercept_all(),
@@ -2227,7 +2228,7 @@ mod tests {
 
         let mut edited =
             HttpRequest::get(HttpService::new("127.0.0.1", target, false), "/rewritten");
-        edited.headers.set("X-Added-By-Hexora", "yes");
+        edited.headers.set("X-Added-By-Nullhawk", "yes");
         let interceptor = Fixed::request(RequestVerdict::Replace(Box::new(edited)));
 
         let (port, _recorder, _ca) = proxy_full(
@@ -2250,7 +2251,7 @@ mod tests {
             "the edit must reach the server: {upstream_saw}"
         );
         assert!(
-            upstream_saw.contains("X-Added-By-Hexora: yes"),
+            upstream_saw.contains("X-Added-By-Nullhawk: yes"),
             "{upstream_saw}"
         );
     }
@@ -2308,12 +2309,12 @@ mod tests {
         let mut canned = HttpResponse {
             status: 418,
             reason: Some("I am a teapot".to_string()),
-            version: hexora_types::http::HttpVersion::Http11,
-            headers: hexora_types::http::Headers::new(),
+            version: nullhawk_types::http::HttpVersion::Http11,
+            headers: nullhawk_types::http::Headers::new(),
             body: bytes::Bytes::from_static(b"brewed locally"),
             truncated: false,
         };
-        canned.headers.set("X-Source", "hexora");
+        canned.headers.set("X-Source", "nullhawk");
 
         let (port, _recorder, _ca) = proxy_full(
             Scope::new(),
@@ -2347,8 +2348,8 @@ mod tests {
         let replacement = HttpResponse {
             status: 500,
             reason: Some("Replaced".to_string()),
-            version: hexora_types::http::HttpVersion::Http11,
-            headers: hexora_types::http::Headers::new(),
+            version: nullhawk_types::http::HttpVersion::Http11,
+            headers: nullhawk_types::http::Headers::new(),
             body: bytes::Bytes::from_static(b"substituted"),
             truncated: false,
         };

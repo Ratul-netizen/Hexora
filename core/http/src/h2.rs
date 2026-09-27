@@ -15,7 +15,7 @@
 //!
 //! # What HTTP/2 costs the wire-preservation promise
 //!
-//! Hexora's identity is byte preservation, and h2 cannot honour all of it: header names
+//! Nullhawk's identity is byte preservation, and h2 cannot honour all of it: header names
 //! are lowercased by the protocol, there is no reason phrase, and the framing is the
 //! `h2` crate's, not the tester's. Those are protocol facts, not choices this code makes —
 //! and a server that treats header casing as significant is itself a finding, reachable
@@ -27,11 +27,11 @@
 use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
-use hexora_engine::transport::Exchange;
-use hexora_types::error::{HexoraError, NetworkError, Result, TimeoutPhase};
-use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpVersion};
-use hexora_types::limits::Limits;
-use hexora_types::tls::TlsInfo;
+use nullhawk_engine::transport::Exchange;
+use nullhawk_types::error::{NetworkError, NullhawkError, Result, TimeoutPhase};
+use nullhawk_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpVersion};
+use nullhawk_types::limits::Limits;
+use nullhawk_types::tls::TlsInfo;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Header fields that must not cross into an HTTP/2 request.
@@ -66,7 +66,7 @@ fn is_dropped_request_header(lower_name: &str) -> bool {
 /// The `h2` builder is where the analogue of the HTTP/1.x decompression-bomb guard lives:
 /// `max_header_list_size` caps the HPACK-decoded header block a server can make us hold,
 /// so a header bomb is refused as it is decoded rather than after. Server push is
-/// disabled outright — Hexora never wants a stream it did not ask for.
+/// disabled outright — Nullhawk never wants a stream it did not ask for.
 pub async fn handshake<S>(stream: S, limits: &Limits) -> Result<h2::client::SendRequest<Bytes>>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -133,7 +133,7 @@ pub async fn send_on(
     let response = tokio::time::timeout(limits.read_head_timeout, response_future)
         .await
         .map_err(|_| {
-            HexoraError::Network(NetworkError::Timeout {
+            NullhawkError::Network(NetworkError::Timeout {
                 phase: TimeoutPhase::ReadResponseHead,
                 elapsed: limits.read_head_timeout,
             })
@@ -228,15 +228,16 @@ pub async fn send_on(
     })
 }
 
-/// Builds the `http` crate request the `h2` API speaks from Hexora's message model.
+/// Builds the `http` crate request the `h2` API speaks from Nullhawk's message model.
 fn build_request(request: &HttpRequest) -> Result<http::Request<()>> {
-    let method = http::Method::from_bytes(request.method.as_bytes())
-        .map_err(|e| HexoraError::invalid_input("method", format!("{:?}: {e}", request.method)))?;
+    let method = http::Method::from_bytes(request.method.as_bytes()).map_err(|e| {
+        NullhawkError::invalid_input("method", format!("{:?}: {e}", request.method))
+    })?;
 
     let uri: http::Uri = request
         .url()
         .parse()
-        .map_err(|e| HexoraError::invalid_input("url", format!("{}: {e}", request.url())))?;
+        .map_err(|e| NullhawkError::invalid_input("url", format!("{}: {e}", request.url())))?;
 
     let mut http_request = http::Request::new(());
     *http_request.method_mut() = method;
@@ -272,14 +273,14 @@ fn build_request(request: &HttpRequest) -> Result<http::Request<()>> {
 }
 
 /// Maps an `h2` error to a network error, naming the peer so the message is actionable.
-fn conn_error(request: &HttpRequest, error: h2::Error) -> HexoraError {
-    HexoraError::Network(NetworkError::Io(format!(
+fn conn_error(request: &HttpRequest, error: h2::Error) -> NullhawkError {
+    NullhawkError::Network(NetworkError::Io(format!(
         "http/2 to {}: {error}",
         request.service.authority()
     )))
 }
 
 /// Maps a handshake-time `h2` error, before there is a request to attribute it to.
-fn handshake_error(error: h2::Error) -> HexoraError {
-    HexoraError::Network(NetworkError::Io(format!("http/2 handshake: {error}")))
+fn handshake_error(error: h2::Error) -> NullhawkError {
+    NullhawkError::Network(NetworkError::Io(format!("http/2 handshake: {error}")))
 }

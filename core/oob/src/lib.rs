@@ -1,6 +1,6 @@
-//! # hexora-oob
+//! # nullhawk-oob
 //!
-//! Out-of-band interaction testing — Hexora's answer to Burp Collaborator. Some
+//! Out-of-band interaction testing — Nullhawk's answer to Burp Collaborator. Some
 //! vulnerabilities produce **no visible response**: a blind SSRF, a blind XXE that fetches a
 //! URL, a blind injection that only triggers a DNS lookup. You confirm them by making the
 //! target reach out to a server you control and *watching it arrive*.
@@ -31,7 +31,7 @@ use std::net::Ipv4Addr;
 
 use serde::{Deserialize, Serialize};
 
-use hexora_types::error::Result;
+use nullhawk_types::error::Result;
 
 /// Runs the collaborator's HTTP and DNS listeners together, sharing one interaction store so a
 /// poll returns callbacks of either kind. `answer_ip` is the address A queries are answered
@@ -65,7 +65,7 @@ pub struct Interaction {
 
 /// A fresh, subdomain-safe correlation token.
 ///
-/// Lowercase hex, unguessable: only a payload Hexora minted carries it, so an interaction that
+/// Lowercase hex, unguessable: only a payload Nullhawk minted carries it, so an interaction that
 /// bears it is one this run provoked, not background noise reaching a public host.
 pub fn fresh_token() -> String {
     // 24 hex chars: unguessable, and safe as a DNS label and a path segment.
@@ -82,7 +82,7 @@ pub(crate) fn token_of(path: &str, host: &str) -> Option<String> {
         .split(['/', '?'])
         .next()
         .unwrap_or("");
-    if !segment.is_empty() && segment != "_hexora" {
+    if !segment.is_empty() && segment != "_nullhawk" {
         return Some(segment.to_string());
     }
     let host = host.split(':').next().unwrap_or(host);
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn ordinary_requests_carry_no_token() {
         assert_eq!(token_of("/", "oob.example"), None);
-        assert_eq!(token_of("/_hexora/poll", "oob.example"), None);
+        assert_eq!(token_of("/_nullhawk/poll", "oob.example"), None);
         assert_eq!(token_of("/", "www.oob.example"), None);
     }
 }

@@ -1,6 +1,6 @@
 [package]
-name = "hexora-authz"
-description = "Hexora's authorization testing: replay one request as several identities and compare what came back"
+name = "nullhawk-authz"
+description = "Nullhawk's authorization testing: replay one request as several identities and compare what came back"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,11 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-hexora-types.workspace = true
-hexora-engine.workspace = true
-hexora-storage.workspace = true
-hexora-repeater.workspace = true
-hexora-verify.workspace = true
+nullhawk-types.workspace = true
+nullhawk-engine.workspace = true
+nullhawk-storage.workspace = true
+nullhawk-repeater.workspace = true
+nullhawk-verify.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 chrono.workspace = true
@@ -21,7 +21,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-hexora-types = { workspace = true, features = ["test-support"] }
+nullhawk-types = { workspace = true, features = ["test-support"] }
 proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }

@@ -1,4 +1,4 @@
-//! `hexora domxss` — drive a real browser to find DOM-based XSS (Burp's DOM Invader).
+//! `nullhawk domxss` — drive a real browser to find DOM-based XSS (Burp's DOM Invader).
 //!
 //! DOM XSS never reaches the server, so nothing in captured traffic can reveal it. This drives
 //! an installed Chrome/Edge over CDP: it wraps the dangerous DOM sinks before the page loads,
@@ -7,9 +7,9 @@
 
 use std::time::Duration;
 
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora domxss`.
+/// Options for `nullhawk domxss`.
 pub struct Args<'a> {
     /// The page URL to test.
     pub url: &'a str,
@@ -37,7 +37,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
         }
     }
     if args.json && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "a DOM-XSS test drives a browser, and --json cannot ask; pass --yes to confirm",
         ));
@@ -46,8 +46,8 @@ pub fn run(args: Args<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
-    let report = runtime.block_on(hexora_browser::domxss::test(
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
+    let report = runtime.block_on(nullhawk_browser::domxss::test(
         args.url,
         !args.headed,
         Duration::from_secs(args.timeout),

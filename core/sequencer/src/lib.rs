@@ -1,4 +1,4 @@
-//! # hexora-sequencer
+//! # nullhawk-sequencer
 //!
 //! Are these tokens actually unpredictable? Burp's Sequencer answers it for session ids, CSRF
 //! tokens, password-reset tokens — anything whose security rests on being hard to guess. This

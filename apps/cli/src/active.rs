@@ -1,11 +1,11 @@
-//! `hexora scan active` — the experiments a passive pass could not run.
+//! `nullhawk scan active` — the experiments a passive pass could not run.
 //!
-//! The first command in Hexora that sends traffic nobody typed, so it is the first one
+//! The first command in Nullhawk that sends traffic nobody typed, so it is the first one
 //! that asks before doing it.
 //!
 //! ```text
-//! hexora scan passive  reads a project                    → hypotheses, filed as nothing
-//! hexora scan active   settles them, one request at a time → findings, or refutations
+//! nullhawk scan passive  reads a project                    → hypotheses, filed as nothing
+//! nullhawk scan active   settles them, one request at a time → findings, or refutations
 //! ```
 //!
 //! # The order of operations, and why it is this order
@@ -19,7 +19,7 @@
 //!
 //! `--dry-run` stops after step 3. It is not a flag the sending path honours — the
 //! sending path is simply not called, which is the same discipline as
-//! [`hexora_scan::passive::scan`] having no transport in its signature.
+//! [`nullhawk_scan::passive::scan`] having no transport in its signature.
 //!
 //! # A refutation is a result
 //!
@@ -31,28 +31,33 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use hexora_active::{Budget, Cancel, Outcome, Plan};
-use hexora_engine::guard::ScopeGuard;
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_repeater::Repeater;
-use hexora_storage::Recorded;
-use hexora_types::verify::Verification;
-use hexora_types::{HexoraError, Result};
-use hexora_verify::RepeaterLab;
+use nullhawk_active::{Budget, Cancel, Outcome, Plan};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_repeater::Repeater;
+use nullhawk_storage::Recorded;
+use nullhawk_types::verify::Verification;
+use nullhawk_types::{NullhawkError, Result};
+use nullhawk_verify::RepeaterLab;
 
 /// Adopts the freshest credential the proxy has seen, for every identity that has one.
 ///
 /// Quiet about what it did not change: an identity whose session is already the newest
 /// one recorded is not news, and a run that printed a paragraph per identity before
 /// every experiment would bury the plan.
-fn refresh_sessions(project: &hexora_storage::Project) -> Result<()> {
+fn refresh_sessions(project: &nullhawk_storage::Project) -> Result<()> {
     let identities = project.identities();
     let traffic = project.traffic();
     let scope = project.settings().scope()?;
 
     for identity in identities.list()? {
-        let found =
-            hexora_authz::session::find_renewal(&traffic, &scope, &identity, REFRESH_SAMPLE, None)?;
+        let found = nullhawk_authz::session::find_renewal(
+            &traffic,
+            &scope,
+            &identity,
+            REFRESH_SAMPLE,
+            None,
+        )?;
         let Some(renewal) = found else {
             continue;
         };
@@ -72,7 +77,7 @@ fn refresh_sessions(project: &hexora_storage::Project) -> Result<()> {
 /// How many recent exchanges `--refresh` reads looking for a newer session.
 const REFRESH_SAMPLE: usize = 500;
 
-/// Options for `hexora scan active`.
+/// Options for `nullhawk scan active`.
 pub struct Args<'a> {
     pub project: &'a Path,
     /// Only hypotheses about this host.
@@ -106,7 +111,7 @@ pub fn active(args: Args<'_>) -> Result<()> {
     let budget = budget_from(&args)?;
     // One function, shared with the window: two surfaces of one tool that each worked
     // out for themselves what was testable would eventually disagree.
-    let standing = hexora_active::standing(&project, &selection(&args))?;
+    let standing = nullhawk_active::standing(&project, &selection(&args))?;
 
     if standing.hypotheses.is_empty() {
         // `Standing` already asked whether "nothing to do" is true. A project can hold
@@ -144,7 +149,7 @@ pub fn active(args: Args<'_>) -> Result<()> {
         refresh_sessions(&project)?;
     }
 
-    let checks = hexora_active::active_checks();
+    let checks = nullhawk_active::active_checks();
     let plan = Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)?;
 
     if args.json {
@@ -174,7 +179,7 @@ pub fn active(args: Args<'_>) -> Result<()> {
         }
     }
     if !args.yes && args.json {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "an active run sends traffic, and --json cannot ask. Pass --yes to say \
              that is intended, or use --dry-run to see the plan",
@@ -184,7 +189,7 @@ pub fn active(args: Args<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let cancel = Cancel::new();
     let outcome = runtime.block_on(stoppable(&plan, &lab, &checks, &cancel, &project))?;
@@ -220,12 +225,12 @@ pub fn active(args: Args<'_>) -> Result<()> {
 /// swallowed the second one would be worse than one that never handled the first.
 async fn stoppable(
     plan: &Plan,
-    lab: &dyn hexora_verify::Lab,
-    checks: &[Box<dyn hexora_active::ActiveCheck>],
+    lab: &dyn nullhawk_verify::Lab,
+    checks: &[Box<dyn nullhawk_active::ActiveCheck>],
     cancel: &Cancel,
-    project: &hexora_storage::Project,
-) -> Result<hexora_active::Outcome> {
-    let run = hexora_active::run_into(plan, lab, checks, cancel, project);
+    project: &nullhawk_storage::Project,
+) -> Result<nullhawk_active::Outcome> {
+    let run = nullhawk_active::run_into(plan, lab, checks, cancel, project);
     tokio::pin!(run);
 
     // One `select!` and no loop: whichever arm wins, the run is then awaited to
@@ -267,13 +272,13 @@ fn budget_from(args: &Args<'_>) -> Result<Budget> {
     }
     budget
         .check()
-        .map_err(|why| HexoraError::invalid_input("budget", why))?;
+        .map_err(|why| NullhawkError::invalid_input("budget", why))?;
     Ok(budget)
 }
 
 /// What the run was asked to look at.
-fn selection(args: &Args<'_>) -> hexora_scan::Selection {
-    hexora_scan::Selection {
+fn selection(args: &Args<'_>) -> nullhawk_scan::Selection {
+    nullhawk_scan::Selection {
         host: args.host.map(|host| host.to_string()),
         detector: args.detector.map(|detector| detector.to_string()),
         ..Default::default()
@@ -310,12 +315,12 @@ fn nothing_to_do(out_of_scope: usize, json: bool) -> Result<()> {
         println!("{out_of_scope} suspicion(s) stand on traffic that is no longer in this");
         println!("project's scope, so nothing was sent to it. That is the scope working,");
         println!("not the application being clean — widen the scope if those hosts are");
-        println!("in bounds, with `hexora scope add`.");
+        println!("in bounds, with `nullhawk scope add`.");
     } else {
         println!("No standing hypothesis to settle.");
         println!();
         println!("An active run tests suspicions a passive pass raised; it does not");
-        println!("invent work of its own. Run `hexora scan passive <project>` first,");
+        println!("invent work of its own. Run `nullhawk scan passive <project>` first,");
         println!("and capture more traffic if that produces nothing.");
     }
     Ok(())
@@ -339,8 +344,8 @@ fn print_plan(plan: &Plan) {
 /// explains what was not tested.
 const GROUP_ABOVE: usize = 3;
 
-fn print_skipped(skipped: &[hexora_active::Skipped]) {
-    let mut by_reason: std::collections::BTreeMap<&str, Vec<&hexora_active::Skipped>> =
+fn print_skipped(skipped: &[nullhawk_active::Skipped]) {
+    let mut by_reason: std::collections::BTreeMap<&str, Vec<&nullhawk_active::Skipped>> =
         Default::default();
     for item in skipped {
         by_reason.entry(item.why.as_str()).or_default().push(item);
@@ -444,10 +449,12 @@ fn print_human(outcome: &Outcome, saved: &[Recorded], no_save: bool) {
         // The overwhelmingly common refutation, and the least interesting: the input
         // was tested and nothing came back. Counted rather than listed, because a
         // hundred identical lines bury the handful that say something.
-        let (silent, echoed): (Vec<&&hexora_verify::Judged>, Vec<&&hexora_verify::Judged>) =
-            refuted
-                .iter()
-                .partition(|judged| judged.verification.note().contains("did not come back"));
+        let (silent, echoed): (
+            Vec<&&nullhawk_verify::Judged>,
+            Vec<&&nullhawk_verify::Judged>,
+        ) = refuted
+            .iter()
+            .partition(|judged| judged.verification.note().contains("did not come back"));
 
         if !silent.is_empty() {
             println!(

@@ -230,7 +230,7 @@ function ComparisonPanel({ comparison }: { comparison: Comparison }) {
         <p className="notice">
           Different builds took these ({comparison.from.tool_version} →{" "}
           {comparison.to.tool_version}). A claim that stopped appearing could be the
-          application or could be Hexora, and nothing here can tell them apart.
+          application or could be Nullhawk, and nothing here can tell them apart.
         </p>
       )}
 
@@ -392,7 +392,7 @@ function explain(row: ClaimChange): string {
     case "not_reproduced":
       return "not reproduced — the same check ran and did not raise it again. That is not proof it is fixed.";
     case "source_silent":
-      return 'inconclusive — nothing from that check appears in the later snapshot, and Hexora cannot tell "ran and found nothing" from "never ran".';
+      return 'inconclusive — nothing from that check appears in the later snapshot, and Nullhawk cannot tell "ran and found nothing" from "never ran".';
     case "tool_changed":
       return `inconclusive — the snapshots were taken by different builds (${row.change.because.from} → ${row.change.because.to}).`;
   }

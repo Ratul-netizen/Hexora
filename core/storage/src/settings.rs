@@ -12,12 +12,12 @@
 //! portable record of an engagement: the traffic, the identities, the findings, and
 //! the authorization it was all collected under.
 
-use hexora_ext::InstalledExtension;
-use hexora_types::custom::CustomCheck;
-use hexora_types::http::Header;
-use hexora_types::matchreplace::MatchReplaceRule;
-use hexora_types::programme::Programme;
-use hexora_types::scope::Scope;
+use nullhawk_ext::InstalledExtension;
+use nullhawk_types::custom::CustomCheck;
+use nullhawk_types::http::Header;
+use nullhawk_types::matchreplace::MatchReplaceRule;
+use nullhawk_types::programme::Programme;
+use nullhawk_types::scope::Scope;
 use rusqlite::params;
 
 use crate::error::{Result, StorageError};
@@ -25,7 +25,7 @@ use crate::MetadataDb;
 
 /// The fixed id of the single project row.
 ///
-/// A project database holds exactly one project, as `hexora project init` writes it.
+/// A project database holds exactly one project, as `nullhawk project init` writes it.
 const PROJECT_ID: &str = "prj_default";
 
 /// Reads and writes the project's settings.
@@ -62,7 +62,7 @@ impl Settings {
         }
     }
 
-    /// Headers to put on every request Hexora sends.
+    /// Headers to put on every request Nullhawk sends.
     ///
     /// A bug bounty programme routinely requires researchers to identify their traffic
     /// — `X-HackerOne-Research: <username>` is the common shape, and Wolt's programme
@@ -274,7 +274,7 @@ impl Settings {
     /// Replaces the engagement's terms.
     ///
     /// Unlike scope, this is not a safety control: an exclusion can only ever reduce
-    /// what is reported or sent, so a wrong one cannot make Hexora touch something it
+    /// what is reported or sent, so a wrong one cannot make Nullhawk touch something it
     /// otherwise would not. It is still printed back to the user, because a silence
     /// nobody remembers asking for is worse than a noisy report.
     pub fn set_programme(&self, programme: &Programme) -> Result<()> {
@@ -323,7 +323,7 @@ impl Settings {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::scope::{PathMatch, ScopeRule};
+    use nullhawk_types::scope::{PathMatch, ScopeRule};
 
     use super::*;
 
@@ -377,8 +377,8 @@ mod tests {
             .unwrap();
 
         let scope = settings.scope().unwrap();
-        let service = hexora_types::http::HttpService::new("example.com", 443, true);
-        let other = hexora_types::http::HttpService::new("elsewhere.com", 443, true);
+        let service = nullhawk_types::http::HttpService::new("example.com", 443, true);
+        let other = nullhawk_types::http::HttpService::new("elsewhere.com", 443, true);
         assert!(scope.contains(&service, "/anything"));
         assert!(!scope.contains(&other, "/anything"));
     }
@@ -421,7 +421,7 @@ mod tests {
             exclusions: Vec::new(),
             test_entities: Vec::new(),
         };
-        programme.exclude(hexora_types::programme::Exclusion::new(
+        programme.exclude(nullhawk_types::programme::Exclusion::new(
             "headers.security",
             "out of scope: missing security headers",
         ));
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn setting_them_on_a_project_that_does_not_exist_is_an_error() {
-        // It used to succeed and store nothing, and `hexora header add` printed
+        // It used to succeed and store nothing, and `nullhawk header add` printed
         // "Attached" over the top of it. A header a programme requires, reported as set
         // and never sent, is how a report gets rejected.
         let settings = Settings::new(MetadataDb::in_memory().unwrap());

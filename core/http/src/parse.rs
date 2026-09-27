@@ -7,7 +7,7 @@
 //! does exactly what a security tool must not: it normalizes away ambiguity.
 //!
 //! Request smuggling, desync attacks and parser-differential bugs all live in the gap
-//! between how two implementations read the same bytes. To find that gap, Hexora has
+//! between how two implementations read the same bytes. To find that gap, Nullhawk has
 //! to see the bytes as they arrived — including the parts a well-behaved parser would
 //! quietly fix or reject.
 //!
@@ -23,9 +23,9 @@
 //! guessing would silently corrupt every downstream measurement.
 
 use bytes::Bytes;
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::http::{Header, Headers, HttpVersion};
-use hexora_types::limits::Limits;
+use nullhawk_types::error::{NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::{Header, Headers, HttpVersion};
+use nullhawk_types::limits::Limits;
 
 /// A deviation from strict RFC 9112 that a normal client would hide.
 ///
@@ -242,8 +242,8 @@ pub fn parse_response_head(
         }
         parse_header_line(line, &mut headers, &mut quirks, &mut previous_had_value)?;
         if headers.len() > limits.max_header_count {
-            return Err(HexoraError::LimitExceeded(
-                hexora_types::error::LimitError::HeadersTooLarge {
+            return Err(NullhawkError::LimitExceeded(
+                nullhawk_types::error::LimitError::HeadersTooLarge {
                     limit: limits.max_header_count,
                 },
             ));
@@ -314,7 +314,7 @@ fn parse_status_line(
         "HTTP/1.0" => HttpVersion::Http10,
         // Anything else on an HTTP/1 connection is not something we can frame.
         other => {
-            return Err(HexoraError::Protocol(ProtocolError::InvalidStatusLine(
+            return Err(NullhawkError::Protocol(ProtocolError::InvalidStatusLine(
                 format!("unsupported version {other:?}"),
             )))
         }
@@ -328,7 +328,7 @@ fn parse_status_line(
     // Deliberately not range-checked beyond three digits: servers do return
     // nonstandard codes, and hiding that from a tester would be wrong.
     if !(100..=599).contains(&status) {
-        return Err(HexoraError::Protocol(ProtocolError::InvalidStatusLine(
+        return Err(NullhawkError::Protocol(ProtocolError::InvalidStatusLine(
             format!("status {status} out of range"),
         )));
     }
@@ -445,7 +445,7 @@ fn determine_framing(
 
         if values.len() > 1 {
             // No defensible way to continue: any choice silently corrupts the body.
-            return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(
+            return Err(NullhawkError::Protocol(ProtocolError::AmbiguousFraming(
                 format!("conflicting Content-Length values: {}", values.join(", ")),
             )));
         }
@@ -454,7 +454,7 @@ fn determine_framing(
         }
 
         let length: u64 = values[0].parse().map_err(|_| {
-            HexoraError::Protocol(ProtocolError::Malformed {
+            NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
                 reason: format!("invalid Content-Length {:?}", values[0]),
             })
@@ -487,15 +487,15 @@ fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
     bytes
 }
 
-fn malformed(reason: &str) -> HexoraError {
-    HexoraError::Protocol(ProtocolError::Malformed {
+fn malformed(reason: &str) -> NullhawkError {
+    NullhawkError::Protocol(ProtocolError::Malformed {
         protocol: "HTTP/1.1",
         reason: reason.to_string(),
     })
 }
 
-fn invalid_status_line(text: &str) -> HexoraError {
-    HexoraError::Protocol(ProtocolError::InvalidStatusLine(
+fn invalid_status_line(text: &str) -> NullhawkError {
+    NullhawkError::Protocol(ProtocolError::InvalidStatusLine(
         text.chars().take(80).collect(),
     ))
 }

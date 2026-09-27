@@ -1,4 +1,4 @@
-//! `hexora llm` — test an LLM-backed endpoint for prompt injection.
+//! `nullhawk llm` — test an LLM-backed endpoint for prompt injection.
 //!
 //! Points the injection probes at one endpoint the tester named. It sends traffic, so it is
 //! gated like the active scanner and asks before sending. The endpoint's host is the scope:
@@ -6,17 +6,17 @@
 
 use std::sync::Arc;
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_llm::{test, test_leakage, test_output_handling, Target, PROMPT_PLACEHOLDER};
-use hexora_types::http::{Header, HttpService};
-use hexora_types::scope::{Scope, ScopeRule};
-use hexora_types::{HexoraError, Result};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_llm::{test, test_leakage, test_output_handling, Target, PROMPT_PLACEHOLDER};
+use nullhawk_types::http::{Header, HttpService};
+use nullhawk_types::scope::{Scope, ScopeRule};
+use nullhawk_types::{NullhawkError, Result};
 
 /// The default request body: an OpenAI-style chat call with the prompt in the user turn.
 const DEFAULT_TEMPLATE: &str = r#"{"messages":[{"role":"user","content":"{{PROMPT}}"}]}"#;
 
-/// Options for `hexora llm`.
+/// Options for `nullhawk llm`.
 pub struct Args<'a> {
     /// The endpoint URL.
     pub url: &'a str,
@@ -41,19 +41,19 @@ pub fn run(args: Args<'_>) -> Result<()> {
 
     let template = match (args.template, args.template_file) {
         (Some(_), Some(_)) => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "template",
                 "pass --template or --template-file, not both",
             ))
         }
         (Some(t), None) => t.to_string(),
         (None, Some(path)) => std::fs::read_to_string(path).map_err(|e| {
-            HexoraError::invalid_input("template-file", format!("{}: {e}", path.display()))
+            NullhawkError::invalid_input("template-file", format!("{}: {e}", path.display()))
         })?,
         (None, None) => DEFAULT_TEMPLATE.to_string(),
     };
     if !template.contains(PROMPT_PLACEHOLDER) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "template",
             format!("the body template must contain the {PROMPT_PLACEHOLDER} placeholder"),
         ));
@@ -72,11 +72,11 @@ pub fn run(args: Args<'_>) -> Result<()> {
     if !args.json {
         println!("Prompt-injection test");
         println!("  endpoint: {} {}", target.method, args.url);
-        let total = hexora_llm::probes().len() + hexora_llm::extraction_probes().len() + 1 + 2;
+        let total = nullhawk_llm::probes().len() + nullhawk_llm::extraction_probes().len() + 1 + 2;
         println!(
             "  probes:   {} injection, {} extraction (+1 control), 2 output-handling",
-            hexora_llm::probes().len(),
-            hexora_llm::extraction_probes().len()
+            nullhawk_llm::probes().len(),
+            nullhawk_llm::extraction_probes().len()
         );
         println!();
         println!("This sends {total} requests to the endpoint. Only test systems you are authorized to test.");
@@ -86,7 +86,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
         }
     }
     if args.json && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "an LLM test sends traffic, and --json cannot ask; pass --yes to confirm",
         ));
@@ -105,7 +105,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
     let report = runtime.block_on(test(&guard, &target));
     let leak = runtime.block_on(test_leakage(&guard, &target));
     let output = runtime.block_on(test_output_handling(&guard, &target));
@@ -122,7 +122,7 @@ fn parse_headers(raw: &[String]) -> Result<Vec<Header>> {
     let mut out = Vec::new();
     for item in raw {
         let (name, value) = item.split_once(':').ok_or_else(|| {
-            HexoraError::invalid_input("header", format!("{item:?} is not `Name: value`"))
+            NullhawkError::invalid_input("header", format!("{item:?} is not `Name: value`"))
         })?;
         out.push(Header::new(name.trim(), value.trim()));
     }
@@ -130,9 +130,9 @@ fn parse_headers(raw: &[String]) -> Result<Vec<Header>> {
 }
 
 fn print_human(
-    report: &hexora_llm::Report,
-    leak: &hexora_llm::LeakReport,
-    output: &hexora_llm::OutputReport,
+    report: &nullhawk_llm::Report,
+    leak: &nullhawk_llm::LeakReport,
+    output: &nullhawk_llm::OutputReport,
 ) {
     println!();
     println!("{} injection probe(s) sent.", report.tested);
@@ -219,9 +219,9 @@ fn print_human(
 
 fn print_json(
     url: &str,
-    report: &hexora_llm::Report,
-    leak: &hexora_llm::LeakReport,
-    output: &hexora_llm::OutputReport,
+    report: &nullhawk_llm::Report,
+    leak: &nullhawk_llm::LeakReport,
+    output: &nullhawk_llm::OutputReport,
 ) {
     println!(
         "{}",

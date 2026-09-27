@@ -1,9 +1,9 @@
-//! `hexora object` — the identifiers a tester says belong to somebody.
+//! `nullhawk object` — the identifiers a tester says belong to somebody.
 //!
 //! Declaring an object is data entry and nothing else. It sends no traffic, and it is
 //! not evidence of ownership: it is the tester's assertion, which every finding built
 //! on it says out loud. Running the test is a separate, explicit act
-//! (`hexora authz --construct`).
+//! (`nullhawk authz --construct`).
 //!
 //! The location is discovered rather than typed. A tester who has just found
 //! `invoice-1001` in a captured request should not also have to count path segments,
@@ -13,11 +13,11 @@
 
 use std::path::Path;
 
-use hexora_authz::construct::locate;
-use hexora_types::object::{ObjectDeclaration, ObjectLocation};
-use hexora_types::{HexoraError, Result};
+use nullhawk_authz::construct::locate;
+use nullhawk_types::object::{ObjectDeclaration, ObjectLocation};
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora object add`.
+/// Options for `nullhawk object add`.
 pub struct AddArgs<'a> {
     pub project: &'a Path,
     /// The identifier itself, exactly as it appears in a request.
@@ -84,7 +84,7 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
     println!();
     println!("Nothing has been sent. Construct cross-identity attempts with:");
     println!(
-        "  hexora authz {} <request-id> --as-identity <who> --construct",
+        "  nullhawk authz {} <request-id> --as-identity <who> --construct",
         args.project.display()
     );
     Ok(())
@@ -92,18 +92,18 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
 
 /// Finds a declared value in a captured request, and records where it was.
 fn from_request(
-    project: &hexora_storage::Project,
+    project: &nullhawk_storage::Project,
     id: &str,
     value: &str,
     name: &str,
-    owner: &hexora_types::identity::Identity,
+    owner: &nullhawk_types::identity::Identity,
 ) -> Result<Vec<ObjectDeclaration>> {
-    let request_id: hexora_types::ids::RequestId = id.parse()?;
+    let request_id: nullhawk_types::ids::RequestId = id.parse()?;
     let stored = project.traffic().request(request_id)?;
 
     // Rebuilt rather than re-parsed: `locate` needs a message model, and the fields
     // the store keeps are enough to look in the target, the headers and the body.
-    let mut request = hexora_types::http::HttpRequest::get(stored.service.clone(), &stored.path);
+    let mut request = nullhawk_types::http::HttpRequest::get(stored.service.clone(), &stored.path);
     request.method = stored.method.clone();
     request.body = bytes::Bytes::from(stored.body.clone());
     for line in String::from_utf8_lossy(&stored.headers_raw)
@@ -111,7 +111,7 @@ fn from_request(
         .flat_map(|l| l.split('\n'))
     {
         if let Some((header, header_value)) = line.split_once(':') {
-            request.headers.append(hexora_types::http::Header::new(
+            request.headers.append(nullhawk_types::http::Header::new(
                 header.trim(),
                 header_value.trim(),
             ));
@@ -120,7 +120,7 @@ fn from_request(
 
     let locations = locate(&request, value);
     if locations.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--in-request",
             format!(
                 "{value:?} does not appear in {id} — not in the path, the query, a \
@@ -145,7 +145,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
     let identities = project_handle.identities();
     let declarations = project_handle.objects().list()?;
 
-    let label_of = |id: hexora_types::ids::IdentityId| {
+    let label_of = |id: nullhawk_types::ids::IdentityId| {
         identities
             .get(id)
             .map(|i| i.label)
@@ -174,9 +174,9 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
         println!("No objects declared in {}.", project.display());
         println!();
         println!("An authorization matrix replays a request as written. Declaring who");
-        println!("owns an identifier is what lets Hexora build the request nobody sent:");
+        println!("owns an identifier is what lets Nullhawk build the request nobody sent:");
         println!(
-            "  hexora object add {} <value> --owner <who> --in-request <request-id>",
+            "  nullhawk object add {} <value> --owner <who> --in-request <request-id>",
             project.display()
         );
         return Ok(());
@@ -204,7 +204,10 @@ pub fn remove(project: &Path, id: &str, json: bool) -> Result<()> {
     let store = crate::open_project(project)?.objects();
     let object_id = id.parse()?;
     if !store.delete(object_id)? {
-        return Err(HexoraError::not_found("object declaration", id.to_string()));
+        return Err(NullhawkError::not_found(
+            "object declaration",
+            id.to_string(),
+        ));
     }
 
     if json {

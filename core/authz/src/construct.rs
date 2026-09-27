@@ -14,7 +14,7 @@
 //! # Nothing is guessed
 //!
 //! Both facts that make this possible — *which value is an object* and *who it
-//! belongs to* — are declared by a human ([`hexora_types::object`]). A tool that
+//! belongs to* — are declared by a human ([`nullhawk_types::object`]). A tool that
 //! guessed would send traffic at an endpoint on the strength of a value that looked
 //! like an id, and then reason about the answer as though the guess had been true.
 //!
@@ -41,15 +41,15 @@
 
 use std::collections::HashMap;
 
-use hexora_engine::transport::HttpTransport;
-use hexora_repeater::{Draft, SendAs};
-use hexora_storage::ConstructedAttempt;
-use hexora_types::http::HttpRequest;
-use hexora_types::identity::Identity;
-use hexora_types::ids::{IdentityId, ObjectId, RequestId};
-use hexora_types::object::{ObjectDeclaration, ObjectLocation};
-use hexora_types::programme::Programme;
-use hexora_types::Result;
+use nullhawk_engine::transport::HttpTransport;
+use nullhawk_repeater::{Draft, SendAs};
+use nullhawk_storage::ConstructedAttempt;
+use nullhawk_types::http::HttpRequest;
+use nullhawk_types::identity::Identity;
+use nullhawk_types::ids::{IdentityId, ObjectId, RequestId};
+use nullhawk_types::object::{ObjectDeclaration, ObjectLocation};
+use nullhawk_types::programme::Programme;
+use nullhawk_types::Result;
 
 use crate::compare::{contains_any, Fingerprint, SAME_RESOURCE};
 use crate::{AuthzTester, Outcome, Verdict};
@@ -183,7 +183,7 @@ pub struct ConstructionPlan {
     ///
     /// Consulted for one thing here, and it is the thing that matters: whether an
     /// identifier may be targeted at all. A constructed attempt is the only place
-    /// Hexora *chooses* an object and puts it in somebody's request — everything else
+    /// Nullhawk *chooses* an object and puts it in somebody's request — everything else
     /// replays what a person already sent — so it is the only place that can reach
     /// data nobody authorised by accident.
     pub programme: Programme,
@@ -229,8 +229,8 @@ impl<T: HttpTransport> AuthzTester<T> {
     /// Builds cross-identity requests from a captured one and sends them.
     ///
     /// Every attempt goes out through the same repeater — and therefore the same
-    /// [`ScopeGuard`](hexora_engine::guard::ScopeGuard) — as every other automated
-    /// request in Hexora. There is no second send path here, which is the only way to
+    /// [`ScopeGuard`](nullhawk_engine::guard::ScopeGuard) — as every other automated
+    /// request in Nullhawk. There is no second send path here, which is the only way to
     /// promise that scope holds for constructed traffic too.
     pub async fn construct(&self, plan: &ConstructionPlan) -> Result<Construction> {
         let draft = self.repeater.draft_from(plan.base)?;
@@ -246,7 +246,7 @@ impl<T: HttpTransport> AuthzTester<T> {
                 .decide_as(&draft, SendAs::authz(first))
                 .permits_sending()
             {
-                return Err(hexora_types::HexoraError::OutOfScope(url));
+                return Err(nullhawk_types::NullhawkError::OutOfScope(url));
             }
         }
 
@@ -261,7 +261,7 @@ impl<T: HttpTransport> AuthzTester<T> {
         // prevent.
         for declaration in &plan.declarations {
             self.objects.put(declaration).map_err(|e| {
-                hexora_types::HexoraError::invalid_input(
+                nullhawk_types::NullhawkError::invalid_input(
                     "declaration",
                     format!(
                         "{} could not be recorded ({e}). A declaration names the \
@@ -415,7 +415,7 @@ impl<T: HttpTransport> AuthzTester<T> {
     /// Sends every violation a second time and records whether it happened again.
     ///
     /// Reproduction is the difference between [`Confidence::Firm`] and
-    /// [`Confidence::Confirmed`](hexora_types::Confidence::Confirmed): a one-off that
+    /// [`Confidence::Confirmed`](nullhawk_types::Confidence::Confirmed): a one-off that
     /// does not repeat was a cache, a race, or a session that had not expired yet.
     #[allow(clippy::too_many_arguments)]
     async fn reproduce_attempts(
@@ -535,7 +535,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             }
         };
 
-        // The parent is the request this was built from, so `hexora repeat --tree`
+        // The parent is the request this was built from, so `nullhawk repeat --tree`
         // and the desktop history both answer "where did this come from?" without
         // knowing anything about object declarations.
         let constructed = Draft::derived_from(request, draft.parent);
@@ -800,21 +800,21 @@ fn slot_for(
     None
 }
 
-pub use hexora_types::inject::{locate, substitute, substitute_in_body, value_at};
+pub use nullhawk_types::inject::{locate, substitute, substitute_in_body, value_at};
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use hexora_engine::guard::ScopeGuard;
-    use hexora_engine::transport::{Exchange, SendOptions};
-    use hexora_repeater::Repeater;
-    use hexora_storage::{
+    use nullhawk_engine::guard::ScopeGuard;
+    use nullhawk_engine::transport::{Exchange, SendOptions};
+    use nullhawk_repeater::Repeater;
+    use nullhawk_storage::{
         FindingStore, IdentityStore, MemoryBlobStore, MetadataDb, ObjectStore, TrafficStore,
     };
-    use hexora_types::finding::{Confidence, Evidence, FindingStatus, Severity};
-    use hexora_types::http::{Headers, HttpResponse, HttpService, HttpVersion};
-    use hexora_types::scope::{Scope, ScopeRule};
+    use nullhawk_types::finding::{Confidence, Evidence, FindingStatus, Severity};
+    use nullhawk_types::http::{Headers, HttpResponse, HttpService, HttpVersion};
+    use nullhawk_types::scope::{Scope, ScopeRule};
 
     use super::*;
 
@@ -964,9 +964,9 @@ mod tests {
                 return rest[..end].to_string();
             }
         }
-        let (path, query) = hexora_types::inject::split_target(&request.path);
+        let (path, query) = nullhawk_types::inject::split_target(&request.path);
         if let Some(query) = query {
-            for (name, value) in hexora_types::inject::query_pairs(Some(query)) {
+            for (name, value) in nullhawk_types::inject::query_pairs(Some(query)) {
                 if name == "id" {
                     return value.to_string();
                 }
@@ -1022,7 +1022,7 @@ mod tests {
         headers.set("Content-Type", "application/json");
         fixture
             .traffic
-            .record(&hexora_storage::CapturedExchange {
+            .record(&nullhawk_storage::CapturedExchange {
                 request,
                 response: HttpResponse {
                     status: 200,
@@ -1148,10 +1148,10 @@ mod tests {
         let mut request = HttpRequest::get(service(), "/a");
         request
             .headers
-            .append(hexora_types::http::Header::new("X-Account", "one"));
+            .append(nullhawk_types::http::Header::new("X-Account", "one"));
         request
             .headers
-            .append(hexora_types::http::Header::new("X-Account", "two"));
+            .append(nullhawk_types::http::Header::new("X-Account", "two"));
 
         let built = substitute(
             &request,
@@ -1334,7 +1334,7 @@ mod tests {
     #[test]
     fn an_oversized_identifier_never_reaches_a_request() {
         let request = HttpRequest::get(service(), "/accounts/acct-2000");
-        let long = "a".repeat(hexora_types::object::MAX_IDENTIFIER_LEN + 1);
+        let long = "a".repeat(nullhawk_types::object::MAX_IDENTIFIER_LEN + 1);
         assert!(substitute(&request, &ObjectLocation::PathSegment { index: 1 }, &long).is_err());
     }
 

@@ -1,4 +1,4 @@
--- Hexora project schema, revision 1 (SQLite backend).
+-- Nullhawk project schema, revision 1 (SQLite backend).
 --
 -- Design notes:
 --
@@ -24,7 +24,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE project (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
-    -- Serialized `hexora_types::scope::Scope`.
+    -- Serialized `nullhawk_types::scope::Scope`.
     scope_json      TEXT NOT NULL DEFAULT '{"include":[],"exclude":[]}',
     settings_json   TEXT NOT NULL DEFAULT '{}',
     created_at      TEXT NOT NULL,
@@ -201,7 +201,7 @@ CREATE TABLE finding_evidence (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     finding_id      TEXT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
     ordinal         INTEGER NOT NULL,
-    -- Serialized `hexora_types::finding::Evidence`.
+    -- Serialized `nullhawk_types::finding::Evidence`.
     evidence_json   TEXT NOT NULL,
     UNIQUE (finding_id, ordinal)
 );

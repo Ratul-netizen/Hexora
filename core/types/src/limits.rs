@@ -1,6 +1,6 @@
 //! Resource limits.
 //!
-//! Hexora talks to systems that may be actively hostile. A target can answer with a
+//! Nullhawk talks to systems that may be actively hostile. A target can answer with a
 //! multi-gigabyte body, a header block that never ends, or 40 bytes of gzip that
 //! expand to 40 GB. None of that may take the application down, so every network
 //! path in the engine is bounded by a [`Limits`] value carried through the call.
@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{HexoraError, LimitError, Result};
+use crate::error::{LimitError, NullhawkError, Result};
 
 /// Bounds applied to a single HTTP exchange.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,7 +81,7 @@ impl Limits {
     /// Checks a declared or observed body size.
     pub fn check_body_size(&self, size: u64) -> Result<()> {
         if size > self.max_body_bytes {
-            return Err(HexoraError::LimitExceeded(LimitError::BodyTooLarge {
+            return Err(NullhawkError::LimitExceeded(LimitError::BodyTooLarge {
                 limit: self.max_body_bytes,
             }));
         }
@@ -91,7 +91,7 @@ impl Limits {
     /// Checks the header block size.
     pub fn check_header_size(&self, size: usize) -> Result<()> {
         if size > self.max_header_bytes {
-            return Err(HexoraError::LimitExceeded(LimitError::HeadersTooLarge {
+            return Err(NullhawkError::LimitExceeded(LimitError::HeadersTooLarge {
                 limit: self.max_header_bytes,
             }));
         }
@@ -109,10 +109,12 @@ impl Limits {
             } else {
                 decompressed as f64 / compressed as f64
             };
-            return Err(HexoraError::LimitExceeded(LimitError::DecompressionBomb {
-                limit: self.max_decompressed_bytes,
-                ratio,
-            }));
+            return Err(NullhawkError::LimitExceeded(
+                LimitError::DecompressionBomb {
+                    limit: self.max_decompressed_bytes,
+                    ratio,
+                },
+            ));
         }
         // Only apply the ratio check once there is enough output for the ratio to be
         // meaningful; tiny inputs produce wild ratios for legitimate reasons.
@@ -120,10 +122,12 @@ impl Limits {
         if compressed > 0 && decompressed > RATIO_FLOOR_BYTES {
             let ratio = decompressed as f64 / compressed as f64;
             if ratio > self.max_decompression_ratio {
-                return Err(HexoraError::LimitExceeded(LimitError::DecompressionBomb {
-                    limit: self.max_decompressed_bytes,
-                    ratio,
-                }));
+                return Err(NullhawkError::LimitExceeded(
+                    LimitError::DecompressionBomb {
+                        limit: self.max_decompressed_bytes,
+                        ratio,
+                    },
+                ));
             }
         }
         Ok(())
@@ -132,7 +136,7 @@ impl Limits {
     /// Checks a redirect chain length.
     pub fn check_redirects(&self, followed: u8) -> Result<()> {
         if followed >= self.max_redirects {
-            return Err(HexoraError::LimitExceeded(LimitError::TooManyRedirects {
+            return Err(NullhawkError::LimitExceeded(LimitError::TooManyRedirects {
                 limit: self.max_redirects,
             }));
         }

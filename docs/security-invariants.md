@@ -1,6 +1,6 @@
 # Security invariants
 
-These are the rules Hexora does not break. They are not aspirations: each one names
+These are the rules Nullhawk does not break. They are not aspirations: each one names
 where it is enforced and which test proves it. A change that violates an invariant is
 a bug regardless of what it enables.
 
@@ -21,7 +21,7 @@ the scope explicitly.
 Traffic sent outside it may be a crime, and a fuzzer that wanders onto a third party's
 infrastructure is the failure mode that ends a testing company.
 
-**Enforced by.** `hexora_engine::guard::ScopeGuard`, which wraps the transport. Every
+**Enforced by.** `nullhawk_engine::guard::ScopeGuard`, which wraps the transport. Every
 subsystem receives its transport already wrapped, so the check happens once, below all
 of them, rather than in each caller. A `Scope` struct on its own would not achieve
 this; the guard is what makes the invariant real.
@@ -49,11 +49,11 @@ this; the guard is what makes the invariant real.
 log file, a crash report, a `Debug` rendering, an error string, an export, or an IPC
 payload to the frontend.
 
-**Why.** Hexora holds live credentials for a client's systems. A stack trace pasted
+**Why.** Nullhawk holds live credentials for a client's systems. A stack trace pasted
 into a bug report must not be a credential disclosure — and neither must a project
 export or a debug dump of an identity.
 
-**Enforced by.** `hexora_types::redact::Secret<T>`, which has:
+**Enforced by.** `nullhawk_types::redact::Secret<T>`, which has:
 
 - a `Debug` that prints `<redacted>`,
 - no `Display`, so it cannot be interpolated into a message by accident,
@@ -97,7 +97,7 @@ incrementally — not after the response has been fully read.
 gzip that expands to 40 GB must not take the process down. Checking *after* reading
 means the damage is already done.
 
-**Enforced by.** `hexora_types::limits::Limits`, threaded through `SendOptions`.
+**Enforced by.** `nullhawk_types::limits::Limits`, threaded through `SendOptions`.
 Decompression is bounded by both an absolute output cap and an expansion ratio, since
 neither alone distinguishes a bomb from a large legitimate document.
 
@@ -121,7 +121,7 @@ code path that widens a grant at runtime.
 traffic. "It only needed filesystem access temporarily" is how that becomes an
 incident.
 
-**Enforced by.** `hexora_engine::permission::GrantSet`, which has no `add` method.
+**Enforced by.** `nullhawk_engine::permission::GrantSet`, which has no `add` method.
 It can be constructed from a user's approval and thereafter only narrowed
 (`revoke`, `intersect`). Dangerous capabilities — filesystem, raw network, process
 execution, credential access — are never implied by any other capability and must each
@@ -151,7 +151,7 @@ requests at production. Second, and more subtly: the AI's *input* includes respo
 bodies from the target, which are attacker-controlled text. Prompt injection is a
 given, not an edge case.
 
-**Enforced by.** `hexora_engine::ai::ToolGate`. Approval is derived from the
+**Enforced by.** `nullhawk_engine::ai::ToolGate`. Approval is derived from the
 *structure* of the proposed call, never from model output. Reading stored credentials
 is `Forbidden` outright — an approval dialog there would be theatre, because the user
 cannot meaningfully evaluate a credential-dump request that originated inside a
@@ -261,7 +261,7 @@ own project format" is how a file format becomes an execution vector.
 **Enforced by.** Parsers return structured `ProtocolError`/`StorageError` values
 rather than panicking; the blob store verifies content against its hash on every read
 and reports `BlobIntegrity` rather than returning altered bytes; a project written by a
-newer Hexora is refused (`SchemaTooNew`) rather than opened and silently corrupted.
+newer Nullhawk is refused (`SchemaTooNew`) rather than opened and silently corrupted.
 
 **Tests.** `core/storage/src/blob.rs` — `corrupted_blobs_are_detected_rather_than_returned`.
 `core/storage/src/migrations.rs` — `a_newer_schema_is_refused_rather_than_downgraded`.
@@ -269,7 +269,7 @@ newer Hexora is refused (`SchemaTooNew`) rather than opened and silently corrupt
 
 ---
 
-## 8. Hexora never sends traffic the user did not ask for
+## 8. Nullhawk never sends traffic the user did not ask for
 
 **Rule.** No telemetry, no update pings, no crash reporting, no reputation lookups.
 No connection to any host that is not a testing target or an explicitly configured
@@ -287,18 +287,18 @@ write.
 
 ## 9. A generated request says where it came from, and changes only what it claims to
 
-**Rule.** Every request Hexora builds rather than replays records its provenance —
+**Rule.** Every request Nullhawk builds rather than replays records its provenance —
 the request it was built from, the identity it was sent as, and the exact
 substitution that produced it — and the substitution touches nothing else in the
 message. The captured request it was built from is never modified.
 
 A request sent in **raw mode** goes further: nothing is normalized at all. What the
 tester wrote is what reaches the socket, and the bytes are stored so it can be re-sent
-identically months later. Hexora never claims byte-preservation it does not have —
+identically months later. Nullhawk never claims byte-preservation it does not have —
 structured sends are serialized from a model and say so.
 
 **Why.** A constructed request is one nobody sent by hand. Six weeks later, "why did
-Hexora ask for `invoice-1001` as User B?" has to be answerable from the project, or
+Nullhawk ask for `invoice-1001` as User B?" has to be answerable from the project, or
 the traffic in it is noise a reader cannot distinguish from the tester's own work.
 And a substitution that quietly changed a second thing — a path that walked
 somewhere else, a header that was rewritten, a body that was re-serialized — would
@@ -350,7 +350,7 @@ encoded; a credential header is never an object location, in either direction.
 
 ## 10. Identifier suggestions never establish ownership
 
-Hexora reads captured traffic and offers values that *might* be object identifiers.
+Nullhawk reads captured traffic and offers values that *might* be object identifiers.
 It never decides that they are, and it never decides whose they are. Three statements
 are kept strictly apart, and only the first is machine-made:
 
@@ -405,7 +405,7 @@ the second visit to an engagement is where a security tool is most tempted to li
 
 A finding is what a test *produced*. When a later run does not produce it, what has
 been established is that one test did not raise one claim — which is a fact about a
-test run, not about an application. So `hexora snapshot diff` never says *fixed*.
+test run, not about an application. So `nullhawk snapshot diff` never says *fixed*.
 It says the claim is **gone**, and it says why, from a vocabulary in which only one
 answer is about the application at all:
 
@@ -435,7 +435,7 @@ treated the same way: not re-tested.
 - A host that left scope stopped being tested. The comparison prints removed scope
   rules and says so in words.
 - A finding count that fell is a count, printed as a count. It is never a headline.
-- Hexora has no registry of which checks ran; that arrives with the verification
+- Nullhawk has no registry of which checks ran; that arrives with the verification
   framework (M13.1). Until then "the check ran and found nothing" and "the check never
   ran" are the same picture, and `SourceSilent` says exactly that rather than guessing.
 
@@ -573,7 +573,7 @@ else would undo `RequestSource::Raw` at the last step.
 **A lead does not get a runnable block.** The report compiles a reproduction for
 findings that are actionable and for no others. A script attached to an unverified
 claim is the thing most likely to be forwarded without the sentence that qualified it,
-and `hexora poc` prints the qualification on the artefact itself when asked for one
+and `nullhawk poc` prints the qualification on the artefact itself when asked for one
 anyway.
 
 **Tests.** `core/report/src/poc.rs` —
@@ -677,7 +677,7 @@ the thing the outcome can state honestly.
 The same invariant's other half, because a run that is *too* polite to finish is the
 common way to get an unfinished one.
 
-**One host is never sent two Hexora requests at the same time.** Each host has one
+**One host is never sent two Nullhawk requests at the same time.** Each host has one
 sequential queue with `Budget::pause` between its requests; different hosts are worked
 concurrently up to `Budget::hosts_at_once`. A global concurrency limit is the wrong
 promise: eight requests spread over eight hosts is polite and eight aimed at one host
@@ -710,14 +710,14 @@ was a real defect, found by reading the `requests.origin` column after a live ru
 
 ---
 
-## 16. A destination a target chose is never a destination Hexora visits
+## 16. A destination a target chose is never a destination Nullhawk visits
 
 The one way an automated tool can be talked into generating traffic to a machine
 nobody authorized is by being told where to go by the thing it is testing. A redirect
 is exactly that instruction:
 
 ```text
-GET /login?next=https://hexora-probe.invalid/   →  302
+GET /login?next=https://nullhawk-probe.invalid/   →  302
                                                    Location: https://somewhere-else/
 ```
 
@@ -727,7 +727,7 @@ instead of not doing the thing is how a backstop eventually gets a hole in it. S
 redirect check reads the header and resolves it arithmetically against the request's
 own host. There is no fetch on that path at all.
 
-The same rule covers the destinations Hexora *sends*. They are `.invalid` hosts (RFC
+The same rule covers the destinations Nullhawk *sends*. They are `.invalid` hosts (RFC
 2606), which never resolve, so a mistake anywhere — a browser opened by hand, a
 library configured to follow — reaches nothing. Nobody can register one either, so a
 redirect reported last year cannot be turned into a live one by somebody buying the
@@ -764,7 +764,7 @@ somebody else's machine.
 
 ---
 
-## 17. A credential Hexora breaks is still a credential
+## 17. A credential Nullhawk breaks is still a credential
 
 Testing whether an application verifies a session means sending it one that is wrong —
 and the only probe that proves anything is *derived from a credential the server
@@ -824,7 +824,7 @@ reading the `requests` table after a live run.
 
 A method nobody recognises is treated as unsafe. That is the direction to be wrong in.
 
-This is a *scheduler* rule and not a *tool* rule: `hexora authz` will replay a
+This is a *scheduler* rule and not a *tool* rule: `nullhawk authz` will replay a
 `DELETE` if a tester asks it to, after telling them what it is about to do. A person
 deciding to do something is different from a queue deciding for them.
 

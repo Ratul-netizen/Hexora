@@ -174,7 +174,7 @@ mod tests {
     use super::*;
 
     fn robots(body: &str) -> Robots {
-        Robots::parse(body.as_bytes(), "Hexora")
+        Robots::parse(body.as_bytes(), "Nullhawk")
     }
 
     #[test]
@@ -206,8 +206,8 @@ mod tests {
 
     #[test]
     fn a_specific_group_beats_the_star_group() {
-        let r = robots("User-agent: *\nDisallow: /\n\nUser-agent: Hexora\nDisallow: /admin");
-        // The Hexora group applies, so only /admin is blocked, not everything.
+        let r = robots("User-agent: *\nDisallow: /\n\nUser-agent: Nullhawk\nDisallow: /admin");
+        // The Nullhawk group applies, so only /admin is blocked, not everything.
         assert!(r.allows("/public"));
         assert!(!r.allows("/admin"));
     }

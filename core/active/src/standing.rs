@@ -10,7 +10,7 @@
 //!                                     a work item; nothing is suspected yet
 //! ```
 //!
-//! The second kind does not belong in a passive pass. `hexora scan passive` reports
+//! The second kind does not belong in a passive pass. `nullhawk scan passive` reports
 //! what the checks *saw*, and an endpoint having a query parameter is not something
 //! anybody saw — it is a list of places nobody has looked. Putting five hundred of
 //! those into a passive summary would bury the two lines that came from evidence.
@@ -24,10 +24,10 @@
 //! The CLI and the window both call [`standing`]. They used to each have their own,
 //! which is how two surfaces of one tool come to disagree about what is testable.
 
-use hexora_scan::passive::Selection;
-use hexora_storage::Project;
-use hexora_types::finding::Hypothesis;
-use hexora_types::Result;
+use nullhawk_scan::passive::Selection;
+use nullhawk_storage::Project;
+use nullhawk_types::finding::Hypothesis;
+use nullhawk_types::Result;
 
 /// What could be settled, and what is out of reach.
 #[derive(Debug, Clone, Default)]
@@ -44,8 +44,8 @@ pub struct Standing {
 
 /// Everything an active run could settle over this project's traffic.
 ///
-/// Reads. Sends nothing — it has no transport and no [`Lab`](hexora_verify::Lab), the
-/// same property [`hexora_scan::passive::scan`] has and for the same reason.
+/// Reads. Sends nothing — it has no transport and no [`Lab`](nullhawk_verify::Lab), the
+/// same property [`nullhawk_scan::passive::scan`] has and for the same reason.
 pub fn standing(project: &Project, selection: &Selection) -> Result<Standing> {
     let mut hypotheses = observed(project, selection)?;
     hypotheses.extend(work_items(project, selection)?);
@@ -70,18 +70,18 @@ pub fn standing(project: &Project, selection: &Selection) -> Result<Standing> {
 
 /// Suspicions a passive check raised from something it actually saw.
 fn observed(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis>> {
-    Ok(hexora_scan::passive::scan(project, selection)?.hypotheses)
+    Ok(nullhawk_scan::passive::scan(project, selection)?.hypotheses)
 }
 
 /// One work item per input of each distinct endpoint.
 ///
 /// Deduplicated on `(method, path-without-query, input)`, so a search page loaded
 /// forty times is one experiment and two endpoints that both take `q` are two.
-/// Whether this suspicion is about a header Hexora attached rather than one the
+/// Whether this suspicion is about a header Nullhawk attached rather than one the
 /// application ever saw from a real client.
 fn is_ours(hypothesis: &Hypothesis, ours: &[String]) -> bool {
     hypothesis.location.as_ref().is_some_and(|location| {
-        location.part == hexora_types::finding::MessagePart::Header
+        location.part == nullhawk_types::finding::MessagePart::Header
             && ours.contains(&location.name.to_ascii_lowercase())
     })
 }
@@ -89,11 +89,11 @@ fn is_ours(hypothesis: &Hypothesis, ours: &[String]) -> bool {
 fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis>> {
     use std::collections::BTreeSet;
 
-    let summary = hexora_scan::passive::scan(project, selection)?;
+    let summary = nullhawk_scan::passive::scan(project, selection)?;
     let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
     let mut raised = Vec::new();
 
-    // Headers Hexora put on the request itself are not the application's input.
+    // Headers Nullhawk put on the request itself are not the application's input.
     //
     // Found against a real programme, and it was not a small thing: the proxy attaches
     // `X-HackerOne-Research: <username>` to in-scope browser traffic, that traffic is
@@ -153,8 +153,8 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hexora_storage::{CapturedExchange, Project};
-    use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+    use nullhawk_storage::{CapturedExchange, Project};
+    use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
 
     fn capture(project: &Project, target: &str) {
         capture_as(project, target, "proxy")
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn the_scanners_own_requests_are_never_read_back_as_the_applications_traffic() {
-        // A project accumulates Hexora's own probes. An endpoint described by one of
+        // A project accumulates Nullhawk's own probes. An endpoint described by one of
         // them would be reported to a tester as `?q=hxa3f9<>"';()hxb1k2` — a URL
         // nobody's application has, named in a finding about that application.
         let project = Project::in_memory().unwrap();
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn no_subsystem_of_hexoras_own_traffic_is_read_back_as_the_applications() {
+    fn no_subsystem_of_nullhawks_own_traffic_is_read_back_as_the_applications() {
         // The second half of this, found by running the scheduler twice: an *anonymous*
         // authorization replay carries no credential, so when it became the
         // representative exchange for an endpoint, every check needing authenticated
@@ -265,7 +265,7 @@ mod tests {
         let standing = standing(&project, &everything()).unwrap();
         assert!(
             standing.hypotheses.is_empty(),
-            "Hexora enumerated its own traffic: {:#?}",
+            "Nullhawk enumerated its own traffic: {:#?}",
             standing.hypotheses
         );
     }

@@ -45,7 +45,7 @@
 //! # What it is not
 //!
 //! Not a safety control. Scope is; this is not. An exclusion can only ever *reduce*
-//! what gets reported or sent, so a wrong one cannot make Hexora touch something it
+//! what gets reported or sent, so a wrong one cannot make Nullhawk touch something it
 //! otherwise would not — which is why it is allowed to be edited casually and scope is
 //! not.
 //!
@@ -60,7 +60,7 @@ use serde::{Deserialize, Serialize};
 /// A finding class this programme will not accept, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Exclusion {
-    /// The detector id, as `hexora detectors` lists it.
+    /// The detector id, as `nullhawk detectors` lists it.
     pub detector: String,
     /// Why, in the programme's own words where possible.
     ///

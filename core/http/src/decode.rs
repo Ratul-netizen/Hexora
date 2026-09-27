@@ -18,15 +18,15 @@
 //! # Known gap
 //!
 //! The decoded body replaces the compressed one, so the original wire bytes are not
-//! retained. That is at odds with Hexora's "preserve the wire" principle and is
+//! retained. That is at odds with Nullhawk's "preserve the wire" principle and is
 //! deliberate only until M3, where the traffic store keeps both: the compressed form
 //! as it arrived, and the decoded form for searching and matching.
 
 use std::io::Read;
 
 use bytes::Bytes;
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::limits::Limits;
+use nullhawk_types::error::{NullhawkError, ProtocolError, Result};
+use nullhawk_types::limits::Limits;
 
 /// Bytes pulled from the decoder before each limit check.
 ///
@@ -34,7 +34,7 @@ use hexora_types::limits::Limits;
 /// bodies do not pay for thousands of round trips.
 const STEP: usize = 64 * 1024;
 
-/// A content coding Hexora can reverse.
+/// A content coding Nullhawk can reverse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Coding {
     /// RFC 1952 gzip.
@@ -90,7 +90,7 @@ pub fn decode_body(content_encoding: &str, body: &[u8], limits: &Limits) -> Resu
         match Coding::parse(token) {
             Some(coding) => codings.push(coding),
             None => {
-                return Err(HexoraError::Protocol(ProtocolError::UnsupportedEncoding(
+                return Err(NullhawkError::Protocol(ProtocolError::UnsupportedEncoding(
                     (*token).to_string(),
                 )))
             }
@@ -158,7 +158,7 @@ fn read_bounded(
 
     loop {
         let read = reader.read(&mut chunk).map_err(|e| {
-            HexoraError::Protocol(ProtocolError::DecodeFailed {
+            NullhawkError::Protocol(ProtocolError::DecodeFailed {
                 encoding: "content-encoding".to_string(),
                 reason: e.to_string(),
             })

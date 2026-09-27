@@ -20,7 +20,7 @@
 //! re-encode on render, and a page somebody has to look at — none of which is visible
 //! from one response. A tester reading "`<` came back unencoded in HTML text at
 //! `$.results[0]`" can check it in thirty seconds; a tester reading "possible XSS" has
-//! to start from nothing. See [`hexora_types::echo`].
+//! to start from nothing. See [`nullhawk_types::echo`].
 //!
 //! # What it costs the target
 //!
@@ -30,22 +30,24 @@
 //!
 //! # Which inputs
 //!
-//! Whatever [`hexora_types::inject::inputs`] offers: query parameters and ordinary
+//! Whatever [`nullhawk_types::inject::inputs`] offers: query parameters and ordinary
 //! headers. Not path segments, because a segment is as often a route as a value and a
 //! marker in the wrong one produces a 404 and a wasted request. Not credential
 //! headers, ever. Not bodies yet — that wants a body model rather than a byte offset,
 //! and the gap is stated rather than papered over.
 
 use async_trait::async_trait;
-use hexora_types::echo::{Probe, Serving, Survived};
-use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
-use hexora_types::inject::{inputs, substitute};
-use hexora_types::object::ObjectLocation;
-use hexora_types::verify::{
+use nullhawk_types::echo::{Probe, Serving, Survived};
+use nullhawk_types::finding::{
+    Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
+};
+use nullhawk_types::inject::{inputs, substitute};
+use nullhawk_types::object::ObjectLocation;
+use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
@@ -232,7 +234,7 @@ impl ActiveCheck for InputReflection {
             reproduction: format!(
                 "Send {} {} with {where_} set to a value containing `<`, `>`, `\"` and \
                  `'`, and read the response body at the offset the evidence names. \
-                 `hexora poc <project> <finding>` compiles the exact requests.",
+                 `nullhawk poc <project> <finding>` compiles the exact requests.",
                 subject.exchange.method, subject.exchange.url,
             ),
             cwe: Some("CWE-79".into()),
@@ -270,7 +272,7 @@ fn severity_for(verification: &Verification) -> Severity {
 
 /// One probe and what came back.
 struct Answer {
-    request: hexora_types::ids::RequestId,
+    request: nullhawk_types::ids::RequestId,
     status: u16,
     found: Survived,
     sent: String,
@@ -442,16 +444,16 @@ fn evidence_both(
 
 /// Raises one suspicion per input of a captured request.
 ///
-/// Not a [`PassiveCheck`](hexora_scan::PassiveCheck): a passive check observes a
+/// Not a [`PassiveCheck`](nullhawk_scan::PassiveCheck): a passive check observes a
 /// response, and *"this request takes a `q` parameter"* is an observation about a
 /// **request** that says nothing at all until somebody sends one. So the suspicion is
 /// manufactured here, next to the check that settles it, and it is honest about being
 /// a work item rather than a finding — see [`Hypothesis::provisional_severity`], which
 /// is `Info` until an experiment says otherwise.
 ///
-/// [`Hypothesis::provisional_severity`]: hexora_types::finding::Hypothesis::provisional_severity
-pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
-    hexora_types::inject::inputs_in(&exchange.path, &exchange.request_headers)
+/// [`Hypothesis::provisional_severity`]: nullhawk_types::finding::Hypothesis::provisional_severity
+pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
+    nullhawk_types::inject::inputs_in(&exchange.path, &exchange.request_headers)
         .into_iter()
         .map(|slot| Hypothesis {
             detector: SETTLES.to_string(),
@@ -481,14 +483,14 @@ pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
 mod tests {
     use super::*;
 
-    use hexora_types::echo::Context;
-    use hexora_types::http::{HttpRequest, HttpService};
+    use nullhawk_types::echo::Context;
+    use nullhawk_types::http::{HttpRequest, HttpService};
 
     /// A captured exchange at `target`, as the scheduler would hand one over.
-    fn exchange(target: &str) -> hexora_scan::Exchange {
-        hexora_scan::Exchange {
-            id: hexora_types::ids::RequestId::new(),
-            target: hexora_types::ids::TargetId::new(),
+    fn exchange(target: &str) -> nullhawk_scan::Exchange {
+        nullhawk_scan::Exchange {
+            id: nullhawk_types::ids::RequestId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             host: "api.example.com".into(),
             port: 443,
             secure: true,
@@ -496,8 +498,8 @@ mod tests {
             url: format!("https://api.example.com{target}"),
             path: target.into(),
             status: 200,
-            request_headers: hexora_types::http::Headers::new(),
-            response_headers: hexora_types::http::Headers::new(),
+            request_headers: nullhawk_types::http::Headers::new(),
+            response_headers: nullhawk_types::http::Headers::new(),
             response_bytes: 0,
             authenticated: false,
             tls: None,
@@ -514,7 +516,7 @@ mod tests {
                 source_request: exchange.id,
                 ..raised(SETTLES)
             },
-            draft: hexora_repeater::Draft::new(HttpRequest::get(
+            draft: nullhawk_repeater::Draft::new(HttpRequest::get(
                 HttpService::new("api.example.com", 443, true),
                 target,
             )),
@@ -528,7 +530,7 @@ mod tests {
         Hypothesis {
             detector: detector.into(),
             claim: "something".into(),
-            source_request: hexora_types::ids::RequestId::new(),
+            source_request: nullhawk_types::ids::RequestId::new(),
             location: None,
             provisional_severity: Severity::Info,
         }

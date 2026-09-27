@@ -1,4 +1,4 @@
-//! `hexora detectors` — what this build actually checks for.
+//! `nullhawk detectors` — what this build actually checks for.
 //!
 //! Two questions a tester asks before pointing a tool at somebody's system, which
 //! until now had no answer except reading the source:
@@ -12,15 +12,19 @@
 //! no plugin mechanism, and printing a number that implied one would be worse than
 //! printing two rows.
 
-use hexora_types::Result;
-use hexora_verify::Registry;
+use nullhawk_types::Result;
+use nullhawk_verify::Registry;
 
 /// The checks this build has.
 pub fn registry() -> Registry {
     Registry::new()
-        .with(hexora_authz::checks())
-        .with(hexora_scan::checks::all().iter().map(|check| check.about()))
-        .with(hexora_active::checks_info())
+        .with(nullhawk_authz::checks())
+        .with(
+            nullhawk_scan::checks::all()
+                .iter()
+                .map(|check| check.about()),
+        )
+        .with(nullhawk_active::checks_info())
 }
 
 /// Every detector id this build has, sorted.
@@ -120,14 +124,14 @@ pub fn list(json: bool) -> Result<()> {
     println!("A hypothesis is a suspicion, and stays one until an experiment settles it.");
     println!("Neither becomes a finding on its own.");
     println!();
-    println!("  hexora scan passive <project>   runs every passive check; sends nothing");
-    println!("  hexora scan active <project>    settles what it raised; sends");
-    println!("  hexora authz <project> <id>     runs the authorization checks; sends");
+    println!("  nullhawk scan passive <project>   runs every passive check; sends nothing");
+    println!("  nullhawk scan active <project>    settles what it raised; sends");
+    println!("  nullhawk authz <project> <id>     runs the authorization checks; sends");
     Ok(())
 }
 
 /// What a check can produce, for the registry listing.
-fn produces(check: &hexora_types::verify::DetectorInfo) -> &'static str {
+fn produces(check: &nullhawk_types::verify::DetectorInfo) -> &'static str {
     match (check.observes, check.hypothesizes, check.settles.is_some()) {
         (true, true, _) => "obs + hyp",
         (true, false, _) => "observations",
@@ -201,10 +205,10 @@ mod tests {
 
     #[test]
     fn every_passive_check_declares_that_it_does_not_send() {
-        // The claim `hexora scan passive` rests on, checked against the registry
+        // The claim `nullhawk scan passive` rests on, checked against the registry
         // rather than against the documentation.
         let registry = registry();
-        for check in hexora_scan::checks::all() {
+        for check in nullhawk_scan::checks::all() {
             let info = check.about();
             let listed = registry
                 .find(info.id.0)

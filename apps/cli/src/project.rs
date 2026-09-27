@@ -1,20 +1,20 @@
-//! `hexora project` subcommands.
+//! `nullhawk project` subcommands.
 
 use std::path::Path;
 
-use hexora_storage::migrations;
-use hexora_storage::rusqlite::{self, params};
-use hexora_types::{HexoraError, Result};
+use nullhawk_storage::migrations;
+use nullhawk_storage::rusqlite::{self, params};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Creates a new project directory, printing nothing.
 ///
-/// Split from [`init`] so `hexora setup` can create a project as one step of a longer
+/// Split from [`init`] so `nullhawk setup` can create a project as one step of a longer
 /// sequence without emitting its own report in the middle of setup's.
 pub fn create(path: &Path, name: Option<&str>) -> Result<String> {
     if path.join("project.db").exists() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "path",
-            format!("{} is already a Hexora project", path.display()),
+            format!("{} is already a Nullhawk project", path.display()),
         ));
     }
 
@@ -28,13 +28,13 @@ pub fn create(path: &Path, name: Option<&str>) -> Result<String> {
     project
         .metadata()
         .connection()
-        .map_err(HexoraError::from)?
+        .map_err(NullhawkError::from)?
         .execute(
             "INSERT INTO project (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
             // A fixed project id: a project database holds exactly one project row.
             params!["prj_default", name, now],
         )
-        .map_err(|e| HexoraError::Storage(e.to_string()))?;
+        .map_err(|e| NullhawkError::Storage(e.to_string()))?;
 
     Ok(name)
 }
@@ -62,19 +62,22 @@ pub fn init(path: &Path, name: Option<&str>, json: bool) -> Result<()> {
 /// Prints information about an existing project.
 pub fn info(path: &Path, json: bool) -> Result<()> {
     if !path.join("project.db").exists() {
-        return Err(HexoraError::not_found(
+        return Err(NullhawkError::not_found(
             "project",
             path.display().to_string(),
         ));
     }
     let project = crate::open_project(path)?;
-    let conn = project.metadata().connection().map_err(HexoraError::from)?;
+    let conn = project
+        .metadata()
+        .connection()
+        .map_err(NullhawkError::from)?;
 
     let (name, created_at): (String, String) = conn
         .query_row("SELECT name, created_at FROM project LIMIT 1", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
-        .map_err(|e| HexoraError::Storage(e.to_string()))?;
+        .map_err(|e| NullhawkError::Storage(e.to_string()))?;
 
     let targets = count(&conn, "targets")?;
     let requests = count(&conn, "requests")?;
@@ -82,7 +85,7 @@ pub fn info(path: &Path, json: bool) -> Result<()> {
     let schema = project
         .metadata()
         .schema_version()
-        .map_err(HexoraError::from)?;
+        .map_err(NullhawkError::from)?;
 
     if json {
         let payload = serde_json::json!({
@@ -111,7 +114,7 @@ fn count(conn: &rusqlite::Connection, table: &str) -> Result<i64> {
     conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
         row.get(0)
     })
-    .map_err(|e| HexoraError::Storage(e.to_string()))
+    .map_err(|e| NullhawkError::Storage(e.to_string()))
 }
 
 fn now_rfc3339() -> String {

@@ -1,6 +1,6 @@
-//! # hexora-types
+//! # nullhawk-types
 //!
-//! The shared domain model for the Hexora offensive-security platform.
+//! The shared domain model for the Nullhawk offensive-security platform.
 //!
 //! Every other crate in the workspace depends on this one and nothing else depends on
 //! them, which keeps the dependency graph acyclic and lets the UI, CLI and engine
@@ -62,7 +62,7 @@ pub mod verify;
 pub mod ws;
 
 pub use candidate::{CandidateStatus, IdentifierCandidate, Signal, SignalKind, Strength};
-pub use error::{HexoraError, Result};
+pub use error::{NullhawkError, Result};
 pub use finding::{Confidence, Evidence, Finding, Hypothesis, Severity};
 pub use http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
 pub use identity::{Credential, Identity, PrivilegeLevel};

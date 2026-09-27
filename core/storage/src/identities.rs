@@ -7,13 +7,13 @@
 //!
 //! # Why writing a credential is deliberately awkward
 //!
-//! [`hexora_types::Credential`] has no `Serialize` impl, by design: a struct holding a
-//! [`Secret`](hexora_types::Secret) that tries to derive one fails to compile rather
+//! [`nullhawk_types::Credential`] has no `Serialize` impl, by design: a struct holding a
+//! [`Secret`](nullhawk_types::Secret) that tries to derive one fails to compile rather
 //! than leaking the value (see `core/types/src/redact.rs`). Persistence therefore
 //! cannot happen by accident — it needs the explicit mirror type below, which opts
 //! each secret field into cleartext with `#[serde(with = "redact::exposed")]`.
 //!
-//! That mirror is the single place in Hexora where a credential is written out in the
+//! That mirror is the single place in Nullhawk where a credential is written out in the
 //! clear, which is exactly the property review needs: one greppable location to
 //! examine, rather than "wherever serde happened to reach".
 //!
@@ -24,10 +24,10 @@
 //! file is as sensitive as the credentials it holds. [`IdentityStore::put`] says so in
 //! its own documentation rather than leaving a tester to assume otherwise.
 
-use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
-use hexora_types::ids::IdentityId;
-use hexora_types::redact::Secret;
-use hexora_types::Header;
+use nullhawk_types::identity::{Credential, Identity, PrivilegeLevel};
+use nullhawk_types::ids::IdentityId;
+use nullhawk_types::redact::Secret;
+use nullhawk_types::Header;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -38,27 +38,27 @@ use crate::MetadataDb;
 ///
 /// Structurally identical to `Credential` and tagged the same way, so a project
 /// written by one release reads back in the next. The difference is only that every
-/// secret field names [`hexora_types::redact::exposed`] explicitly.
+/// secret field names [`nullhawk_types::redact::exposed`] explicitly.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StoredCredential {
     None,
     Bearer {
-        #[serde(with = "hexora_types::redact::exposed")]
+        #[serde(with = "nullhawk_types::redact::exposed")]
         token: Secret<String>,
     },
     Basic {
         username: String,
-        #[serde(with = "hexora_types::redact::exposed")]
+        #[serde(with = "nullhawk_types::redact::exposed")]
         password: Secret<String>,
     },
     Cookie {
-        #[serde(with = "hexora_types::redact::exposed")]
+        #[serde(with = "nullhawk_types::redact::exposed")]
         value: Secret<String>,
     },
     Header {
         name: String,
-        #[serde(with = "hexora_types::redact::exposed")]
+        #[serde(with = "nullhawk_types::redact::exposed")]
         value: Secret<String>,
     },
 }
@@ -382,9 +382,9 @@ mod tests {
 
             // Compared by the header it produces rather than by structural equality:
             // what matters is that the credential still authenticates the same way.
-            let mut expected = hexora_types::Headers::new();
+            let mut expected = nullhawk_types::Headers::new();
             credential.apply(&mut expected);
-            let mut actual = hexora_types::Headers::new();
+            let mut actual = nullhawk_types::Headers::new();
             store
                 .get(identity.id)
                 .unwrap()
@@ -398,7 +398,7 @@ mod tests {
         }
     }
 
-    fn header_block(headers: &hexora_types::Headers) -> Vec<(String, String)> {
+    fn header_block(headers: &nullhawk_types::Headers) -> Vec<(String, String)> {
         headers
             .iter()
             .map(|h| (h.name.clone(), h.value_lossy().into_owned()))

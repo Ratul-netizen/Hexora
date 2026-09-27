@@ -1,7 +1,7 @@
 //! `tls.observations` — what the handshake already recorded.
 //!
 //! No new connection is made, and none could be: this reads the
-//! [`TlsInfo`](hexora_types::tls::TlsInfo) the HTTP engine wrote down when the
+//! [`TlsInfo`](nullhawk_types::tls::TlsInfo) the HTTP engine wrote down when the
 //! exchange happened. A TLS check that reconnects to enumerate cipher suites is a
 //! different, active thing.
 //!
@@ -13,13 +13,13 @@
 //!
 //! # One thing deliberately not reported
 //!
-//! `Verification::AcceptAny` means the tester told Hexora not to check the
+//! `Verification::AcceptAny` means the tester told Nullhawk not to check the
 //! certificate, usually with `--insecure` against a staging box. Reporting "the peer
 //! certificate was not verified" as an issue would be reporting the tester's own
 //! flag back at them, so it is recorded as context — the fact that a run was done
 //! that way is worth knowing when reading the rest of it.
 
-use hexora_types::tls::Verification as TlsVerification;
+use nullhawk_types::tls::Verification as TlsVerification;
 
 use super::prelude::*;
 
@@ -155,7 +155,7 @@ impl PassiveCheck for TlsObservations {
                      the server would accept from a different client is not something \
                      a captured connection shows."
                 .into(),
-            remediation: "Check the host's TLS configuration directly. Hexora has \
+            remediation: "Check the host's TLS configuration directly. Nullhawk has \
                           reported one negotiated connection, not a survey."
                 .into(),
             reproduction: format!(
@@ -173,7 +173,7 @@ impl PassiveCheck for TlsObservations {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::tls::{CertificateSummary, TlsInfo};
+    use nullhawk_types::tls::{CertificateSummary, TlsInfo};
 
     use crate::checks::test_support::*;
 

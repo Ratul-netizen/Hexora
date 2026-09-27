@@ -4,9 +4,9 @@
 //! what makes them cheap to test exhaustively — including against the malformed input
 //! a hostile application actually sends.
 
-use hexora_types::http::{Header, Headers};
-use hexora_types::ids::{RequestId, TargetId};
-use hexora_types::tls::TlsInfo;
+use nullhawk_types::http::{Header, Headers};
+use nullhawk_types::ids::{RequestId, TargetId};
+use nullhawk_types::tls::TlsInfo;
 
 use crate::Exchange;
 

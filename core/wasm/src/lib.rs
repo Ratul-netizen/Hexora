@@ -1,4 +1,4 @@
-//! # hexora-wasm
+//! # nullhawk-wasm
 //!
 //! The sandbox that runs an extension's WebAssembly module. This is the half of the extension
 //! system that executes untrusted code, so it is built to make "untrusted" true: the module is
@@ -27,7 +27,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
-use hexora_ext::{Capability, ExtensionKind, InstalledExtension};
+use nullhawk_ext::{Capability, ExtensionKind, InstalledExtension};
 use wasmi::{Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
 
 /// What went wrong running a module. Every variant is a *contained* failure — the host is fine.
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn the_capability_gate_requires_http_read_a_passive_kind_and_enabled() {
-        use hexora_ext::Manifest;
+        use nullhawk_ext::Manifest;
         let manifest = |kind: &str, perms: &str| {
             Manifest::parse(
                 format!(

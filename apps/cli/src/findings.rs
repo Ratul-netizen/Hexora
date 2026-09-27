@@ -1,4 +1,4 @@
-//! `hexora findings` — what the project claims, and how firmly.
+//! `nullhawk findings` — what the project claims, and how firmly.
 //!
 //! The list is ordered the way a tester triages: worst first, and within a severity,
 //! the ones that are actually established before the ones that are still leads. A
@@ -11,13 +11,13 @@
 
 use std::path::Path;
 
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::FindingFilter;
-use hexora_types::finding::{Confidence, Evidence, Finding, FindingStatus, Severity};
-use hexora_types::ids::FindingId;
-use hexora_types::{HexoraError, Result};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_storage::FindingFilter;
+use nullhawk_types::finding::{Confidence, Evidence, Finding, FindingStatus, Severity};
+use nullhawk_types::ids::FindingId;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora findings`.
+/// Options for `nullhawk findings`.
 pub struct ListArgs<'a> {
     pub project: &'a Path,
     /// Only findings at or above this severity.
@@ -67,7 +67,7 @@ pub fn list(args: ListArgs<'_>) -> Result<()> {
             println!();
             println!("Run an authorization matrix to produce some:");
             println!(
-                "  hexora authz {} <request-id> --as-identity <who>",
+                "  nullhawk authz {} <request-id> --as-identity <who>",
                 args.project.display()
             );
         } else {
@@ -109,7 +109,7 @@ pub fn list(args: ListArgs<'_>) -> Result<()> {
     }
     if let Some(next) = &page.next {
         println!(
-            "Next page: hexora findings {} --after {}",
+            "Next page: nullhawk findings {} --after {}",
             args.project.display(),
             next.0
         );
@@ -265,7 +265,7 @@ pub fn status_word(status: FindingStatus) -> &'static str {
     }
 }
 
-/// Shared with `hexora report`, so both commands accept the same words for a level.
+/// Shared with `nullhawk report`, so both commands accept the same words for a level.
 pub fn parse_severity(value: &str) -> Result<Severity> {
     match value.to_ascii_lowercase().as_str() {
         "info" => Ok(Severity::Info),
@@ -273,7 +273,7 @@ pub fn parse_severity(value: &str) -> Result<Severity> {
         "medium" | "med" => Ok(Severity::Medium),
         "high" => Ok(Severity::High),
         "critical" | "crit" => Ok(Severity::Critical),
-        other => Err(HexoraError::invalid_input(
+        other => Err(NullhawkError::invalid_input(
             "--severity",
             format!("{other:?} is not one of info, low, medium, high, critical"),
         )),
@@ -291,7 +291,7 @@ fn parse_status(value: &str) -> Result<FindingStatus> {
         "reported" => Ok(FindingStatus::Reported),
         "fixed" => Ok(FindingStatus::Fixed),
         "accepted" => Ok(FindingStatus::Accepted),
-        other => Err(HexoraError::invalid_input(
+        other => Err(NullhawkError::invalid_input(
             "--status",
             format!(
                 "{other:?} is not one of new, triaged, confirmed, false-positive, \
@@ -313,7 +313,7 @@ pub fn one_line(finding: &Finding) -> String {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::ids::{RequestId, ResponseId};
+    use nullhawk_types::ids::{RequestId, ResponseId};
 
     use super::*;
 

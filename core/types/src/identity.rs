@@ -1,6 +1,6 @@
 //! Testing identities.
 //!
-//! Authorization testing is one of Hexora's flagship capabilities, and it rests on a
+//! Authorization testing is one of Nullhawk's flagship capabilities, and it rests on a
 //! simple idea: the same request, replayed as several different principals, should
 //! produce *different* responses. To do that the engine needs a first-class notion of
 //! "who am I sending this as".
@@ -231,7 +231,7 @@ impl Identity {
 
 /// Minimal base64 (standard alphabet, padded).
 ///
-/// Kept local so `hexora-types` stays dependency-light; the engine crates use the
+/// Kept local so `nullhawk-types` stays dependency-light; the engine crates use the
 /// `base64` crate where performance matters.
 fn base64_standard(input: impl AsRef<[u8]>) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -306,7 +306,7 @@ mod tests {
 
     /// Obviously-fake fixture credentials.
     ///
-    /// Hexora's own repository must stay clean for secret scanners. That means no
+    /// Nullhawk's own repository must stay clean for secret scanners. That means no
     /// credential-shaped literal anywhere in the tree — not even a real RFC's worked
     /// example, which is still a valid Base64 Basic Authentication string and will be
     /// flagged as one. Naming the values this way makes it unambiguous to a human

@@ -19,9 +19,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use hexora_engine::guard::ScopeDecision;
-use hexora_engine::transport::Exchange;
-use hexora_storage::{CapturedExchange, TrafficStore};
+use nullhawk_engine::guard::ScopeDecision;
+use nullhawk_engine::transport::Exchange;
+use nullhawk_storage::{CapturedExchange, TrafficStore};
 
 use crate::server::ExchangeObserver;
 
@@ -143,7 +143,7 @@ impl ExchangeObserver for ProjectCapture {
         &self,
         exchange: &Exchange,
         decision: ScopeDecision,
-    ) -> Option<hexora_types::ids::RequestId> {
+    ) -> Option<nullhawk_types::ids::RequestId> {
         if !self.should_capture(decision) {
             return None;
         }
@@ -168,8 +168,8 @@ impl ExchangeObserver for ProjectCapture {
 
     fn observe_websocket_message(
         &self,
-        request_id: hexora_types::ids::RequestId,
-        direction: hexora_types::ws::WsDirection,
+        request_id: nullhawk_types::ids::RequestId,
+        direction: nullhawk_types::ws::WsDirection,
         opcode: u8,
         payload: &[u8],
     ) {
@@ -187,8 +187,8 @@ impl ExchangeObserver for ProjectCapture {
 
 #[cfg(test)]
 mod tests {
-    use hexora_storage::{MemoryBlobStore, Project};
-    use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+    use nullhawk_storage::{MemoryBlobStore, Project};
+    use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
 
     use super::*;
 
@@ -265,7 +265,7 @@ mod tests {
 
         assert_eq!(store.count().unwrap(), 1);
         let page = store
-            .history(None, hexora_storage::repository::Limit::default())
+            .history(None, nullhawk_storage::repository::Limit::default())
             .unwrap();
         assert!(page.items[0].url.ends_with("/kept"), "{:?}", page.items[0]);
     }
@@ -338,8 +338,8 @@ mod tests {
         };
         let server = ProxyServer::bind(
             config,
-            Arc::new(hexora_types::scope::Scope::new()),
-            hexora_http::TcpTransport::default(),
+            Arc::new(nullhawk_types::scope::Scope::new()),
+            nullhawk_http::TcpTransport::default(),
             capture.clone(),
             Arc::new(CertificateAuthority::generate().unwrap()),
         )
@@ -369,7 +369,7 @@ mod tests {
         settle().await;
 
         let page = store
-            .history(None, hexora_storage::repository::Limit::default())
+            .history(None, nullhawk_storage::repository::Limit::default())
             .unwrap();
         assert_eq!(page.items.len(), 1, "{page:?}");
         let item = &page.items[0];
@@ -389,11 +389,11 @@ mod tests {
         let capture = ProjectCapture::new(store.clone());
 
         let mut exchange = exchange("/");
-        exchange.tls = Some(hexora_types::tls::TlsInfo {
+        exchange.tls = Some(nullhawk_types::tls::TlsInfo {
             protocol: "TLSv1.3".into(),
             cipher_suite: "TLS13_AES_128_GCM_SHA256".into(),
             alpn: Some("http/1.1".into()),
-            verification: hexora_types::tls::Verification::Platform,
+            verification: nullhawk_types::tls::Verification::Platform,
             peer_certificates: Vec::new(),
         });
         capture.observe(&exchange, ScopeDecision::Allowed);

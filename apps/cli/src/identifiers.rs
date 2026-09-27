@@ -1,4 +1,4 @@
-//! `hexora identifiers` — values that might be object identifiers.
+//! `nullhawk identifiers` — values that might be object identifiers.
 //!
 //! The command exists because declaring every identifier by hand is what keeps
 //! constructed testing narrower than it should be. It does not exist to do the
@@ -11,12 +11,12 @@
 
 use std::path::Path;
 
-use hexora_storage::{CandidateFilter, CandidateStore};
-use hexora_types::candidate::CandidateStatus;
-use hexora_types::ids::CandidateId;
-use hexora_types::{HexoraError, Result};
+use nullhawk_storage::{CandidateFilter, CandidateStore};
+use nullhawk_types::candidate::CandidateStatus;
+use nullhawk_types::ids::CandidateId;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora identifiers`.
+/// Options for `nullhawk identifiers`.
 pub struct ListArgs<'a> {
     pub project: &'a Path,
     /// Only suggestions in this state.
@@ -32,7 +32,7 @@ pub fn list(args: ListArgs<'_>) -> Result<()> {
     let store = project.candidates();
 
     let analysis = if args.analyze {
-        Some(hexora_authz::suggest::analyze(
+        Some(nullhawk_authz::suggest::analyze(
             &project.traffic(),
             &project.objects(),
             &store,
@@ -90,7 +90,10 @@ pub fn list(args: ListArgs<'_>) -> Result<()> {
             println!("No suggestions recorded in {}.", args.project.display());
             println!();
             println!("Read the project's traffic and offer what it finds:");
-            println!("  hexora identifiers {} --analyze", args.project.display());
+            println!(
+                "  nullhawk identifiers {} --analyze",
+                args.project.display()
+            );
         }
         return Ok(());
     }
@@ -120,7 +123,7 @@ pub fn list(args: ListArgs<'_>) -> Result<()> {
          it says nothing about whose."
     );
     println!(
-        "  hexora identifiers {} --show <id>",
+        "  nullhawk identifiers {} --show <id>",
         args.project.display()
     );
     Ok(())
@@ -191,13 +194,13 @@ pub fn show(project: &Path, id: &str, json: bool) -> Result<()> {
     println!();
     println!("This is a suggestion, not an ownership assertion.");
     if candidate.status == CandidateStatus::Proposed {
-        println!("  hexora identifiers <project> --accept {}", candidate.id);
-        println!("  hexora identifiers <project> --reject {}", candidate.id);
+        println!("  nullhawk identifiers <project> --accept {}", candidate.id);
+        println!("  nullhawk identifiers <project> --reject {}", candidate.id);
     }
     println!();
     println!("Declaring it as somebody's object is a separate, explicit step:");
     println!(
-        "  hexora object add <project> {} --owner <identity> --name <what it is>",
+        "  nullhawk object add <project> {} --owner <identity> --name <what it is>",
         candidate.value
     );
     Ok(())
@@ -230,7 +233,7 @@ pub fn decide(project: &Path, id: &str, status: CandidateStatus, json: bool) -> 
             println!("That says it *is* an identifier. It says nothing about whose it is,");
             println!("and nothing has been declared. To say who owns it:");
             println!(
-                "  hexora object add {} {} --owner <identity> --name <what it is>",
+                "  nullhawk object add {} {} --owner <identity> --name <what it is>",
                 project.display(),
                 candidate.value
             );
@@ -246,7 +249,7 @@ pub fn decide(project: &Path, id: &str, status: CandidateStatus, json: bool) -> 
 
 fn parse_status(value: &str) -> Result<CandidateStatus> {
     CandidateStatus::parse(value).ok_or_else(|| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "--status",
             format!("{value:?} is not one of proposed, accepted, rejected, superseded"),
         )

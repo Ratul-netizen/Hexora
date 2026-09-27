@@ -3,7 +3,7 @@
 **Status: PLANNED (M20). Nothing here is implemented.**
 
 This directory is reserved for the compatibility layer that will let Java extensions
-written against PortSwigger's public Montoya API run under Hexora.
+written against PortSwigger's public Montoya API run under Nullhawk.
 
 ## Why it is empty
 
@@ -20,7 +20,7 @@ a compatibility layer over subsystems that do not exist.
 
 ## Ground rules for when it starts
 
-1. **Independently versioned.** Its version tracks API coverage, not Hexora releases.
+1. **Independently versioned.** Its version tracks API coverage, not Nullhawk releases.
 2. **Public compatibility matrix.** Every API is documented FULL / PARTIAL /
    UNSUPPORTED, with the observed behaviour. No blanket claim that "Burp extensions
    work".

@@ -176,7 +176,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <strong>Hexora</strong>
+          <strong>Nullhawk</strong>
           <span className="muted small">
             {boot.info.milestone} · v{boot.info.version}
           </span>
@@ -308,7 +308,7 @@ export default function App() {
       </main>
 
         <footer>
-          For authorized security testing only. Do not use Hexora against systems
+          For authorized security testing only. Do not use Nullhawk against systems
           you do not own or have written permission to test.
         </footer>
       </div>
@@ -320,7 +320,7 @@ export default function App() {
 function Blocked({ boot }: { boot: Boot }) {
   return (
     <main className="shell">
-      <h1>Hexora</h1>
+      <h1>Nullhawk</h1>
       {boot.status === "loading" && (
         <p className="status">Connecting to the engine…</p>
       )}
@@ -338,7 +338,7 @@ function Blocked({ boot }: { boot: Boot }) {
           <p>
             This interface speaks IPC contract v{EXPECTED_RPC_CONTRACT_VERSION},
             but the engine reports v{boot.info.rpc_contract_version}. Update
-            Hexora so the two halves match — showing you a request decoded under
+            Nullhawk so the two halves match — showing you a request decoded under
             the wrong contract would be worse than showing you nothing.
           </p>
         </section>

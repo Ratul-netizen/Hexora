@@ -14,8 +14,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use hexora_types::http::HttpService;
-use hexora_types::scope::Scope;
+use nullhawk_types::http::HttpService;
+use nullhawk_types::scope::Scope;
 
 use crate::{extract, LinkSource};
 
@@ -182,7 +182,7 @@ impl SiteMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hexora_types::scope::{Scope, ScopeRule};
+    use nullhawk_types::scope::{Scope, ScopeRule};
 
     fn page(url: &str, method: &str, status: u16, identity: Option<&str>) -> CapturedPage {
         CapturedPage {

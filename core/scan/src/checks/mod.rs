@@ -17,7 +17,7 @@
 //!   claimed them would be claiming exactly what it cannot see.
 //! - **Version-to-CVE matching.** `Server: nginx/1.24.0` is a fact; deciding it is a
 //!   vulnerability needs a vulnerability database, a patch level, and usually the
-//!   distribution's backporting policy. Hexora records the fact.
+//!   distribution's backporting policy. Nullhawk records the fact.
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -50,9 +50,9 @@ pub fn all() -> Vec<Box<dyn PassiveCheck>> {
 
 /// The information every check needs to describe itself.
 pub(crate) mod prelude {
-    pub(crate) use hexora_types::finding::{FindingSource, Location, MessagePart, Severity};
-    pub(crate) use hexora_types::ids::TargetId;
-    pub(crate) use hexora_types::verify::{
+    pub(crate) use nullhawk_types::finding::{FindingSource, Location, MessagePart, Severity};
+    pub(crate) use nullhawk_types::ids::TargetId;
+    pub(crate) use nullhawk_types::verify::{
         DetectorId, DetectorInfo, DetectorMode, Observation, Significance, Writeup,
     };
 

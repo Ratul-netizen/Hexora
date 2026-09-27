@@ -1,4 +1,4 @@
-//! `hexora run` — a whole engagement in one declarative file.
+//! `nullhawk run` — a whole engagement in one declarative file.
 //!
 //! ZAP's Automation Framework is the entire CI story in one YAML file, and it is the piece a
 //! pipeline needs that Burp Pro makes you buy Enterprise for. This runs an ordered plan —
@@ -24,10 +24,10 @@
 
 use std::path::{Path, PathBuf};
 
-use hexora_storage::repository::Limit;
-use hexora_storage::FindingFilter;
-use hexora_types::finding::Severity;
-use hexora_types::{HexoraError, Result};
+use nullhawk_storage::repository::Limit;
+use nullhawk_storage::FindingFilter;
+use nullhawk_types::finding::Severity;
+use nullhawk_types::{NullhawkError, Result};
 use serde::Deserialize;
 
 /// A whole engagement, declared.
@@ -95,10 +95,11 @@ struct ReportStep {
 
 /// Runs a plan file end to end.
 pub fn run(plan_path: &Path, json: bool) -> Result<()> {
-    let text = std::fs::read_to_string(plan_path)
-        .map_err(|e| HexoraError::invalid_input("plan", format!("{}: {e}", plan_path.display())))?;
+    let text = std::fs::read_to_string(plan_path).map_err(|e| {
+        NullhawkError::invalid_input("plan", format!("{}: {e}", plan_path.display()))
+    })?;
     let plan: Plan = serde_yaml_ng::from_str(&text)
-        .map_err(|e| HexoraError::invalid_input("plan", format!("not a valid plan: {e}")))?;
+        .map_err(|e| NullhawkError::invalid_input("plan", format!("not a valid plan: {e}")))?;
 
     // Paths in the plan are relative to the plan file, so a checked-in plan is portable.
     let base_dir = plan_path.parent().unwrap_or_else(|| Path::new("."));
@@ -118,7 +119,7 @@ pub fn run(plan_path: &Path, json: bool) -> Result<()> {
         _ => false,
     });
     if sends {
-        crate::license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+        crate::license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
     }
 
     let project = resolve(&plan.project);
@@ -173,7 +174,10 @@ fn run_step(
                 }),
                 (None, Some(spec)) => {
                     let url = i.url.as_deref().ok_or_else(|| {
-                        HexoraError::invalid_input("import", "a graphql import step needs a `url`")
+                        NullhawkError::invalid_input(
+                            "import",
+                            "a graphql import step needs a `url`",
+                        )
                     })?;
                     crate::import::graphql(crate::import::GraphqlArgs {
                         project,
@@ -187,7 +191,7 @@ fn run_step(
                         json,
                     })
                 }
-                _ => Err(HexoraError::invalid_input(
+                _ => Err(NullhawkError::invalid_input(
                     "import",
                     "an import step needs exactly one of `openapi` or `graphql`",
                 )),
@@ -248,7 +252,7 @@ fn run_step(
 /// any finding meets or exceeds it.
 fn fail_on(project: &Path, threshold: &str, json: bool) -> Result<()> {
     let severity = Severity::parse(threshold).ok_or_else(|| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "fail_on",
             format!("{threshold:?} is not a severity (info, low, medium, high, critical)"),
         )
@@ -270,7 +274,7 @@ fn fail_on(project: &Path, threshold: &str, json: bool) -> Result<()> {
         println!();
     }
     if breached {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "fail_on",
             format!("findings at or above `{}` were recorded", severity.as_str()),
         ));

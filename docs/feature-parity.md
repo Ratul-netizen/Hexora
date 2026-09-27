@@ -14,7 +14,7 @@ Three competitors, lopsided in three different directions:
 | Burp Enterprise (DAST) | n/a | best | good | good | **$13,600+/yr** |
 | Caido | **best in class** | **none at all** | good | thin | free / $200/yr / $30 user/mo |
 | ZAP | worst | good | **best in class** | good (SARIF) | **free**, Apache 2.0 |
-| **Hexora target** | Caido-class | evidence-driven | ZAP-class | **best in class** | TBD |
+| **Nullhawk target** | Caido-class | evidence-driven | ZAP-class | **best in class** | TBD |
 
 **Nobody holds all four columns.** That is the position worth attacking, and it is more
 defensible than price.
@@ -37,7 +37,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 ## 1. Interception and traffic
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
 | HTTP/1.1 proxy | ✅ | ✅ | PLANNED M2 | |
 | HTTPS interception (own CA) | ✅ | ✅ | PLANNED M2 | Per-install CA, never shipped |
@@ -47,30 +47,30 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Invisible / transparent proxying | ✅ | ✅ | PLANNED M5 | Needed for thick clients and mobile |
 | Upstream proxy chaining | ✅ | ✅ | PLANNED M5 | |
 | Client certificates / mTLS | ✅ | ✅ | PLANNED M5 | |
-| Match & Replace rules | ✅ | ✅ | **DONE M7** | `hexora matchreplace`: literal or regex rules over request/response headers, bodies and the request first line; empty pattern adds a header, empty replacement removes what matched; applied to in-scope traffic only |
+| Match & Replace rules | ✅ | ✅ | **DONE M7** | `nullhawk matchreplace`: literal or regex rules over request/response headers, bodies and the request first line; empty pattern adds a header, empty replacement removes what matched; applied to in-scope traffic only |
 | Traffic history + filtering | ✅ | ✅ | PLANNED M3 | |
 | Query language over traffic | Bambda | **HTTPQL** | **DONE M8** | See §6 |
 
 ## 2. Manual testing toolkit
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
 | Repeater | ✅ | ✅ Replay | PLANNED M4 | |
 | Repeater collections/tabs | ✅ | ✅ | PLANNED M4 | |
-| **Request branching with lineage** | ❌ | ❌ | PLANNED M4 | Hexora original — variants keep their parent |
-| Request pipelines (race conditions) | ⚠️ single-packet | ✅ Pipeline | **DONE M7** | `hexora race <request> --count N` replays a captured request N times concurrently and reports the spread; more than one 2xx on a single-use action is the race. Concurrent in-flight sends (HTTP/2 supported); last-byte single-packet synchronisation is a future refinement |
+| **Request branching with lineage** | ❌ | ❌ | PLANNED M4 | Nullhawk original — variants keep their parent |
+| Request pipelines (race conditions) | ⚠️ single-packet | ✅ Pipeline | **DONE M7** | `nullhawk race <request> --count N` replays a captured request N times concurrently and reports the spread; more than one 2xx on a single-use action is the race. Concurrent in-flight sends (HTTP/2 supported); last-byte single-packet synchronisation is a future refinement |
 | Comparer (response diff) | ✅ | ⚠️ | PLANNED M4 | |
 | Decoder | ✅ | ✅ | PLANNED M7 | |
-| Sequencer (token randomness) | ✅ | ❌ | **DONE M9** | `hexora sequencer`: from a file of tokens or extracted from captured traffic by response header or cookie name. Reports per-character Shannon entropy and effective bits/token, and flags predictable ones — a sequential/evenly-spaced counter (which fixed length and charset hide), a tiny alphabet, repeats — with a conservative verdict that says plainly when the sample is too small. Caido has no sequencer |
+| Sequencer (token randomness) | ✅ | ❌ | **DONE M9** | `nullhawk sequencer`: from a file of tokens or extracted from captured traffic by response header or cookie name. Reports per-character Shannon entropy and effective bits/token, and flags predictable ones — a sequential/evenly-spaced counter (which fixed length and charset hide), a tiny alphabet, repeats — with a conservative verdict that says plainly when the sample is too small. Caido has no sequencer |
 | Site map / target tree | ✅ | ✅ Sitemap | PLANNED M5 | |
 | Scope definition | ✅ | ✅ | **DONE M0** | Already enforced, not just represented |
 | Session handling rules / macros | ✅ | ⚠️ | **DONE M9/M15.2** | Two complementary paths: `identity refresh` adopts a fresh session from prior proxy traffic; `identity renew` replays a recorded login/refresh request and reads the new token out of its response (a Set-Cookie, a response header, or a dot-path in the JSON body) — the API-token / refresh-endpoint case. Both reshape the value into the identity's credential kind and never print it |
 
 ## 3. Automated attack
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Intruder: Sniper | ✅ | ✅ | **DONE M6** | `hexora fuzz --mode sniper` (the default); one list walked through each marked position in turn |
+| Intruder: Sniper | ✅ | ✅ | **DONE M6** | `nullhawk fuzz --mode sniper` (the default); one list walked through each marked position in turn |
 | Intruder: Battering Ram | ✅ | ✅ | **DONE M6** | `--mode battering-ram`; one list, the same value in every position at once |
 | Intruder: Pitchfork | ✅ | ✅ | **DONE M6** | `--mode pitchfork`; one list per position, advanced in lockstep |
 | Intruder: Cluster Bomb | ✅ | ✅ | **DONE M6** | `--mode cluster-bomb`; one list per position, the Cartesian product (memory-bounded to the ceiling) |
@@ -81,7 +81,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 ## 4. Scanning
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
 | Passive checks | ✅ | ❌ | **IMPLEMENTED M13.2** | Six checks: security headers, cookie attributes, CORS, technology disclosure, cache directives on authenticated responses, recorded TLS. Each result is a *lead* — a passive check cannot state anything more firmly |
 | Passive check catalogue size | large | — | **six** | Deliberately small. The differentiator is what a result means, not how many there are |
@@ -89,7 +89,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Active scanner | ✅ | ❌ | PLANNED M13.3–M13.7 | |
 | Crawler | ✅ | ❌ | PLANNED M13.8 | Scoped in `roadmap.md` as CR.a–f: a static extractor + a scheduled, scope-guarded frontier, GET-only and never auto-submitting, feeding the scanner's project; JS-rendered discovery merges with browser integration (M18) |
 | **Caido ships no active scanner at all** | — | — | — | Strong evidence the market adopts on manual quality first |
-| Custom scan checks | BChecks | ❌ | **DONE M15.5** | `hexora check`: a check is a saved query (the `hexora-query` language) plus a finding template; it runs in the passive scanner and files a lead when it matches. Matches on metadata and headers (body fields refused at add time). By construction it can only ever raise a lead capped at `Confidence::Reported` — never an actionable finding, never an active hypothesis — so a user-written check cannot overclaim. Caido has no check DSL at all |
+| Custom scan checks | BChecks | ❌ | **DONE M15.5** | `nullhawk check`: a check is a saved query (the `nullhawk-query` language) plus a finding template; it runs in the passive scanner and files a lead when it matches. Matches on metadata and headers (body fields refused at add time). By construction it can only ever raise a lead capped at `Confidence::Reported` — never an actionable finding, never an active hypothesis — so a user-written check cannot overclaim. Caido has no check DSL at all |
 | Evidence-verified findings | ⚠️ | ⚠️ | **IMPLEMENTED M13.1** | The store accepts only a `Verified`, which only a verification produces — a detector's suspicion does not compile into a finding |
 | OAST / Collaborator | ✅ | ⚠️ hosted | PLANNED M16 | Self-hostable is a selling point |
 | Findings with Markdown + export | ⚠️ | ✅ | **IMPLEMENTED M12.3** | |
@@ -97,7 +97,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Runnable proof of concept generated from evidence | ⚠️ manual | ⚠️ manual | **IMPLEMENTED M12.9** | Built from the stored exchanges, with credentials as named placeholders. `curl` where curl can express the request, and a stated reason where it cannot |
 | Response comparison names the field that differed | ⚠️ visual diff | ⚠️ visual diff | **IMPLEMENTED M12.10** | By JSON path with array indices kept, under a normalization policy that is reported rather than applied silently. Credential-named fields report the difference and withhold the value |
 | Active scanner with a request budget | ✅ | ✅ | **IMPLEMENTED M13.3** | One queue per host rather than a global limit, a plan produced by a function that cannot send, and a run that says when it stopped early instead of reading as clean |
-| Scanner says which of its own suspicions it cannot settle | ❌ | ❌ | **IMPLEMENTED M13.3** | `hexora detectors` names the dead ends. A suspicion nothing can answer is a gap in the tool, not coverage |
+| Scanner says which of its own suspicions it cannot settle | ❌ | ❌ | **IMPLEMENTED M13.3** | `nullhawk detectors` names the dead ends. A suspicion nothing can answer is a gap in the tool, not coverage |
 | Reflected input reported with its context | ⚠️ | ⚠️ | **IMPLEMENTED M13.4** | Which characters survived and what they landed inside, under the response's declared content type. A JSON echo is ruled out rather than filed |
 | Scanner declines to name a vulnerability class it did not establish | ❌ | ❌ | **IMPLEMENTED M13.4** | The finding says what the bytes did and what it would take to know more. It does not name a vulnerability class |
 | Open redirect resolved rather than substring-matched | ⚠️ | ⚠️ | **IMPLEMENTED M13.5** | Protocol-relative, backslash and userinfo forms are resolved the way a browser resolves them; a value merely carried in the header is refuted with the reason |
@@ -106,47 +106,47 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Scanner refuses to replay state-changing requests | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | Invariant 18, enforced by the scheduler rather than by each check |
 | Cross-identity access tested across captured traffic | ⚠️ | ⚠️ | **IMPLEMENTED M13.7** | Owner inferred from the captured credential by exact match, never guessed. Same `replay_once` and confidence ladder as the on-demand matrix |
 | Correctly-scoped endpoints are cleared without a declaration | ❌ | ❌ | **IMPLEMENTED M13.7** | Every value differing is the shape of per-caller data; an IDOR returns the owner's values, not different ones |
-| Intruder / payload iteration | ✅ | ✅ | **IMPLEMENTED M14.1** | `hexora fuzz`. Responses grouped by `(status, length)` so the outlier is one short row; concludes nothing, because what a difference means is the tester's judgement |
+| Intruder / payload iteration | ✅ | ✅ | **IMPLEMENTED M14.1** | `nullhawk fuzz`. Responses grouped by `(status, length)` so the outlier is one short row; concludes nothing, because what a difference means is the tester's judgement |
 | Payload iteration is rate-limited and stoppable | ⚠️ | ⚠️ | **IMPLEMENTED M14.1** | Reuses the scheduler's budget, pause and Ctrl-C. A truncated list says so rather than reading as "nothing stood out" |
 
-| A header on every request the tool sends | ✅ | ✅ | **IMPLEMENTED M14.2** | `hexora header add`, stored on the project. Bug bounty programmes require it so research traffic is attributable; applied before the identity's credential, and never spliced into a raw send |
+| A header on every request the tool sends | ✅ | ✅ | **IMPLEMENTED M14.2** | `nullhawk header add`, stored on the project. Bug bounty programmes require it so research traffic is attributable; applied before the identity's credential, and never spliced into a raw send |
 | Match-and-replace on proxied traffic | ✅ | ✅ | **DONE M7** | General rules now: the request-header add case that `--attach-headers` covered is one shape of it. Body rewrites keep a present `Content-Length` honest; a body/first-line change updates the exchange the proxy forwards and records |
 
-| Programme terms filter what gets reported | ❌ | ❌ | **IMPLEMENTED M14.3** | `hexora programme exclude`. Bug bounty programmes reject whole finding classes; a run that files forty of them is a run whose output gets skipped. Excluded classes are still looked for and still named in the report |
+| Programme terms filter what gets reported | ❌ | ❌ | **IMPLEMENTED M14.3** | `nullhawk programme exclude`. Bug bounty programmes reject whole finding classes; a run that files forty of them is a run whose output gets skipped. Excluded classes are still looked for and still named in the report |
 
 | Session handling / re-authentication | ✅ | ✅ | **DONE M15.1/M15.2** | `identity refresh` adopts a session from proxy traffic; `identity renew` replays a recorded login/refresh request and takes the fresh token from its response. Two paths, one for browser sessions and one for API tokens |
 | Login sequence recorder | ✅ | ⚠️ | **PARTIAL M15.2** | `identity renew --from <captured login>` replays a single recorded login/refresh request and extracts the new token. A multi-step recorded sequence, and password logins behind captcha/MFA/SSO, remain out of scope by design |
 
 ## 5. Extensibility
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Extension API | Montoya (Java) | JS/TS | **DONE M17/M19** | The SDK contract, permission-gated registry, and the WASM sandbox that runs the module. `hexora-ext` defines the manifest and `hexora ext install/list/permissions/enable/remove` installs with exactly the granted capabilities. `hexora-wasm` runs an extension's module (wasmi, a pure-Rust interpreter) with **no host imports** — no filesystem, network or clock — bounded by fuel and a memory cap, so a runaway or hostile module fails the run, not the tool. `hexora ext run` executes a passive-check module (exchange JSON in, observations out); validated with a real Rust guest compiled to wasm32. Wiring the runtime into the scanner loop, and the store, remain. See docs/extensions.md |
+| Extension API | Montoya (Java) | JS/TS | **DONE M17/M19** | The SDK contract, permission-gated registry, and the WASM sandbox that runs the module. `nullhawk-ext` defines the manifest and `nullhawk ext install/list/permissions/enable/remove` installs with exactly the granted capabilities. `nullhawk-wasm` runs an extension's module (wasmi, a pure-Rust interpreter) with **no host imports** — no filesystem, network or clock — bounded by fuel and a memory cap, so a runaway or hostile module fails the run, not the tool. `nullhawk ext run` executes a passive-check module (exchange JSON in, observations out); validated with a real Rust guest compiled to wasm32. Wiring the runtime into the scanner loop, and the store, remain. See docs/extensions.md |
 | Extension store | BApp Store | Plugin store | PLANNED M19 | Depends on the WASM runtime |
 | Permission model for extensions | ❌ | ❌ | **DONE M0** | Neither competitor has one |
 | Burp extension compatibility | — | mapping docs | DEFERRED M20+ | Separate subproject; out-of-process JVM |
 
 ## 6. Query, automation, workflow
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Traffic query language | Bambda (Java) | HTTPQL | **DONE M8** | `hexora-query`: boolean logic (AND/OR/NOT, implicit AND, parens) over `field OP value` clauses — `:` contains, `= != > < >= <=`, `~ !~` regex — across method/host/path/url/scheme/port/ext/status/duration/identity/origin/secure/sizes and the header/body fields. Wired into `hexora history --query` and the desktop History query box; bodies are read back only when a query mentions them |
+| Traffic query language | Bambda (Java) | HTTPQL | **DONE M8** | `nullhawk-query`: boolean logic (AND/OR/NOT, implicit AND, parens) over `field OP value` clauses — `:` contains, `= != > < >= <=`, `~ !~` regex — across method/host/path/url/scheme/port/ext/status/duration/identity/origin/secure/sizes and the header/body fields. Wired into `nullhawk history --query` and the desktop History query box; bodies are read back only when a query mentions them |
 | Node-based workflows | ❌ | ✅ | PLANNED M10 | |
 | Scripted automation | Bambda | JS nodes | PLANNED M10 | |
-| Headless / CLI | ⚠️ Enterprise | ✅ server mode | **DONE (CLI) M11** | The whole tool is a headless CLI already; `hexora run <plan.yaml>` drives a full engagement non-interactively. A long-running client/server split (run on a VPS) is still to do |
-| CI/CD integration | Enterprise only | ⚠️ | **DONE M11** | `hexora run` executes a declarative plan and, via `fail_on`, exits non-zero when findings cross a severity — a pipeline gate. Findings export as SARIF for GitHub code scanning. This is Burp-Enterprise-tier automation at the CLI, no separate product |
+| Headless / CLI | ⚠️ Enterprise | ✅ server mode | **DONE (CLI) M11** | The whole tool is a headless CLI already; `nullhawk run <plan.yaml>` drives a full engagement non-interactively. A long-running client/server split (run on a VPS) is still to do |
+| CI/CD integration | Enterprise only | ⚠️ | **DONE M11** | `nullhawk run` executes a declarative plan and, via `fail_on`, exits non-zero when findings cross a severity — a pipeline gate. Findings export as SARIF for GitHub code scanning. This is Burp-Enterprise-tier automation at the CLI, no separate product |
 
 ## 7. Browser integration
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Embedded browser | ✅ Chromium | ⚠️ | **DONE M18** | Drives the user's installed Chrome/Edge over CDP (a throwaway profile, killed on drop) rather than shipping a 150 MB Chromium — `core/browser`, used by `hexora domxss` |
-| DOM XSS testing | DOM Invader | ❌ | **DONE M18** | `hexora domxss <url>`: installs sink instrumentation over CDP (innerHTML/outerHTML, insertAdjacentHTML, document.write, eval, string timers), navigates with a canary in `location.hash` and `location.search`, and reports each proven source→sink flow. Caido has none |
+| Embedded browser | ✅ Chromium | ⚠️ | **DONE M18** | Drives the user's installed Chrome/Edge over CDP (a throwaway profile, killed on drop) rather than shipping a 150 MB Chromium — `core/browser`, used by `nullhawk domxss` |
+| DOM XSS testing | DOM Invader | ❌ | **DONE M18** | `nullhawk domxss <url>`: installs sink instrumentation over CDP (innerHTML/outerHTML, insertAdjacentHTML, document.write, eval, string timers), navigates with a canary in `location.hash` and `location.search`, and reports each proven source→sink flow. Caido has none |
 | Pre-configured proxy + cert | ✅ | ✅ | PLANNED M18 | |
 
 ## 8. AI
 
-| Capability | Burp Pro | Caido | Hexora | Notes |
+| Capability | Burp Pro | Caido | Nullhawk | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
 | Payload suggestions | Burp AI | ⚠️ | PLANNED M21 | |
 | Explain request/finding | Burp AI | ⚠️ | PLANNED M21 | |
@@ -154,7 +154,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | **Tool-permission gate** | ❌ | ❌ | **DONE M0** | Neither competitor gates AI actions |
 | **Evidence required for AI claims** | ❌ | ❌ | **DONE M0** | |
 
-## 9. Hexora-only
+## 9. Nullhawk-only
 
 Not parity — reasons to switch.
 
@@ -175,12 +175,12 @@ below are mostly cheap, and several are things we would have had to invent anywa
 
 | Adopt | Effort | Where | Why |
 | ----- | ------ | ----- | --- |
-| **Declarative YAML automation plans** | low | M10 | **DONE** — `hexora run <plan.yaml>`: an ordered `project → scope → import → crawl → scan → report` plan, run non-interactively (the plan is the consent), with `fail_on` to gate CI. Visual node workflows (for humans) are still to do; the YAML plan (for pipelines) is the one that matters here |
-| **SARIF output** | very low | M11 | **DONE** — `hexora report --format sarif` renders SARIF 2.1.0 (valid against the schema; findings at their severity level, leads as notes, no credentials). GitHub code scanning ingests it natively |
+| **Declarative YAML automation plans** | low | M10 | **DONE** — `nullhawk run <plan.yaml>`: an ordered `project → scope → import → crawl → scan → report` plan, run non-interactively (the plan is the consent), with `fail_on` to gate CI. Visual node workflows (for humans) are still to do; the YAML plan (for pipelines) is the one that matters here |
+| **SARIF output** | very low | M11 | **DONE** — `nullhawk report --format sarif` renders SARIF 2.1.0 (valid against the schema; findings at their severity level, leads as notes, no credentials). GitHub code scanning ingests it natively |
 | **Docker images + daemon mode** | medium | M11 | Already planned, but ZAP proves it must be first-class rather than an afterthought |
 | **Contexts** | medium | M9 | ZAP groups URLs + auth + session + technology into one object. A distinctly better model than Burp's scattered scope / session-rule / macro configuration, and session handling is the thing everyone hates |
 | **Browser-driven crawling** | high | M13+M18 | In July 2026 ZAP made its **Client Spider the recommended crawler**, replacing the AJAX Spider. This independently confirms the "drive a real browser over CDP" decision — and means the crawler and browser-integration milestones should merge rather than be built twice |
-| **OpenAPI / GraphQL / SOAP importers** | low | M5 | **OpenAPI 3.x + Swagger 2.0 DONE** (`hexora import openapi`, JSON/YAML): parses the spec, fills path params and required query params, and — with `--send` — fetches the safe operations through the scope guard and records them for scanning, the frontier the crawler cannot find because an API has no HTML links. GraphQL DONE too (`hexora import graphql`: parses an introspection result, generates a sendable query per root field — required args filled, `{ __typename }` where it returns an object — and POSTs the queries; mutations only with `--include-mutations`). SOAP still to do |
+| **OpenAPI / GraphQL / SOAP importers** | low | M5 | **OpenAPI 3.x + Swagger 2.0 DONE** (`nullhawk import openapi`, JSON/YAML): parses the spec, fills path params and required query params, and — with `--send` — fetches the safe operations through the scope guard and records them for scanning, the frontier the crawler cannot find because an API has no HTML links. GraphQL DONE too (`nullhawk import graphql`: parses an introspection result, generates a sendable query per root field — required args filled, `{ __typename }` where it returns an object — and POSTs the queries; mutations only with `--include-mutations`). SOAP still to do |
 | **Alert filters** | low | M13.2 | False-positive suppression. Consultancies need it; Caido lacks it |
 
 ### What we will not take from ZAP
@@ -215,7 +215,7 @@ addition.
   OEM licence required for embedding.
 - **Npcap — proprietary.** Free version does not permit redistribution.
 
-Hexora is AGPL-3.0, which changes the analysis versus a proprietary product, but
+Nullhawk is AGPL-3.0, which changes the analysis versus a proprietary product, but
 "invoke a tool the user installed" is materially safer than "ship it" in every case.
 Get advice before bundling anything.
 

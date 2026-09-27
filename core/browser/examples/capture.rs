@@ -1,16 +1,16 @@
 //! Launches the installed browser routed through a proxy and navigates it to a URL — the
-//! M18.c capture path. Everything the page fetches goes through the proxy (Hexora's scope
+//! M18.c capture path. Everything the page fetches goes through the proxy (Nullhawk's scope
 //! guard + capture); this only drives the browser.
 //!
 //! ```console
-//! $ cargo run -p hexora-browser --example capture -- 127.0.0.1:8751 http://target.test/
+//! $ cargo run -p nullhawk-browser --example capture -- 127.0.0.1:8751 http://target.test/
 //! ```
 //!
 //! Args: `<proxy host:port> <url> [settle_ms]`.
 
 use std::time::Duration;
 
-use hexora_browser::{Browser, LaunchOptions};
+use nullhawk_browser::{Browser, LaunchOptions};
 
 #[tokio::main]
 async fn main() {

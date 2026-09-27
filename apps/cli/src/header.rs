@@ -1,4 +1,4 @@
-//! `hexora header` — the headers every request must carry.
+//! `nullhawk header` — the headers every request must carry.
 //!
 //! A bug bounty programme routinely requires a researcher to identify their traffic:
 //!
@@ -18,8 +18,8 @@
 
 use std::path::Path;
 
-use hexora_types::http::Header;
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::http::Header;
+use nullhawk_types::{NullhawkError, Result};
 
 /// Prints the headers put on every request.
 pub fn list(path: &Path, json: bool) -> Result<()> {
@@ -48,11 +48,11 @@ pub fn list(path: &Path, json: bool) -> Result<()> {
         println!("A bug bounty programme usually requires one so it can tell your");
         println!("traffic from an attacker's:");
         println!();
-        println!("  hexora header add <project> \"X-HackerOne-Research: <username>\"");
+        println!("  nullhawk header add <project> \"X-HackerOne-Research: <username>\"");
         return Ok(());
     }
 
-    println!("On every request Hexora sends:");
+    println!("On every request Nullhawk sends:");
     for header in &headers {
         println!("  {}: {}", header.name, header.value_lossy());
     }
@@ -125,7 +125,7 @@ pub fn remove(path: &Path, name: &str, json: bool) -> Result<()> {
 /// Reads `Name: value`.
 fn parse(header: &str) -> Result<Header> {
     let (name, value) = header.split_once(':').ok_or_else(|| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "header",
             format!("`{header}` is not a header — write it as `Name: value`"),
         )
@@ -137,7 +137,7 @@ fn parse(header: &str) -> Result<Header> {
     let name = name.trim_matches([' ', '\t']);
     let value = value.trim_matches([' ', '\t']);
     if name.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "header",
             "a header needs a name",
         ));
@@ -145,14 +145,14 @@ fn parse(header: &str) -> Result<Header> {
     // A value carrying CR or LF would split every request it is spliced into, and this
     // one is spliced into all of them.
     if name.chars().chain(value.chars()).any(char::is_control) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "header",
             "a header cannot contain control characters: a value carrying CR or LF \
              would split every request it is attached to",
         ));
     }
     if name.chars().any(|c| c.is_whitespace() || c == ':') {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "header",
             format!("`{name}` is not a valid header name"),
         ));

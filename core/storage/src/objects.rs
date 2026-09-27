@@ -2,7 +2,7 @@
 //!
 //! A declaration is the tester's assertion that a particular string is an object
 //! belonging to a particular identity. It is stored because a constructed attempt
-//! made six weeks ago has to remain explicable: "why did Hexora ask for
+//! made six weeks ago has to remain explicable: "why did Nullhawk ask for
 //! `invoice-1001` as User B?" is answered by a row here, not by a reader inferring it
 //! from two paths that differ by one segment.
 //!
@@ -13,8 +13,8 @@
 //! project that emitted requests as a side effect of being edited would be a project
 //! nobody could safely open on a client's network.
 
-use hexora_types::ids::{IdentityId, ObjectId, RequestId};
-use hexora_types::object::{ObjectDeclaration, ObjectLocation};
+use nullhawk_types::ids::{IdentityId, ObjectId, RequestId};
+use nullhawk_types::object::{ObjectDeclaration, ObjectLocation};
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Result, StorageError};
@@ -262,7 +262,7 @@ fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::identity::Identity;
+    use nullhawk_types::identity::Identity;
 
     use super::*;
     use crate::{IdentityStore, Project};

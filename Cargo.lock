@@ -1547,390 +1547,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "hexora-active"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "futures",
- "hexora-authz",
- "hexora-engine",
- "hexora-http",
- "hexora-repeater",
- "hexora-scan",
- "hexora-storage",
- "hexora-types",
- "hexora-verify",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-authz"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "hexora-engine",
- "hexora-repeater",
- "hexora-storage",
- "hexora-types",
- "hexora-verify",
- "proptest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-browser"
-version = "0.1.0"
-dependencies = [
- "base64 0.21.7",
- "hexora-engine",
- "hexora-http",
- "hexora-types",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-cli"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "clap",
- "futures",
- "hexora-active",
- "hexora-authz",
- "hexora-browser",
- "hexora-crawl",
- "hexora-engine",
- "hexora-ext",
- "hexora-fuzz",
- "hexora-http",
- "hexora-import",
- "hexora-llm",
- "hexora-oob",
- "hexora-proxy",
- "hexora-query",
- "hexora-repeater",
- "hexora-report",
- "hexora-scan",
- "hexora-sequencer",
- "hexora-storage",
- "hexora-types",
- "hexora-verify",
- "hexora-wasm",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "hexora-crawl"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "hexora-engine",
- "hexora-types",
- "proptest",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-desktop"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "futures",
- "hexora-active",
- "hexora-authz",
- "hexora-browser",
- "hexora-crawl",
- "hexora-engine",
- "hexora-fuzz",
- "hexora-http",
- "hexora-import",
- "hexora-llm",
- "hexora-oob",
- "hexora-proxy",
- "hexora-query",
- "hexora-repeater",
- "hexora-report",
- "hexora-scan",
- "hexora-sequencer",
- "hexora-storage",
- "hexora-types",
- "hexora-verify",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "hexora-engine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.21.7",
- "bytes",
- "chrono",
- "hexora-types",
- "ring",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-ext"
-version = "0.1.0"
-dependencies = [
- "base64 0.21.7",
- "hexora-engine",
- "serde",
- "serde_json",
- "serde_yaml_ng",
-]
-
-[[package]]
-name = "hexora-fuzz"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "hexora-active",
- "hexora-engine",
- "hexora-repeater",
- "hexora-types",
- "hexora-verify",
- "tokio",
-]
-
-[[package]]
-name = "hexora-http"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.21.7",
- "brotli 7.0.0",
- "bytes",
- "flate2",
- "h2",
- "hexora-engine",
- "hexora-types",
- "http",
- "proptest",
- "rcgen",
- "rustls",
- "rustls-native-certs",
- "rustls-pemfile",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls",
- "tracing",
- "x509-parser",
-]
-
-[[package]]
-name = "hexora-import"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "serde_yaml_ng",
-]
-
-[[package]]
-name = "hexora-llm"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "hexora-engine",
- "hexora-types",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hexora-oob"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "hexora-types",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hexora-proxy"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "h2",
- "hexora-engine",
- "hexora-http",
- "hexora-storage",
- "hexora-types",
- "http",
- "rcgen",
- "regex",
- "rustls",
- "rustls-pemfile",
- "rustls-pki-types",
- "serde",
- "sha1",
- "sha2",
- "tempfile",
- "time",
- "tokio",
- "tokio-rustls",
- "tracing",
-]
-
-[[package]]
-name = "hexora-query"
-version = "0.1.0"
-dependencies = [
- "hexora-types",
- "regex",
-]
-
-[[package]]
-name = "hexora-repeater"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "hexora-engine",
- "hexora-http",
- "hexora-storage",
- "hexora-types",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-report"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "hexora-storage",
- "hexora-types",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "hexora-scan"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "hexora-ext",
- "hexora-query",
- "hexora-storage",
- "hexora-types",
- "hexora-verify",
- "hexora-wasm",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
- "wat",
-]
-
-[[package]]
-name = "hexora-sequencer"
-version = "0.1.0"
-
-[[package]]
-name = "hexora-storage"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "hexora-ext",
- "hexora-query",
- "hexora-types",
- "r2d2",
- "r2d2_sqlite",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.20",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hexora-types"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "chrono",
- "proptest",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "uuid",
-]
-
-[[package]]
-name = "hexora-verify"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "hexora-engine",
- "hexora-repeater",
- "hexora-types",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hexora-wasm"
-version = "0.1.0"
-dependencies = [
- "hexora-ext",
- "serde_json",
- "wasmi",
- "wat",
-]
-
-[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2652,6 +2268,390 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nullhawk-active"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "nullhawk-authz",
+ "nullhawk-engine",
+ "nullhawk-http",
+ "nullhawk-repeater",
+ "nullhawk-scan",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "nullhawk-verify",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-authz"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "nullhawk-engine",
+ "nullhawk-repeater",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "nullhawk-verify",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-browser"
+version = "0.1.0"
+dependencies = [
+ "base64 0.21.7",
+ "nullhawk-engine",
+ "nullhawk-http",
+ "nullhawk-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-cli"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "clap",
+ "futures",
+ "nullhawk-active",
+ "nullhawk-authz",
+ "nullhawk-browser",
+ "nullhawk-crawl",
+ "nullhawk-engine",
+ "nullhawk-ext",
+ "nullhawk-fuzz",
+ "nullhawk-http",
+ "nullhawk-import",
+ "nullhawk-llm",
+ "nullhawk-oob",
+ "nullhawk-proxy",
+ "nullhawk-query",
+ "nullhawk-repeater",
+ "nullhawk-report",
+ "nullhawk-scan",
+ "nullhawk-sequencer",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "nullhawk-verify",
+ "nullhawk-wasm",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "nullhawk-crawl"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nullhawk-engine",
+ "nullhawk-types",
+ "proptest",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-desktop"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "nullhawk-active",
+ "nullhawk-authz",
+ "nullhawk-browser",
+ "nullhawk-crawl",
+ "nullhawk-engine",
+ "nullhawk-fuzz",
+ "nullhawk-http",
+ "nullhawk-import",
+ "nullhawk-llm",
+ "nullhawk-oob",
+ "nullhawk-proxy",
+ "nullhawk-query",
+ "nullhawk-repeater",
+ "nullhawk-report",
+ "nullhawk-scan",
+ "nullhawk-sequencer",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "nullhawk-verify",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "nullhawk-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.21.7",
+ "bytes",
+ "chrono",
+ "nullhawk-types",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-ext"
+version = "0.1.0"
+dependencies = [
+ "base64 0.21.7",
+ "nullhawk-engine",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "nullhawk-fuzz"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "nullhawk-active",
+ "nullhawk-engine",
+ "nullhawk-repeater",
+ "nullhawk-types",
+ "nullhawk-verify",
+ "tokio",
+]
+
+[[package]]
+name = "nullhawk-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.21.7",
+ "brotli 7.0.0",
+ "bytes",
+ "flate2",
+ "h2",
+ "http",
+ "nullhawk-engine",
+ "nullhawk-types",
+ "proptest",
+ "rcgen",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "x509-parser",
+]
+
+[[package]]
+name = "nullhawk-import"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "nullhawk-llm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nullhawk-engine",
+ "nullhawk-types",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "nullhawk-oob"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nullhawk-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "nullhawk-proxy"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "h2",
+ "http",
+ "nullhawk-engine",
+ "nullhawk-http",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "rcgen",
+ "regex",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-pki-types",
+ "serde",
+ "sha1",
+ "sha2",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-query"
+version = "0.1.0"
+dependencies = [
+ "nullhawk-types",
+ "regex",
+]
+
+[[package]]
+name = "nullhawk-repeater"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "nullhawk-engine",
+ "nullhawk-http",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-report"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "nullhawk-scan"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "nullhawk-ext",
+ "nullhawk-query",
+ "nullhawk-storage",
+ "nullhawk-types",
+ "nullhawk-verify",
+ "nullhawk-wasm",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "wat",
+]
+
+[[package]]
+name = "nullhawk-sequencer"
+version = "0.1.0"
+
+[[package]]
+name = "nullhawk-storage"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "nullhawk-ext",
+ "nullhawk-query",
+ "nullhawk-types",
+ "r2d2",
+ "r2d2_sqlite",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "nullhawk-types"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
+name = "nullhawk-verify"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nullhawk-engine",
+ "nullhawk-repeater",
+ "nullhawk-types",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullhawk-wasm"
+version = "0.1.0"
+dependencies = [
+ "nullhawk-ext",
+ "serde_json",
+ "wasmi",
+ "wat",
 ]
 
 [[package]]

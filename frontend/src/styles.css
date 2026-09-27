@@ -1,5 +1,5 @@
 /*
- * Hexora's interface.
+ * Nullhawk's interface.
  *
  * Dark by default, because this is a tool people sit in front of for eight hours,
  * and dense by default, because the useful question is usually "which of these four
@@ -1135,7 +1135,7 @@ tr.violation td {
 }
 
 /* A field whose name suggests it carries something personal. A hint for the eye, not
-   a claim: Hexora does not know what an application's data means. */
+   a claim: Nullhawk does not know what an application's data means. */
 .differences li.notable code {
   font-weight: 600;
 }

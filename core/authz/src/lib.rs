@@ -1,4 +1,4 @@
-//! # hexora-authz
+//! # nullhawk-authz
 //!
 //! Authorization testing: take one request that worked, replay it as everybody else,
 //! and say what that proves.
@@ -68,7 +68,7 @@
 //! looks exactly the same from inside a comparison — and
 //! [`AnonymousControl::NotTried`] does not clear it, because a run that did not look
 //! has not shown anything. See [`compare::Baseline`] and
-//! [`hexora_types::structure`].
+//! [`nullhawk_types::structure`].
 //!
 //! ## Requests that change things
 //!
@@ -92,13 +92,13 @@ pub mod session;
 /// else is read as a bearer token. `None` means nothing stated a lifetime, never that
 /// the credential works.
 fn expiry_of(value: &str) -> Option<i64> {
-    if let Some(lifetime) = hexora_types::expiry::of_jwt(value) {
+    if let Some(lifetime) = nullhawk_types::expiry::of_jwt(value) {
         return Some(lifetime.expires_at);
     }
     value
         .split(';')
         .filter_map(|pair| pair.split_once('='))
-        .filter_map(|(_, v)| hexora_types::expiry::of_jwt(v.trim()))
+        .filter_map(|(_, v)| nullhawk_types::expiry::of_jwt(v.trim()))
         .map(|lifetime| lifetime.expires_at)
         .max()
 }
@@ -106,14 +106,14 @@ pub mod suggest;
 
 use std::sync::Arc;
 
-use hexora_engine::transport::HttpTransport;
-use hexora_repeater::{Repeater, SendAs};
-use hexora_storage::{IdentityStore, ObjectStore, TrafficStore};
-use hexora_types::error::Result;
-use hexora_types::finding::Hypothesis;
-use hexora_types::identity::{Identity, PrivilegeLevel};
-use hexora_types::ids::{IdentityId, RequestId, TargetId};
-use hexora_verify::Detector;
+use nullhawk_engine::transport::HttpTransport;
+use nullhawk_repeater::{Repeater, SendAs};
+use nullhawk_storage::{IdentityStore, ObjectStore, TrafficStore};
+use nullhawk_types::error::Result;
+use nullhawk_types::finding::Hypothesis;
+use nullhawk_types::identity::{Identity, PrivilegeLevel};
+use nullhawk_types::ids::{IdentityId, RequestId, TargetId};
+use nullhawk_verify::Detector;
 
 use crate::compare::{contains_any, Baseline, Fingerprint, SAME_RESOURCE};
 
@@ -224,7 +224,7 @@ pub struct Cell {
     /// for User A and absent for User B". `None` when nothing was sent, so there was
     /// nothing to compare. Carries the normalization policy that was applied, because
     /// a comparison that set fields aside without saying so would be altering evidence.
-    pub structure: Option<hexora_types::structure::Diff>,
+    pub structure: Option<nullhawk_types::structure::Diff>,
     /// What happened.
     pub outcome: Outcome,
     /// What it means.
@@ -245,7 +245,7 @@ pub struct Cell {
     ///
     /// `None` means nothing re-examined it — which is not the same as "it did not
     /// reproduce", and the difference is the whole reason this is not a `bool`.
-    pub verification: Option<hexora_types::verify::Verification>,
+    pub verification: Option<nullhawk_types::verify::Verification>,
     /// Why the cell has no request, when it failed.
     pub error: Option<String>,
     /// Why a violation was demoted, when it was.
@@ -420,7 +420,7 @@ impl<T: HttpTransport> AuthzTester<T> {
             .decide_as(&draft, SendAs::authz(&plan.owner))
             .permits_sending()
         {
-            return Err(hexora_types::HexoraError::OutOfScope(url));
+            return Err(nullhawk_types::NullhawkError::OutOfScope(url));
         }
 
         // Persisted before anything is sent, and not only to satisfy the foreign key
@@ -515,7 +515,7 @@ impl<T: HttpTransport> AuthzTester<T> {
     /// The whole check, in the shape every check has. The matrix is the first
     /// experiment; `--verify` makes the verifier run a second one. Nothing here
     /// produces a `Finding` directly — it cannot, because
-    /// [`Verified::conclude`](hexora_types::verify::Verified::conclude) is the only
+    /// [`Verified::conclude`](nullhawk_types::verify::Verified::conclude) is the only
     /// thing that does and it needs a verification.
     pub async fn assess(&self, plan: &Plan, target: TargetId) -> Result<Assessment> {
         let mut run = self.run(plan).await?;
@@ -549,10 +549,10 @@ impl<T: HttpTransport> AuthzTester<T> {
             owner_request: run.matrix.owner.request,
             repeat: run.repeat,
         };
-        let lab = hexora_verify::RepeaterLab::new(&self.repeater);
+        let lab = nullhawk_verify::RepeaterLab::new(&self.repeater);
 
         let matrix_for_writeup = run.matrix.clone();
-        let judged = hexora_verify::verify_all(&verifier, &work, &lab, |hypothesis, _| {
+        let judged = nullhawk_verify::verify_all(&verifier, &work, &lab, |hypothesis, _| {
             let cell = matrix_for_writeup
                 .cells
                 .iter()
@@ -585,13 +585,13 @@ impl<T: HttpTransport> AuthzTester<T> {
     /// Sends the draft as one identity and classifies what came back.
     async fn replay(
         &self,
-        draft: &hexora_repeater::Draft,
+        draft: &nullhawk_repeater::Draft,
         identity: &Identity,
         owner: &Identity,
         baseline: &Baseline,
     ) -> Cell {
         replay_once(
-            &hexora_verify::RepeaterLab::new(&self.repeater),
+            &nullhawk_verify::RepeaterLab::new(&self.repeater),
             draft,
             identity,
             owner,
@@ -603,13 +603,13 @@ impl<T: HttpTransport> AuthzTester<T> {
 
 /// Sends a draft as one identity through a lab and classifies what came back.
 ///
-/// Free rather than a method, and taking a [`Lab`](hexora_verify::Lab) rather than the
+/// Free rather than a method, and taking a [`Lab`](nullhawk_verify::Lab) rather than the
 /// repeater, because the verifier needs exactly this and must not be handed a
 /// transport of its own. Both callers go through the same scope guard because there
 /// is only one way to send.
 pub async fn replay_once(
-    lab: &dyn hexora_verify::Lab,
-    draft: &hexora_repeater::Draft,
+    lab: &dyn nullhawk_verify::Lab,
+    draft: &nullhawk_repeater::Draft,
     identity: &Identity,
     owner: &Identity,
     baseline: &Baseline,
@@ -692,7 +692,7 @@ pub async fn replay_once(
 ///
 /// Listed rather than discovered: adding a check means adding it here, and that is
 /// the honest cost of not having a plugin mechanism.
-pub fn checks() -> [hexora_types::verify::DetectorInfo; 2] {
+pub fn checks() -> [nullhawk_types::verify::DetectorInfo; 2] {
     [
         crate::analysis::CROSS_IDENTITY,
         crate::analysis::CONSTRUCTED_OBJECT,
@@ -709,7 +709,7 @@ pub fn checks() -> [hexora_types::verify::DetectorInfo; 2] {
 pub struct Run {
     /// What the run saw.
     pub matrix: Matrix,
-    draft: hexora_repeater::Draft,
+    draft: nullhawk_repeater::Draft,
     identities: Vec<Identity>,
     owner: Identity,
     baseline: Baseline,
@@ -721,12 +721,12 @@ pub struct Assessment {
     /// The matrix, with each verified cell carrying its verification.
     pub matrix: Matrix,
     /// Every hypothesis the detector raised and what became of it.
-    pub judged: Vec<hexora_verify::Judged>,
+    pub judged: Vec<nullhawk_verify::Judged>,
 }
 
 impl Assessment {
     /// The findings, dropping every hypothesis verification did not support.
-    pub fn findings(&self) -> Vec<hexora_types::verify::Verified> {
+    pub fn findings(&self) -> Vec<nullhawk_types::verify::Verified> {
         self.judged
             .iter()
             .filter_map(|outcome| outcome.finding.clone())
@@ -735,7 +735,7 @@ impl Assessment {
 
     /// Hypotheses an experiment knocked down, for a tester who wants to see that the
     /// check ran and produced nothing rather than assuming it did not run.
-    pub fn unsupported(&self) -> impl Iterator<Item = &hexora_verify::Judged> {
+    pub fn unsupported(&self) -> impl Iterator<Item = &nullhawk_verify::Judged> {
         self.judged
             .iter()
             .filter(|outcome| outcome.finding.is_none())
@@ -782,11 +782,11 @@ fn verdict_for(cell: &Cell, identity: &Identity, owner: &Identity) -> Verdict {
 
 #[cfg(test)]
 mod tests {
-    use hexora_engine::guard::ScopeGuard;
-    use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
-    use hexora_storage::{MemoryBlobStore, MetadataDb};
-    use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-    use hexora_types::scope::Scope;
+    use nullhawk_engine::guard::ScopeGuard;
+    use nullhawk_engine::transport::{Exchange, HttpTransport, SendOptions};
+    use nullhawk_storage::{MemoryBlobStore, MetadataDb};
+    use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+    use nullhawk_types::scope::Scope;
 
     use super::*;
 
@@ -881,7 +881,7 @@ mod tests {
         let mut headers = Headers::new();
         headers.set("Content-Type", "application/json");
         store
-            .record(&hexora_storage::CapturedExchange {
+            .record(&nullhawk_storage::CapturedExchange {
                 request,
                 response: HttpResponse {
                     status: 200,
@@ -909,7 +909,7 @@ mod tests {
     /// Not optional: authorization replays are automated traffic, and the guard
     /// refuses automated requests to hosts nobody declared in scope.
     fn scope() -> Arc<Scope> {
-        Arc::new(Scope::new().include(hexora_types::scope::ScopeRule::host("api.example.com")))
+        Arc::new(Scope::new().include(nullhawk_types::scope::ScopeRule::host("api.example.com")))
     }
 
     fn tester(
@@ -1306,7 +1306,7 @@ mod tests {
         #[async_trait::async_trait]
         impl HttpTransport for Broken {
             async fn send(&self, _r: HttpRequest, _o: SendOptions) -> Result<Exchange> {
-                Err(hexora_types::HexoraError::Internal(
+                Err(nullhawk_types::NullhawkError::Internal(
                     "connection reset".into(),
                 ))
             }
@@ -1340,16 +1340,16 @@ mod tests {
 
         // The second experiment is the verifier's, so this goes through `assess`.
         let assessment = tester
-            .assess(&plan, hexora_types::ids::TargetId::new())
+            .assess(&plan, nullhawk_types::ids::TargetId::new())
             .await
             .unwrap();
         assert!(matches!(
             assessment.matrix.cells[0].verification,
-            Some(hexora_types::verify::Verification::Reproduced { .. })
+            Some(nullhawk_types::verify::Verification::Reproduced { .. })
         ));
         assert_eq!(
             assessment.findings()[0].finding().confidence,
-            hexora_types::Confidence::Confirmed
+            nullhawk_types::Confidence::Confirmed
         );
     }
 
