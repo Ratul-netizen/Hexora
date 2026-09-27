@@ -33,6 +33,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+pub mod launch;
+pub use launch::{attach, find_browser, Browser, BrowserKind, LaunchOptions};
+
 use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
 use hexora_http::ws::{self, Opcode, WsConnection};
 use hexora_http::{TcpTransport, TlsConfig};

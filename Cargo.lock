@@ -1584,6 +1584,7 @@ dependencies = [
  "hexora-http",
  "hexora-types",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]

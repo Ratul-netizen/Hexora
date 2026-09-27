@@ -933,6 +933,14 @@ the same way the crawler is.
 | ---- | ---------------- | ---------- |
 | **M18.a** — the CDP transport | Connect to a browser's DevTools endpoint (discover the WebSocket URL over its `/json` HTTP interface), speak CDP over that socket — **reusing the WS.d client** — with request/response id matching and an event stream. The foundation everything else rides. Testable against a local headless browser, no target needed. | WS.d (`WsConnection`) |
 | **M18.b** — launch and attach | Find the user's installed Chrome or Edge, launch it headless with a throwaway profile and a debugging port, or attach to one already running; clean shutdown that never leaves an orphan. No Chromium shipped. | M18.a |
+<!-- M18.a + M18.b DONE. hexora-browser::launch: find_browser() probes the known Chrome/Edge/
+Chromium locations (HEXORA_BROWSER overrides); Browser::launch() starts it headless with a
+throwaway profile and --remote-debugging-port=0, reads the real port back from the
+DevToolsActivePort file, and connect()/version() drive it over the M18.a CDP client. Drop kills
+the process (children exit with it) and TempDir removes the profile — verified live against
+Chrome 154 with zero orphaned processes left. attach(port) connects to an already-running
+instance without owning its lifecycle. -->
+
 | **M18.c** — navigate and capture | Drive `Page.navigate`, wait for load, enable the `Network` domain, and capture the requests the page actually made — **through the scope guard**, recorded like proxy traffic so the scanner sees a SPA's real surface. | M18.b, scope guard |
 | **M18.d** — the JS-rendered crawl | After load, extract links and endpoints from the **rendered DOM** and the network the page generated, feed them to CR.a/CR.f, and crawl under the same bounds and safety policy — closing the SPA coverage gap CR.f named. `rel="nofollow"` from the live DOM lands here. | M18.c, CR.b–f |
 | **M18.e** — DOM XSS testing | The flagship: drive a source, observe the sink in the live DOM, and settle it with the verification model — a finding no request/response scanner can make. | M18.d, verify |
