@@ -1632,6 +1632,14 @@ enum ExtCommand {
         /// The extension id.
         id: String,
     },
+    /// Run a passive-check extension's module against one exchange, in the sandbox.
+    Run {
+        /// The extension manifest (its `entry` module is loaded).
+        manifest: PathBuf,
+        /// An exchange as JSON to feed the check. Defaults to `{}`.
+        #[arg(long, value_name = "FILE")]
+        exchange: Option<PathBuf>,
+    },
     /// Switch an extension on (requires its required capabilities be granted).
     Enable {
         /// Project directory.
@@ -2296,6 +2304,9 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }) => ext::install(path, manifest, *grant_all, cli.json),
         Command::Ext(ExtCommand::Remove { path, id }) => ext::remove(path, id, cli.json),
         Command::Ext(ExtCommand::Permissions { path, id }) => ext::permissions(path, id, cli.json),
+        Command::Ext(ExtCommand::Run { manifest, exchange }) => {
+            ext::run_extension(manifest, exchange.as_deref(), cli.json)
+        }
         Command::Ext(ExtCommand::Enable { path, id }) => ext::set_enabled(path, id, true, cli.json),
         Command::Ext(ExtCommand::Disable { path, id }) => {
             ext::set_enabled(path, id, false, cli.json)

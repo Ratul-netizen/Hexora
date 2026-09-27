@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use hexora_ext::{InstalledExtension, Manifest};
+use hexora_ext::{ExtensionKind, InstalledExtension, Manifest};
 use hexora_types::{HexoraError, Result};
 
 /// Lists the project's installed extensions.
@@ -179,6 +179,53 @@ pub fn permissions(project: &Path, id: &str, json: bool) -> Result<()> {
             };
             println!("  {cap} [{held}] — {}", cap.explanation());
         }
+    }
+    Ok(())
+}
+
+/// Runs a passive-check extension's WASM module against one exchange, in the sandbox.
+///
+/// A test harness for extension authors: it loads the module the manifest points at and runs it
+/// over an exchange you supply, printing the observations it emits. The module runs with no host
+/// imports (no filesystem, network or clock), bounded by fuel and a memory cap, so a runaway or
+/// hostile module fails the run rather than the tool.
+pub fn run_extension(manifest_path: &Path, exchange_path: Option<&Path>, json: bool) -> Result<()> {
+    let bytes = std::fs::read(manifest_path).map_err(|e| {
+        HexoraError::invalid_input("manifest", format!("{}: {e}", manifest_path.display()))
+    })?;
+    let manifest =
+        Manifest::parse(&bytes).map_err(|e| HexoraError::invalid_input("manifest", e.message))?;
+    if manifest.kind != ExtensionKind::PassiveCheck {
+        return Err(HexoraError::invalid_input(
+            "kind",
+            format!(
+                "only passive-check extensions can be run this way; this is a {}",
+                manifest.kind.label()
+            ),
+        ));
+    }
+
+    let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let module_path = dir.join(&manifest.entry);
+    let module = std::fs::read(&module_path).map_err(|e| {
+        HexoraError::invalid_input("entry", format!("{}: {e}", module_path.display()))
+    })?;
+
+    let exchange = match exchange_path {
+        Some(path) => std::fs::read_to_string(path).map_err(|e| {
+            HexoraError::invalid_input("--exchange", format!("{}: {e}", path.display()))
+        })?,
+        None => "{}".to_string(),
+    };
+
+    let out = hexora_wasm::run_passive(&module, &exchange, &hexora_wasm::Limits::default())
+        .map_err(|e| HexoraError::invalid_input("extension", e.message))?;
+
+    if json {
+        println!("{out}");
+    } else {
+        println!("{} produced:", manifest.name);
+        println!("{out}");
     }
     Ok(())
 }

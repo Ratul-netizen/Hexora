@@ -22,6 +22,7 @@ members = [
     "core/import",
     "core/sequencer",
     "core/ext",
+    "core/wasm",
     "core/report",
     "apps/cli",
     "apps/desktop/src-tauri",
@@ -58,6 +59,7 @@ hexora-query = { path = "core/query" }
 hexora-import = { path = "core/import" }
 hexora-sequencer = { path = "core/sequencer" }
 hexora-ext = { path = "core/ext" }
+hexora-wasm = { path = "core/wasm" }
 hexora-report = { path = "core/report" }
 
 # Async runtime. Needed at M0 only for the engine trait signatures.

@@ -115,3 +115,4 @@ when Tauri and the rustls stack update.
 | RUSTSEC-2024-0370 | `proc-macro-error` | Unmaintained; arrives via Tauri's proc-macro dependencies. No direct use. |
 | RUSTSEC-2025-0075 / 0080 / 0081 / 0098 / 0100 | `unic-*` (ICU) | Unmaintained; the ICU/`unic-*` stack arrives via Tauri and `url`. No direct use. |
 | RUSTSEC-2025-0134 | `rustls-pemfile` | Unmaintained, superseded by `rustls-pki-types`; still pulled by the rustls stack. Migrate when the ecosystem does. |
+| RUSTSEC-2024-0436 | `paste` | Unmaintained; a compile-time macro pulled in by `wasmi`, the extension WASM interpreter. No runtime code, no direct use. Re-review when `wasmi` drops it. |

@@ -121,7 +121,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Extension API | Montoya (Java) | JS/TS | **IN PROGRESS M17** | The SDK contract and permission-gated registry are done: `hexora-ext` defines the manifest (id, version, api_version, kind, entry, permission request) and `hexora ext install/list/permissions/enable/remove` installs one with exactly the granted capabilities, never wider than requested, disabled if a required one is declined. The WASM sandbox that runs the module is the next milestone (M19). See docs/extensions.md |
+| Extension API | Montoya (Java) | JS/TS | **DONE M17/M19** | The SDK contract, permission-gated registry, and the WASM sandbox that runs the module. `hexora-ext` defines the manifest and `hexora ext install/list/permissions/enable/remove` installs with exactly the granted capabilities. `hexora-wasm` runs an extension's module (wasmi, a pure-Rust interpreter) with **no host imports** — no filesystem, network or clock — bounded by fuel and a memory cap, so a runaway or hostile module fails the run, not the tool. `hexora ext run` executes a passive-check module (exchange JSON in, observations out); validated with a real Rust guest compiled to wasm32. Wiring the runtime into the scanner loop, and the store, remain. See docs/extensions.md |
 | Extension store | BApp Store | Plugin store | PLANNED M19 | Depends on the WASM runtime |
 | Permission model for extensions | ❌ | ❌ | **DONE M0** | Neither competitor has one |
 | Burp extension compatibility | — | mapping docs | DEFERRED M20+ | Separate subproject; out-of-process JVM |

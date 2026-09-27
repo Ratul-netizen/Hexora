@@ -5,9 +5,32 @@ is and what it needs; the module is the code. Hexora installs an extension with 
 capabilities the user approves — nothing is granted implicitly, and a capability that was never
 granted is never available (security invariant 4).
 
-> Status: this build installs, validates and permission-gates extensions
-> (`hexora ext`). Executing the WASM module in a sandbox is the runtime milestone (M19). The
-> manifest and permission contract below are stable; author against them now.
+> Status: this build installs, validates and permission-gates extensions (`hexora ext`) **and
+> runs a passive-check module in the WASM sandbox** (`hexora ext run`). Wiring the runtime into
+> the scan loop, and the extension store, are the remaining steps. The manifest, permission and
+> ABI contracts below are stable; author against them now.
+
+## The module ABI
+
+The module is WebAssembly with **no host imports** — it gets its linear memory and nothing else,
+so it cannot touch the filesystem, network or clock. It exports:
+
+- `memory` — its linear memory.
+- `alloc(len: i32) -> i32` — reserve `len` bytes, return a pointer; the host writes the input there.
+- `run(ptr: i32, len: i32) -> i64` — read `len` bytes of input JSON at `ptr`, and return a packed
+  `(out_ptr << 32) | out_len` pointing at the output JSON in the same memory.
+
+For a passive check the input is one exchange as JSON and the output is an array of observations.
+Execution is bounded by **fuel** (an infinite loop is trapped, not left to hang) and a memory
+cap, so a hostile or buggy module fails the run rather than the tool. Test a module before you
+ship it:
+
+```
+hexora ext run path/to/manifest.yaml --exchange exchange.json
+```
+
+A minimal Rust guest is `cargo build --release --target wasm32-unknown-unknown` of a `cdylib`
+that exports `alloc` and `run`; point the manifest's `entry` at the resulting `.wasm`.
 
 ## The manifest
 

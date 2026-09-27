@@ -23,6 +23,7 @@ ignore = [
     "RUSTSEC-2025-0098", # unic-* (ICU) unmaintained, via Tauri
     "RUSTSEC-2025-0100", # unic-* (ICU) unmaintained, via Tauri
     "RUSTSEC-2025-0134", # rustls-pemfile: unmaintained, superseded by rustls-pki-types
+    "RUSTSEC-2024-0436", # paste: unmaintained, via wasmi (the extension WASM interpreter)
 ]
 
 [licenses]
@@ -71,6 +72,7 @@ exceptions = [
     { name = "hexora-import", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-sequencer", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-ext", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-wasm", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-report", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-cli", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-desktop", allow = ["AGPL-3.0-or-later"] },
