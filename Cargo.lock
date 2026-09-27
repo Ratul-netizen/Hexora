@@ -1709,6 +1709,7 @@ dependencies = [
 name = "hexora-ext"
 version = "0.1.0"
 dependencies = [
+ "base64 0.21.7",
  "hexora-engine",
  "serde",
  "serde_json",
@@ -1856,13 +1857,17 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "hexora-ext",
  "hexora-query",
  "hexora-storage",
  "hexora-types",
  "hexora-verify",
+ "hexora-wasm",
+ "serde",
  "serde_json",
  "tempfile",
  "tracing",
+ "wat",
 ]
 
 [[package]]

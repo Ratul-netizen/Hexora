@@ -55,12 +55,19 @@ pub fn passive(args: Args<'_>) -> Result<()> {
             .custom_checks()?
             .iter()
             .any(|c| c.id == detector);
-        if registry.find(detector).is_none() && !is_custom {
+        // Or an installed passive-check extension — those live in the project too, keyed by their
+        // manifest id.
+        let is_extension = project
+            .settings()
+            .extensions()?
+            .iter()
+            .any(|e| e.manifest.id == detector);
+        if registry.find(detector).is_none() && !is_custom && !is_extension {
             return Err(hexora_types::HexoraError::invalid_input(
                 "--detector",
                 format!(
                     "no check called {detector:?}. `hexora detectors` lists the built-ins, \
-                     and `hexora check list` the custom ones"
+                     `hexora check list` the custom ones, and `hexora ext list` the extensions"
                 ),
             ));
         }

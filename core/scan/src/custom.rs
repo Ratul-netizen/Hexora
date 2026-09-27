@@ -180,7 +180,10 @@ fn header_lines(headers: &hexora_types::http::Headers) -> Vec<String> {
 /// Leaks a string once and reuses it thereafter, so runtime-loaded checks can satisfy the
 /// `&'static str` a [`DetectorInfo`] requires without leaking on every scan. Bounded to the
 /// set of distinct id/name/message strings a session ever sees.
-fn intern(value: &str) -> &'static str {
+///
+/// Shared with [`crate::extension`], which faces the same `&'static str` requirement for
+/// extension-backed checks loaded at runtime.
+pub(crate) fn intern(value: &str) -> &'static str {
     static POOL: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
     let mut guard = POOL.lock().unwrap();
     let pool = guard.get_or_insert_with(HashSet::new);

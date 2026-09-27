@@ -176,6 +176,31 @@ pub struct InstalledExtension {
     pub grants: GrantSet,
     /// Whether it runs. False when its required capabilities are not all granted.
     pub enabled: bool,
+    /// The extension's compiled WASM module, captured at install so the runtime can execute it
+    /// without the original files — the record of what code was permitted travels with the
+    /// project. Empty for installs made before modules were stored; the runtime treats an empty
+    /// module as "nothing to run" rather than a failure.
+    #[serde(default, with = "module_bytes")]
+    pub module: Vec<u8>,
+}
+
+/// Serialises the module bytes as base64 in the project's JSON, so an installed extension is one
+/// readable record rather than a byte array bloated fivefold.
+mod module_bytes {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        if text.is_empty() {
+            return Ok(Vec::new());
+        }
+        STANDARD.decode(text).map_err(serde::de::Error::custom)
+    }
 }
 
 impl InstalledExtension {
@@ -194,7 +219,14 @@ impl InstalledExtension {
             manifest,
             grants,
             enabled,
+            module: Vec::new(),
         }
+    }
+
+    /// Attaches the extension's compiled module bytes, captured at install. Chainable.
+    pub fn with_module(mut self, module: Vec<u8>) -> Self {
+        self.module = module;
+        self
     }
 
     /// The default grant: exactly the required capabilities, nothing optional. The safe install

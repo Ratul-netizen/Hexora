@@ -5,9 +5,10 @@ is and what it needs; the module is the code. Hexora installs an extension with 
 capabilities the user approves — nothing is granted implicitly, and a capability that was never
 granted is never available (security invariant 4).
 
-> Status: this build installs, validates and permission-gates extensions (`hexora ext`) **and
-> runs a passive-check module in the WASM sandbox** (`hexora ext run`). Wiring the runtime into
-> the scan loop, and the extension store, are the remaining steps. The manifest, permission and
+> Status: this build installs, validates and permission-gates extensions (`hexora ext`), runs a
+> passive-check module in the WASM sandbox (`hexora ext run`), **and runs installed passive-check
+> extensions as part of `hexora scan passive`** — their observations are folded into the scan as
+> leads. The extension store (distribution) is the remaining step. The manifest, permission and
 > ABI contracts below are stable; author against them now.
 
 ## The module ABI
@@ -28,6 +29,45 @@ ship it:
 ```
 hexora ext run path/to/manifest.yaml --exchange exchange.json
 ```
+
+### The passive-check input (exchange JSON)
+
+One exchange, metadata and headers only — **never a body**, and credential request headers and
+`Set-Cookie` values arrive already replaced, exactly as the built-in checks see them. A module is
+no more privileged than the checks shipped in the box:
+
+```json
+{
+  "method": "POST",
+  "url": "http://127.0.0.1:8077/boom",
+  "host": "127.0.0.1",
+  "path": "/boom",
+  "port": 8077,
+  "secure": false,
+  "status": 500,
+  "authenticated": false,
+  "response_bytes": 33,
+  "origin": "proxy",
+  "request_headers": [{ "name": "Accept", "value": "*/*" }],
+  "response_headers": [{ "name": "Content-Type", "value": "application/json" }]
+}
+```
+
+### The passive-check output (observations JSON)
+
+An array of observations. `title` is required; `detail` and `severity` are optional, so the
+simplest useful module returns `[{"title": "..."}]`. `severity` is one of `info`, `low`,
+`medium`, `high`, `critical` (default `medium`); an unrecognised word makes that observation drop
+rather than silently downgrade. `[]` means "nothing to report".
+
+```json
+[{ "title": "a 500 response was seen", "detail": "the server erred", "severity": "medium" }]
+```
+
+Every observation an extension emits is concluded as a **lead** (capped at `Reported`
+confidence), the same as a built-in or custom passive check — an extension states what it saw, it
+cannot declare a vulnerability. An extension runs in the scan only if it is enabled and holds
+`http_read`; a passive extension without that grant never sees the traffic.
 
 A minimal Rust guest is `cargo build --release --target wasm32-unknown-unknown` of a `cdylib`
 that exports `alloc` and `run`; point the manifest's `entry` at the resulting `.wasm`.

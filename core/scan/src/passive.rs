@@ -209,6 +209,10 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
     // other passive observation.
     let mut all_checks = checks::all();
     all_checks.extend(crate::custom::load(&project.settings().custom_checks()?));
+    // Installed passive-check extensions that pass the capability gate. Each runs in the WASM
+    // sandbox over the same redacted exchange every other check sees; its observations are
+    // concluded as leads, exactly like a built-in or custom check.
+    all_checks.extend(crate::extension::load(&project.settings().extensions()?));
     let checks: Vec<Box<dyn PassiveCheck>> = all_checks
         .into_iter()
         .filter(|check| match &selection.detector {

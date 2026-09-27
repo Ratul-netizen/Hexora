@@ -101,85 +101,115 @@ pub fn may_run_passive(ext: &InstalledExtension) -> Result<(), WasmError> {
     Ok(())
 }
 
-/// Runs a module's `run` entry over `input` and returns the output bytes it produced.
+/// A compiled module, ready to run many times.
 ///
-/// The module is instantiated with no imports, so it cannot do anything but compute over the
-/// bytes given. Fuel and a memory cap bound it. Any misbehaviour — a trap, running out of fuel,
-/// a bad pointer — is returned as an error, never a panic or a hang.
-pub fn run(module_bytes: &[u8], input: &[u8], limits: &Limits) -> Result<Vec<u8>, WasmError> {
-    let mut config = Config::default();
-    config.consume_fuel(true);
-    let engine = Engine::new(&config);
-
-    let module = Module::new(&engine, module_bytes)
-        .map_err(|e| WasmError::new(format!("the module did not compile: {e}")))?;
-
-    let state = HostState {
-        limits: StoreLimitsBuilder::new()
-            .memory_size(limits.max_memory_bytes)
-            .build(),
-    };
-    let mut store = Store::new(&engine, state);
-    store.limiter(|s| &mut s.limits);
-    store
-        .set_fuel(limits.fuel)
-        .map_err(|e| WasmError::new(format!("could not set the fuel limit: {e}")))?;
-
-    // No imports: an extension module gets memory and nothing else.
-    let linker: Linker<HostState> = Linker::new(&engine);
-    let instance = linker
-        .instantiate(&mut store, &module)
-        .map_err(|e| WasmError::new(format!("the module would not instantiate: {e}")))?
-        .start(&mut store)
-        .map_err(|e| WasmError::new(format!("the module's start function trapped: {e}")))?;
-
-    let memory = instance
-        .get_memory(&store, "memory")
-        .ok_or_else(|| WasmError::new("the module exports no `memory`"))?;
-    let alloc = instance
-        .get_typed_func::<i32, i32>(&store, "alloc")
-        .map_err(|_| WasmError::new("the module exports no `alloc(i32) -> i32`"))?;
-    let run = instance
-        .get_typed_func::<(i32, i32), i64>(&store, "run")
-        .map_err(|_| WasmError::new("the module exports no `run(i32, i32) -> i64`"))?;
-
-    let len = i32::try_from(input.len())
-        .map_err(|_| WasmError::new("the input is too large to pass to the module"))?;
-    let ptr = alloc
-        .call(&mut store, len)
-        .map_err(|e| trap_message("alloc", e))?;
-    if ptr < 0 {
-        return Err(WasmError::new(
-            "the module's alloc returned a negative pointer",
-        ));
-    }
-    memory
-        .write(&mut store, ptr as usize, input)
-        .map_err(|_| WasmError::new("the module's alloc did not reserve enough memory"))?;
-
-    let packed = run
-        .call(&mut store, (ptr, len))
-        .map_err(|e| trap_message("run", e))?;
-
-    let out_ptr = (packed >> 32) as u32 as usize;
-    let out_len = (packed & 0xffff_ffff) as u32 as usize;
-
-    let data = memory.data(&store);
-    let end = out_ptr
-        .checked_add(out_len)
-        .filter(|end| *end <= data.len())
-        .ok_or_else(|| WasmError::new("the module returned an output range outside its memory"))?;
-    Ok(data[out_ptr..end].to_vec())
+/// Compiling is the expensive step, so a scanner compiles an extension once and then runs it over
+/// every exchange. Each [`Sandbox::run`] gets a **fresh** store and instance, so one exchange's
+/// run cannot leak state into the next — isolation between invocations, not just between
+/// extensions.
+pub struct Sandbox {
+    engine: Engine,
+    module: Module,
 }
 
-/// Runs a passive-check module and returns the observations JSON string it produced.
+impl Sandbox {
+    /// Compiles a module. The engine is configured to meter fuel so every run can be bounded.
+    pub fn compile(module_bytes: &[u8]) -> Result<Sandbox, WasmError> {
+        let mut config = Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
+        let module = Module::new(&engine, module_bytes)
+            .map_err(|e| WasmError::new(format!("the module did not compile: {e}")))?;
+        Ok(Sandbox { engine, module })
+    }
+
+    /// Runs the module's `run` entry over `input`, in a fresh sandbox, and returns its output.
+    ///
+    /// No imports, so the module can only compute over the bytes given. Fuel and a memory cap
+    /// bound it; any misbehaviour — a trap, running out of fuel, a bad pointer — is an error,
+    /// never a panic or a hang.
+    pub fn run(&self, input: &[u8], limits: &Limits) -> Result<Vec<u8>, WasmError> {
+        let state = HostState {
+            limits: StoreLimitsBuilder::new()
+                .memory_size(limits.max_memory_bytes)
+                .build(),
+        };
+        let mut store = Store::new(&self.engine, state);
+        store.limiter(|s| &mut s.limits);
+        store
+            .set_fuel(limits.fuel)
+            .map_err(|e| WasmError::new(format!("could not set the fuel limit: {e}")))?;
+
+        // No imports: an extension module gets memory and nothing else.
+        let linker: Linker<HostState> = Linker::new(&self.engine);
+        let instance = linker
+            .instantiate(&mut store, &self.module)
+            .map_err(|e| WasmError::new(format!("the module would not instantiate: {e}")))?
+            .start(&mut store)
+            .map_err(|e| WasmError::new(format!("the module's start function trapped: {e}")))?;
+
+        let memory = instance
+            .get_memory(&store, "memory")
+            .ok_or_else(|| WasmError::new("the module exports no `memory`"))?;
+        let alloc = instance
+            .get_typed_func::<i32, i32>(&store, "alloc")
+            .map_err(|_| WasmError::new("the module exports no `alloc(i32) -> i32`"))?;
+        let run = instance
+            .get_typed_func::<(i32, i32), i64>(&store, "run")
+            .map_err(|_| WasmError::new("the module exports no `run(i32, i32) -> i64`"))?;
+
+        let len = i32::try_from(input.len())
+            .map_err(|_| WasmError::new("the input is too large to pass to the module"))?;
+        let ptr = alloc
+            .call(&mut store, len)
+            .map_err(|e| trap_message("alloc", e))?;
+        if ptr < 0 {
+            return Err(WasmError::new(
+                "the module's alloc returned a negative pointer",
+            ));
+        }
+        memory
+            .write(&mut store, ptr as usize, input)
+            .map_err(|_| WasmError::new("the module's alloc did not reserve enough memory"))?;
+
+        let packed = run
+            .call(&mut store, (ptr, len))
+            .map_err(|e| trap_message("run", e))?;
+
+        let out_ptr = (packed >> 32) as u32 as usize;
+        let out_len = (packed & 0xffff_ffff) as u32 as usize;
+
+        let data = memory.data(&store);
+        let end = out_ptr
+            .checked_add(out_len)
+            .filter(|end| *end <= data.len())
+            .ok_or_else(|| {
+                WasmError::new("the module returned an output range outside its memory")
+            })?;
+        Ok(data[out_ptr..end].to_vec())
+    }
+
+    /// Runs the module as a passive check: an exchange JSON in, an observations JSON string out.
+    pub fn run_passive(&self, exchange_json: &str, limits: &Limits) -> Result<String, WasmError> {
+        let out = self.run(exchange_json.as_bytes(), limits)?;
+        String::from_utf8(out)
+            .map_err(|_| WasmError::new("the module's output was not valid UTF-8"))
+    }
+}
+
+/// Runs a module's `run` entry over `input` once (compile + run). For repeated runs over many
+/// exchanges, compile a [`Sandbox`] once and reuse it instead.
+pub fn run(module_bytes: &[u8], input: &[u8], limits: &Limits) -> Result<Vec<u8>, WasmError> {
+    Sandbox::compile(module_bytes)?.run(input, limits)
+}
+
+/// Runs a passive-check module once and returns the observations JSON string it produced.
 pub fn run_passive(
     module_bytes: &[u8],
     exchange_json: &str,
     limits: &Limits,
 ) -> Result<String, WasmError> {
-    let out = run(module_bytes, exchange_json.as_bytes(), limits)?;
-    String::from_utf8(out).map_err(|_| WasmError::new("the module's output was not valid UTF-8"))
+    Sandbox::compile(module_bytes)?.run_passive(exchange_json, limits)
 }
 
 /// Turns a wasmi trap into a message, naming fuel exhaustion specifically since that is the

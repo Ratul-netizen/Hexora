@@ -6,8 +6,10 @@
 //! grant is recorded in the project, and one whose *required* capabilities are declined installs
 //! switched off rather than half-working.
 //!
-//! This build manages extensions and their permissions. Executing the WASM module in a sandbox
-//! is the runtime milestone; `install` validates and records the manifest, it does not run it.
+//! `install` validates the manifest, records the exact grant, and captures the WASM module bytes
+//! so the record of what code was permitted travels with the project — it does not run the
+//! module. Running it is the scanner's job: an enabled passive-check extension that holds
+//! `http:read` is executed in the sandbox over each exchange during `hexora scan passive`.
 
 use std::path::Path;
 
@@ -55,6 +57,14 @@ pub fn install(project: &Path, manifest_path: &Path, grant_all: bool, json: bool
     let manifest =
         Manifest::parse(&bytes).map_err(|e| HexoraError::invalid_input("manifest", e.message))?;
 
+    // Capture the module the manifest points at, so the runtime can execute it without the
+    // original files and the record of what code was permitted travels with the project.
+    let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let module_path = dir.join(&manifest.entry);
+    let module = std::fs::read(&module_path).map_err(|e| {
+        HexoraError::invalid_input("entry", format!("{}: {e}", module_path.display()))
+    })?;
+
     // Default: grant only what the extension marks required. `--grant-all` also grants the
     // optional capabilities. Never more than the manifest requested — enforced in the crate.
     let installed = if grant_all {
@@ -62,7 +72,8 @@ pub fn install(project: &Path, manifest_path: &Path, grant_all: bool, json: bool
         InstalledExtension::install(manifest, all)
     } else {
         InstalledExtension::install_required_only(manifest)
-    };
+    }
+    .with_module(module);
 
     let settings = crate::open_project(project)?.settings();
     let mut extensions = settings.extensions()?;

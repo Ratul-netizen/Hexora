@@ -72,6 +72,7 @@
 
 pub mod checks;
 pub mod custom;
+pub mod extension;
 pub mod passive;
 
 use hexora_types::finding::Hypothesis;

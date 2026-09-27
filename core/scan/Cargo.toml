@@ -12,12 +12,18 @@ hexora-types.workspace = true
 hexora-storage.workspace = true
 hexora-verify.workspace = true
 hexora-query.workspace = true
+hexora-ext.workspace = true
+hexora-wasm.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 hexora-types = { workspace = true, features = ["test-support"] }
 bytes.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+# Compiles WebAssembly text to bytes, so the extension bridge's tests need no external toolchain.
+wat = "1"
