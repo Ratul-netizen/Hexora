@@ -894,6 +894,146 @@ pub fn scope_remove(state: State<'_, AppState>, host: String) -> CommandResult<S
 }
 
 // ---------------------------------------------------------------------------
+// Match & Replace rules (M7)
+// ---------------------------------------------------------------------------
+
+/// One match-and-replace rule, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct MatchReplaceRuleView {
+    pub name: String,
+    pub enabled: bool,
+    /// A CLI/stable target spelling, e.g. `request-header`.
+    pub target: String,
+    /// The human label, e.g. `request header`.
+    pub target_label: String,
+    pub is_regex: bool,
+    pub pattern: String,
+    pub replacement: String,
+    /// The one-line description the CLI also prints.
+    pub summary: String,
+}
+
+fn rule_view(rule: &hexora_types::matchreplace::MatchReplaceRule) -> MatchReplaceRuleView {
+    MatchReplaceRuleView {
+        name: rule.name.clone(),
+        enabled: rule.enabled,
+        target: rule.target.label().replace(' ', "-"),
+        target_label: rule.target.label().to_string(),
+        is_regex: rule.is_regex,
+        pattern: rule.pattern.clone(),
+        replacement: rule.replacement.clone(),
+        summary: rule.summary(),
+    }
+}
+
+/// The project's match-and-replace rules, in the order they apply.
+#[tauri::command]
+pub fn matchreplace_list(state: State<'_, AppState>) -> CommandResult<Vec<MatchReplaceRuleView>> {
+    let project = open(&state)?;
+    Ok(project
+        .settings()
+        .match_replace_rules()
+        .map_err(fail)?
+        .iter()
+        .map(rule_view)
+        .collect())
+}
+
+/// Adds a rule to the end of the list. Returns the whole list, like scope does.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn matchreplace_add(
+    state: State<'_, AppState>,
+    name: String,
+    target: String,
+    is_regex: bool,
+    pattern: String,
+    replacement: String,
+    disabled: bool,
+) -> CommandResult<Vec<MatchReplaceRuleView>> {
+    use hexora_types::matchreplace::{MatchReplaceRule, RuleTarget};
+
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("a rule needs a name".to_string());
+    }
+    let target = RuleTarget::parse(&target).ok_or_else(|| {
+        format!(
+            "{target:?} is not a target. Use one of: {}",
+            RuleTarget::spellings()
+        )
+    })?;
+
+    if pattern.is_empty() {
+        if target.is_header() {
+            if !replacement.contains(':') {
+                return Err("an empty pattern on a header target adds a header, so the replacement must be `Name: value`".to_string());
+            }
+        } else {
+            return Err(
+                "give a pattern to match; only header targets accept an empty pattern".to_string(),
+            );
+        }
+    }
+
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut rules = settings.match_replace_rules().map_err(fail)?;
+    if rules.iter().any(|r| r.name == name) {
+        return Err(format!("a rule named {name:?} already exists"));
+    }
+
+    let mut rule = MatchReplaceRule::new(name, target, is_regex, pattern, replacement);
+    rule.enabled = !disabled;
+
+    // Refuse an invalid regex here, not when the proxy runs.
+    let mut candidate = rules.clone();
+    candidate.push(rule.clone());
+    hexora_proxy::Rewriter::compile(&candidate).map_err(fail)?;
+
+    rules.push(rule);
+    settings.set_match_replace_rules(&rules).map_err(fail)?;
+    Ok(rules.iter().map(rule_view).collect())
+}
+
+/// Removes a rule by name.
+#[tauri::command]
+pub fn matchreplace_remove(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<Vec<MatchReplaceRuleView>> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut rules = settings.match_replace_rules().map_err(fail)?;
+    let before = rules.len();
+    rules.retain(|r| r.name != name);
+    if rules.len() == before {
+        return Err(format!("no match-replace rule named {name:?}"));
+    }
+    settings.set_match_replace_rules(&rules).map_err(fail)?;
+    Ok(rules.iter().map(rule_view).collect())
+}
+
+/// Enables or disables a rule by name, keeping it in place.
+#[tauri::command]
+pub fn matchreplace_set_enabled(
+    state: State<'_, AppState>,
+    name: String,
+    enabled: bool,
+) -> CommandResult<Vec<MatchReplaceRuleView>> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut rules = settings.match_replace_rules().map_err(fail)?;
+    let rule = rules
+        .iter_mut()
+        .find(|r| r.name == name)
+        .ok_or_else(|| format!("no match-replace rule named {name:?}"))?;
+    rule.enabled = enabled;
+    settings.set_match_replace_rules(&rules).map_err(fail)?;
+    Ok(rules.iter().map(rule_view).collect())
+}
+
+// ---------------------------------------------------------------------------
 // Identities
 // ---------------------------------------------------------------------------
 

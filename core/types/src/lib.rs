@@ -47,6 +47,7 @@ pub mod identity;
 pub mod ids;
 pub mod inject;
 pub mod limits;
+pub mod matchreplace;
 pub mod object;
 pub mod programme;
 pub mod raw;
@@ -85,4 +86,4 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped whenever the UI/engine boundary changes shape. The desktop client refuses
 /// to talk to an engine reporting a different major value rather than misinterpreting
 /// messages.
-pub const RPC_CONTRACT_VERSION: u32 = 15;
+pub const RPC_CONTRACT_VERSION: u32 = 16;

@@ -8,9 +8,10 @@ use hexora_engine::guard::ScopeDecision;
 use hexora_engine::transport::Exchange;
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_proxy::attach::Attaching;
+use hexora_proxy::hook::{Interceptor, PassThrough};
 use hexora_proxy::{
     trust, CertificateAuthority, ExchangeObserver, Fanout, InterceptionPolicy, ProjectCapture,
-    ProxyConfig, ProxyServer, TrustState,
+    ProxyConfig, ProxyServer, Rewriter, Rewriting, TrustState,
 };
 use hexora_types::scope::Scope;
 use hexora_types::{HexoraError, Result};
@@ -154,6 +155,35 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         _ => None,
     };
 
+    // Match-and-replace rules, compiled before the listener opens so an invalid regex is
+    // reported now rather than on the first request it would have rewritten.
+    let rewrite = match &project {
+        Some(project) => {
+            let rules = project.settings().match_replace_rules()?;
+            let rewriter = Rewriter::compile(&rules)
+                .map_err(|why| HexoraError::invalid_input("match-replace", why))?;
+            if rewriter.is_empty() {
+                None
+            } else {
+                let scope = project.settings().scope()?;
+                if scope.is_empty() {
+                    // Rules apply only to declared hosts — otherwise a rule would rewrite the
+                    // tester's own mail and bank. An empty scope means nowhere, so this would
+                    // silently do nothing.
+                    return Err(HexoraError::invalid_input(
+                        "match-replace",
+                        "this project has match-and-replace rules but no scope, and rules \
+                         apply only to hosts the project declared. Declare them with `hexora \
+                         scope add`, or remove the rules",
+                    ));
+                }
+                let active = rules.iter().filter(|r| r.enabled).count();
+                Some((Arc::new(rewriter), Arc::new(scope), active))
+            }
+        }
+        None => None,
+    };
+
     // Read before the runtime starts, with the rest of the project's settings.
     let scope_for_marking = match &project {
         Some(project) => project.settings().scope()?,
@@ -184,18 +214,28 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         )
         .await?;
 
-        let server = match &attach {
-            Some((headers, scope)) => server.with_interceptor(Arc::new(Attaching::new(
-                headers.clone(),
-                scope.clone(),
-                Arc::new(hexora_proxy::hook::PassThrough),
-            ))),
-            None => server,
+        // Compose the interceptor stack from the inside out: rewriting sees the request the
+        // browser sent, then header-attachment runs outermost so a programme's identifying
+        // header is always the last word on what goes out.
+        let mut interceptor: Arc<dyn Interceptor> = Arc::new(PassThrough);
+        if let Some((rewriter, scope, _)) = &rewrite {
+            interceptor = Arc::new(Rewriting::new(rewriter.clone(), scope.clone(), interceptor));
+        }
+        if let Some((headers, scope)) = &attach {
+            interceptor = Arc::new(Attaching::new(headers.clone(), scope.clone(), interceptor));
+        }
+        let server = if rewrite.is_some() || attach.is_some() {
+            server.with_interceptor(interceptor)
+        } else {
+            server
         };
 
         let addr = server.local_addr()?;
         eprintln!("Hexora proxy listening on {addr}");
         eprintln!("CA certificate: {}", ca_dir.join("hexora-ca.crt").display());
+        if let Some((_, _, active)) = &rewrite {
+            eprintln!("{active} match-and-replace rule(s) active on in-scope traffic.");
+        }
         eprintln!();
         eprintln!("Configure your browser to use {addr} as its HTTP and HTTPS proxy,");
         eprintln!("then install the CA certificate so HTTPS can be intercepted:");

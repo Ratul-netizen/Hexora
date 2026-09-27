@@ -47,7 +47,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Invisible / transparent proxying | ✅ | ✅ | PLANNED M5 | Needed for thick clients and mobile |
 | Upstream proxy chaining | ✅ | ✅ | PLANNED M5 | |
 | Client certificates / mTLS | ✅ | ✅ | PLANNED M5 | |
-| Match & Replace rules | ✅ | ✅ | PLANNED M7 | Caido's redesign (param/header-aware) is the better model to copy |
+| Match & Replace rules | ✅ | ✅ | **DONE M7** | `hexora matchreplace`: literal or regex rules over request/response headers, bodies and the request first line; empty pattern adds a header, empty replacement removes what matched; applied to in-scope traffic only |
 | Traffic history + filtering | ✅ | ✅ | PLANNED M3 | |
 | Query language over traffic | Bambda | **HTTPQL** | PLANNED M8 | See §6 |
 
@@ -110,7 +110,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Payload iteration is rate-limited and stoppable | ⚠️ | ⚠️ | **IMPLEMENTED M14.1** | Reuses the scheduler's budget, pause and Ctrl-C. A truncated list says so rather than reading as "nothing stood out" |
 
 | A header on every request the tool sends | ✅ | ✅ | **IMPLEMENTED M14.2** | `hexora header add`, stored on the project. Bug bounty programmes require it so research traffic is attributable; applied before the identity's credential, and never spliced into a raw send |
-| Match-and-replace on proxied traffic | ✅ | ✅ | **PARTIAL M14.4** | `--attach-headers` adds a project's required headers to in-scope browser traffic. Not general match-and-replace: it sets named headers on requests and touches nothing else |
+| Match-and-replace on proxied traffic | ✅ | ✅ | **DONE M7** | General rules now: the request-header add case that `--attach-headers` covered is one shape of it. Body rewrites keep a present `Content-Length` honest; a body/first-line change updates the exchange the proxy forwards and records |
 
 | Programme terms filter what gets reported | ❌ | ❌ | **IMPLEMENTED M14.3** | `hexora programme exclude`. Bug bounty programmes reject whole finding classes; a run that files forty of them is a run whose output gets skipped. Excluded classes are still looked for and still named in the report |
 

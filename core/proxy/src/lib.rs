@@ -43,6 +43,7 @@ pub mod capture;
 pub mod fanout;
 pub mod hook;
 pub mod intercept;
+pub mod rewrite;
 pub mod server;
 pub mod trust;
 
@@ -54,5 +55,6 @@ pub use hook::{
     RequestVerdict, ResponseVerdict, WsVerdict,
 };
 pub use intercept::{InterceptionPolicy, TunnelOutcome};
+pub use rewrite::{Rewriter, Rewriting};
 pub use server::{ExchangeObserver, NoObserver, ProxyConfig, ProxyServer};
 pub use trust::{Fingerprints, Installed, ManualStep, Store, TrustState};

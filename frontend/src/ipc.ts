@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 15;
+export const EXPECTED_RPC_CONTRACT_VERSION = 16;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -432,6 +432,53 @@ export const runFuzz = (args: {
   maxRequests: number | null;
   insecure: boolean;
 }): Promise<FuzzRun> => invoke<FuzzRun>("fuzz_run", args);
+
+// --- Match & Replace rules (M7) -----------------------------------------
+
+/** The five parts of an exchange a rule can rewrite. */
+export type RuleTarget =
+  | "request-header"
+  | "request-body"
+  | "request-first-line"
+  | "response-header"
+  | "response-body";
+
+/** One match-and-replace rule, as the window shows it. */
+export interface MatchReplaceRule {
+  name: string;
+  enabled: boolean;
+  target: string;
+  target_label: string;
+  is_regex: boolean;
+  pattern: string;
+  replacement: string;
+  summary: string;
+}
+
+/** The project's rules, in the order they apply. */
+export const matchReplaceList = (): Promise<MatchReplaceRule[]> =>
+  invoke<MatchReplaceRule[]>("matchreplace_list");
+
+/** Adds a rule; returns the whole list. */
+export const matchReplaceAdd = (args: {
+  name: string;
+  target: RuleTarget;
+  isRegex: boolean;
+  pattern: string;
+  replacement: string;
+  disabled: boolean;
+}): Promise<MatchReplaceRule[]> => invoke<MatchReplaceRule[]>("matchreplace_add", args);
+
+/** Removes a rule by name; returns the whole list. */
+export const matchReplaceRemove = (name: string): Promise<MatchReplaceRule[]> =>
+  invoke<MatchReplaceRule[]>("matchreplace_remove", { name });
+
+/** Enables or disables a rule by name; returns the whole list. */
+export const matchReplaceSetEnabled = (
+  name: string,
+  enabled: boolean,
+): Promise<MatchReplaceRule[]> =>
+  invoke<MatchReplaceRule[]>("matchreplace_set_enabled", { name, enabled });
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

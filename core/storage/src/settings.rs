@@ -13,6 +13,7 @@
 //! the authorization it was all collected under.
 
 use hexora_types::http::Header;
+use hexora_types::matchreplace::MatchReplaceRule;
 use hexora_types::programme::Programme;
 use hexora_types::scope::Scope;
 use rusqlite::params;
@@ -111,6 +112,53 @@ impl Settings {
         // caller went on to print "Attached". A tool that reports a programme header as
         // set when it is not is the exact failure that forfeits a report, so this says
         // so instead.
+        if updated == 0 {
+            return Err(StorageError::NotFound {
+                entity: "project row",
+                id: PROJECT_ID.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The match-and-replace rules the proxy applies to in-scope traffic.
+    ///
+    /// An ordered list: rules run in the order they are stored, so a later rule sees the
+    /// output of an earlier one. Empty for a project with no `project` row, which is the
+    /// correct reading of "no rules have been added".
+    pub fn match_replace_rules(&self) -> Result<Vec<MatchReplaceRule>> {
+        let conn = self.db.connection()?;
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT match_replace_rules_json FROM project LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        match json {
+            None => Ok(Vec::new()),
+            Some(json) => serde_json::from_str(&json).map_err(|e| StorageError::Decode {
+                entity: "match-replace rules",
+                reason: e.to_string(),
+            }),
+        }
+    }
+
+    /// Replaces the match-and-replace rules.
+    ///
+    /// The order is preserved as given, because rules compose in order. Callers show the
+    /// user what changed.
+    pub fn set_match_replace_rules(&self, rules: &[MatchReplaceRule]) -> Result<()> {
+        let json = serde_json::to_string(rules).map_err(|e| StorageError::Decode {
+            entity: "match-replace rules",
+            reason: e.to_string(),
+        })?;
+        let conn = self.db.connection()?;
+        let updated = conn.execute(
+            "UPDATE project SET match_replace_rules_json = ?1",
+            params![json],
+        )?;
         if updated == 0 {
             return Err(StorageError::NotFound {
                 entity: "project row",

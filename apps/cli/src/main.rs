@@ -26,6 +26,7 @@ mod identifiers;
 mod identity;
 mod license;
 mod llm;
+mod matchreplace;
 mod object;
 mod oob;
 mod poc;
@@ -382,6 +383,13 @@ enum Command {
     /// nobody has declared here.
     #[command(subcommand)]
     Scope(ScopeCommand),
+
+    /// Rules that rewrite proxied traffic — Burp/Caido's match-and-replace.
+    ///
+    /// Applied to in-scope traffic when the proxy runs: request rules on the way out,
+    /// response rules on the way back.
+    #[command(subcommand)]
+    Matchreplace(MatchReplaceCommand),
 
     /// Replay a captured request as several identities and compare what came back.
     ///
@@ -1340,6 +1348,62 @@ enum ScopeCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum MatchReplaceCommand {
+    /// List the project's match-and-replace rules, in the order they apply.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Add a rule.
+    ///
+    /// An empty `--match` on a header target adds the `--replace` value as a header. An empty
+    /// `--replace` removes what matched. Rules apply to in-scope traffic only.
+    Add {
+        /// Project directory.
+        path: PathBuf,
+        /// A unique name for the rule, used to remove or toggle it.
+        name: String,
+        /// What to rewrite: request-header, request-body, request-first-line, response-header,
+        /// response-body.
+        #[arg(long, value_name = "TARGET")]
+        target: String,
+        /// The text to find.
+        #[arg(long, value_name = "PATTERN", default_value = "")]
+        r#match: String,
+        /// What to put in its place. Empty removes what matched.
+        #[arg(long, value_name = "TEXT", default_value = "")]
+        replace: String,
+        /// Treat the pattern as a regular expression.
+        #[arg(long)]
+        regex: bool,
+        /// Add the rule but leave it switched off.
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// Remove a rule by name.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// The rule's name.
+        name: String,
+    },
+    /// Switch a rule on.
+    Enable {
+        /// Project directory.
+        path: PathBuf,
+        /// The rule's name.
+        name: String,
+    },
+    /// Switch a rule off, keeping it in the list.
+    Disable {
+        /// Project directory.
+        path: PathBuf,
+        /// The rule's name.
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ProjectCommand {
     /// Create a new project.
     Init {
@@ -1759,6 +1823,36 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             exclude,
         }) => scope::add(path, host, path_prefix.as_deref(), *exclude, cli.json),
         Command::Scope(ScopeCommand::Remove { path, host }) => scope::remove(path, host, cli.json),
+        Command::Matchreplace(MatchReplaceCommand::List { path }) => {
+            matchreplace::list(path, cli.json)
+        }
+        Command::Matchreplace(MatchReplaceCommand::Add {
+            path,
+            name,
+            target,
+            r#match,
+            replace,
+            regex,
+            disabled,
+        }) => matchreplace::add(matchreplace::AddArgs {
+            project: path,
+            name,
+            target,
+            regex: *regex,
+            pattern: r#match,
+            replacement: replace,
+            disabled: *disabled,
+            json: cli.json,
+        }),
+        Command::Matchreplace(MatchReplaceCommand::Remove { path, name }) => {
+            matchreplace::remove(path, name, cli.json)
+        }
+        Command::Matchreplace(MatchReplaceCommand::Enable { path, name }) => {
+            matchreplace::set_enabled(path, name, true, cli.json)
+        }
+        Command::Matchreplace(MatchReplaceCommand::Disable { path, name }) => {
+            matchreplace::set_enabled(path, name, false, cli.json)
+        }
         Command::Authz {
             path,
             id,

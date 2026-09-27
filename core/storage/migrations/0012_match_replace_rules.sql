@@ -1,0 +1,12 @@
+-- M7: match-and-replace rules the proxy applies to in-scope traffic.
+--
+-- A rule names a part of an exchange (a request/response header, body, or the request's
+-- first line), a pattern to find, and what to put in its place. The proxy runs enabled
+-- rules on in-scope traffic — request rules on the way out, response rules on the way
+-- back. This is Burp's and Caido's everyday rewriting, which Hexora had only as a narrow
+-- "attach these headers" special case.
+--
+-- Stored as an ordered JSON array in the single project row, beside the scope and the
+-- attached headers, for the same reason: a project file should be a complete, portable
+-- record of the engagement, including how its traffic was rewritten.
+ALTER TABLE project ADD COLUMN match_replace_rules_json TEXT NOT NULL DEFAULT '[]';

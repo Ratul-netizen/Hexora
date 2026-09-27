@@ -9,6 +9,7 @@ import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
 import { LicenseView } from "./views/LicenseView";
 import { LlmView } from "./views/LlmView";
+import { MatchReplaceView } from "./views/MatchReplaceView";
 import { OobView } from "./views/OobView";
 import { SitemapView } from "./views/SitemapView";
 import { RepeaterView } from "./views/RepeaterView";
@@ -43,6 +44,7 @@ type Tab =
   | "repeater"
   | "decoder"
   | "websockets"
+  | "matchreplace"
   | "identifiers"
   | "scan"
   | "fuzzer"
@@ -63,6 +65,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "repeater", label: "Repeater" },
   { id: "decoder", label: "Decoder" },
   { id: "websockets", label: "WebSocket" },
+  { id: "matchreplace", label: "Match & Replace" },
   { id: "identifiers", label: "Identifiers" },
   { id: "scan", label: "Scan" },
   { id: "fuzzer", label: "Fuzzer" },
@@ -255,6 +258,7 @@ export default function App() {
         )}
         {tab === "llm" && <LlmView license={license} />}
         {tab === "oob" && <OobView license={license} />}
+        {tab === "matchreplace" && <MatchReplaceView hasProject={project !== null} />}
         {tab === "findings" && (
           <FindingsView
             hasProject={project !== null}

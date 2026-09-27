@@ -82,6 +82,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "session_cookies",
         sql: include_str!("../migrations/0011_session_cookies.sql"),
     },
+    Migration {
+        version: 12,
+        name: "match_replace_rules",
+        sql: include_str!("../migrations/0012_match_replace_rules.sql"),
+    },
 ];
 
 /// The schema version this build expects.

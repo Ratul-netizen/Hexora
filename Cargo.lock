@@ -1756,6 +1756,7 @@ dependencies = [
  "hexora-types",
  "http",
  "rcgen",
+ "regex",
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",
