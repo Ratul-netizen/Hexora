@@ -31,6 +31,7 @@ mod llm;
 mod matchreplace;
 mod object;
 mod oob;
+mod plan;
 mod poc;
 mod programme;
 mod project;
@@ -413,6 +414,15 @@ enum Command {
     /// map instead. Dry-run by default; `--send` fetches the safe operations.
     #[command(subcommand)]
     Import(ImportCommand),
+
+    /// Run a declarative plan file end to end — import, crawl, scan, report — for CI.
+    ///
+    /// The whole engagement in one YAML file: steps run in order against a project, without
+    /// prompts, and `fail_on` can fail the build when findings cross a severity.
+    Run {
+        /// The plan file (YAML).
+        plan: PathBuf,
+    },
 
     /// Measure how unpredictable a token is — session ids, CSRF and reset tokens.
     ///
@@ -2151,6 +2161,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 json: cli.json,
             })
         }
+        Command::Run { plan } => plan::run(plan, cli.json),
         Command::Sequencer {
             path,
             file,

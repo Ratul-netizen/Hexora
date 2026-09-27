@@ -133,8 +133,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Traffic query language | Bambda (Java) | HTTPQL | **DONE M8** | `hexora-query`: boolean logic (AND/OR/NOT, implicit AND, parens) over `field OP value` clauses — `:` contains, `= != > < >= <=`, `~ !~` regex — across method/host/path/url/scheme/port/ext/status/duration/identity/origin/secure/sizes and the header/body fields. Wired into `hexora history --query` and the desktop History query box; bodies are read back only when a query mentions them |
 | Node-based workflows | ❌ | ✅ | PLANNED M10 | |
 | Scripted automation | Bambda | JS nodes | PLANNED M10 | |
-| Headless / CLI | ⚠️ Enterprise | ✅ server mode | PLANNED M11 | Caido's client/server split (run on a VPS) is genuinely better |
-| CI/CD integration | Enterprise only | ⚠️ | PLANNED M11 | |
+| Headless / CLI | ⚠️ Enterprise | ✅ server mode | **DONE (CLI) M11** | The whole tool is a headless CLI already; `hexora run <plan.yaml>` drives a full engagement non-interactively. A long-running client/server split (run on a VPS) is still to do |
+| CI/CD integration | Enterprise only | ⚠️ | **DONE M11** | `hexora run` executes a declarative plan and, via `fail_on`, exits non-zero when findings cross a severity — a pipeline gate. Findings export as SARIF for GitHub code scanning. This is Burp-Enterprise-tier automation at the CLI, no separate product |
 
 ## 7. Browser integration
 
@@ -175,7 +175,7 @@ below are mostly cheap, and several are things we would have had to invent anywa
 
 | Adopt | Effort | Where | Why |
 | ----- | ------ | ----- | --- |
-| **Declarative YAML automation plans** | low | M10 | ZAP's Automation Framework is the entire CI story in one file. Visual workflows are for humans; YAML is for pipelines. We need both, and currently plan only the first |
+| **Declarative YAML automation plans** | low | M10 | **DONE** — `hexora run <plan.yaml>`: an ordered `project → scope → import → crawl → scan → report` plan, run non-interactively (the plan is the consent), with `fail_on` to gate CI. Visual node workflows (for humans) are still to do; the YAML plan (for pipelines) is the one that matters here |
 | **SARIF output** | very low | M11 | **DONE** — `hexora report --format sarif` renders SARIF 2.1.0 (valid against the schema; findings at their severity level, leads as notes, no credentials). GitHub code scanning ingests it natively |
 | **Docker images + daemon mode** | medium | M11 | Already planned, but ZAP proves it must be first-class rather than an afterthought |
 | **Contexts** | medium | M9 | ZAP groups URLs + auth + session + technology into one object. A distinctly better model than Burp's scattered scope / session-rule / macro configuration, and session handling is the thing everyone hates |
