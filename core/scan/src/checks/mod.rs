@@ -27,7 +27,6 @@ pub mod cookies;
 pub mod cors;
 pub mod disclosure;
 pub mod headers;
-pub mod inputs;
 pub mod llm;
 pub mod tls;
 
@@ -45,7 +44,6 @@ pub fn all() -> Vec<Box<dyn PassiveCheck>> {
         Box::new(disclosure::DisclosureHeaders),
         Box::new(cache::CacheBehaviour),
         Box::new(tls::TlsObservations),
-        Box::new(inputs::InputCandidates),
         Box::new(llm::LlmEndpoints),
     ]
 }

@@ -786,8 +786,10 @@ mod tests {
         // A megabyte of zeros compresses to almost nothing; inflating it under a small cap
         // must be refused as it expands rather than exhausting memory.
         let compressed = deflate_for_test(&vec![0u8; 1024 * 1024]);
-        let mut limits = Limits::default();
-        limits.max_decompressed_bytes = 64 * 1024;
+        let limits = Limits {
+            max_decompressed_bytes: 64 * 1024,
+            ..Default::default()
+        };
         assert!(inflate(&compressed, &limits).is_err());
     }
 
@@ -851,11 +853,9 @@ mod tests {
             parser.push(&bytes);
             // Pull frames until it stops making progress; must terminate and never panic.
             let mut guard = 0;
-            loop {
-                match parser.next_frame() {
-                    Ok(Some(_)) => { guard += 1; prop_assert!(guard < 4096); }
-                    Ok(None) | Err(_) => break,
-                }
+            while let Ok(Some(_)) = parser.next_frame() {
+                guard += 1;
+                prop_assert!(guard < 4096);
             }
         }
 

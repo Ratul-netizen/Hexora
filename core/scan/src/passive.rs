@@ -267,7 +267,7 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
 
             // Query strings differ between two loads of one page; the endpoint does
             // not. Keyed without the query so `?q=shoes` and `?q=hats` are one place.
-            if human_driven(&exchange.origin) {
+            if describes_app_surface(&exchange.origin) {
                 let endpoint = exchange
                     .path
                     .split('?')
@@ -549,6 +549,17 @@ fn wanted(
 /// Hexora's, which is the direction to be wrong in.
 fn human_driven(origin: &str) -> bool {
     matches!(origin, "proxy" | "repeater")
+}
+
+/// Whether an exchange describes a real endpoint of the *application* worth testing.
+///
+/// Human traffic does, and so does the **crawler**: it is automated, but it fetches the
+/// application's own links, so a crawled `/search?q=…` is the application's endpoint and its
+/// parameters are the application's — the opposite of a scanner probe, whose value Hexora
+/// invented. So the active run may enumerate crawled endpoints (that is the point of a crawl:
+/// "the scanner now has more to scan"), while still never reading its own probes back.
+fn describes_app_surface(origin: &str) -> bool {
+    human_driven(origin) || origin == "crawler"
 }
 
 /// Reads one stored exchange by id, into the shape a check sees.

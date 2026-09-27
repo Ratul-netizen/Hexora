@@ -1306,11 +1306,14 @@ mod tests {
 
     use super::*;
 
-    /// Records what the proxy observed, so tests can assert on capture. The client and
-    /// origin protocol versions are kept too, so a downgrade can be asserted on.
+    /// One observed exchange: url, status, scope decision, and the client and origin protocol
+    /// versions (kept so a downgrade can be asserted on).
+    type Seen = (String, u16, ScopeDecision, HttpVersion, HttpVersion);
+
+    /// Records what the proxy observed, so tests can assert on capture.
     #[derive(Default)]
     struct Recorder {
-        seen: Mutex<Vec<(String, u16, ScopeDecision, HttpVersion, HttpVersion)>>,
+        seen: Mutex<Vec<Seen>>,
     }
 
     impl ExchangeObserver for Arc<Recorder> {

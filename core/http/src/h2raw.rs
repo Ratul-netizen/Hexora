@@ -783,7 +783,7 @@ mod tests {
         // saturate while still consuming every continuation byte, so the decoder stays in
         // sync. Found by the proptest below.
         let mut bytes = vec![0xffu8]; // 7-bit prefix maxed, so a continuation follows
-        bytes.extend(std::iter::repeat(0xff).take(30)); // 30 continuation bytes
+        bytes.extend(std::iter::repeat_n(0xff, 30)); // 30 continuation bytes
         bytes.push(0x00); // terminator
         let (value, pos) = decode_integer(&bytes, 0, 7);
         assert_eq!(pos, bytes.len(), "every continuation byte is consumed");
