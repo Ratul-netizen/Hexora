@@ -967,7 +967,7 @@ a capability neither Burp nor Caido ships natively.
 | Step | What it gives us | Depends on |
 | ---- | ---------------- | ---------- |
 | **LLM.a** — prompt injection | Send injection/jailbreak probes to an LLM endpoint, each carrying a **canary** — a random token the model would never emit — inside an instruction to output it. If the canary comes back, the application's system instructions were overridden by user input: prompt injection, *demonstrated with evidence*, the same shape as the reflected-input check. `hexora llm <url>`. | scope guard, HttpTransport |
-| **LLM.b** — auto-discovery | A passive detector that recognises LLM-backed endpoints (request fields like `prompt`/`messages`, chat-completion response shapes) and raises the injection hypothesis, so a crawl/proxy feeds it — the input.reflected → input.reflection bridge, for LLM inputs. | LLM.a, scan |
+| **LLM.b** — auto-discovery | A passive detector that recognises LLM-backed endpoints (a JSON body to a chat-shaped path) and surfaces them as a **lead**, so a crawl/proxy feeds discovery. | LLM.a, scan |
 | **LLM.c** — system-prompt & data leakage | Extraction probes and an oracle for when the model discloses its system prompt or context it should not. | LLM.a |
 | **LLM.d** — insecure output handling | Where a model's output flows into a sink (HTML, SQL, a shell, a tool call) — the injection-to-impact chain, joined to the existing reflection/injection checks. | LLM.a, M18.d |
 

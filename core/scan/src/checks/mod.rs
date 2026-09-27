@@ -28,6 +28,7 @@ pub mod cors;
 pub mod disclosure;
 pub mod headers;
 pub mod inputs;
+pub mod llm;
 pub mod tls;
 
 use crate::PassiveCheck;
@@ -45,6 +46,7 @@ pub fn all() -> Vec<Box<dyn PassiveCheck>> {
         Box::new(cache::CacheBehaviour),
         Box::new(tls::TlsObservations),
         Box::new(inputs::InputCandidates),
+        Box::new(llm::LlmEndpoints),
     ]
 }
 

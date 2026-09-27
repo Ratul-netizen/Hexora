@@ -168,6 +168,63 @@ impl Report {
     }
 }
 
+// ---- Auto-discovery helpers (LLM.b): recognising an LLM call and injecting its prompt ----
+
+/// Whether a request target looks like an LLM/chat endpoint. Paired with a JSON content type
+/// and a body-bearing method by the caller; on its own it is only the path signal.
+pub fn looks_like_llm_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [
+        "chat",
+        "completion",
+        "generate",
+        "/llm",
+        "/ai/",
+        "/ask",
+        "message",
+        "prompt",
+        "converse",
+        "respond",
+        "assistant",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+/// Replaces the user prompt inside a JSON request body with `payload`, returning the new body.
+///
+/// Recognises the common shapes: a `messages` array (the last user turn's `content`), or a
+/// top-level `prompt`/`input`/`text`/`question`/`query` string. `None` when the body is not
+/// JSON or carries no recognisable prompt — which is also how the active check refutes a
+/// request that only *looked* like an LLM call.
+pub fn inject_into_body(body: &[u8], payload: &str) -> Option<String> {
+    let mut value: serde_json::Value = serde_json::from_slice(body).ok()?;
+
+    if let Some(messages) = value.get_mut("messages").and_then(|m| m.as_array_mut()) {
+        // The last turn whose role is user (or, failing that, the last turn at all).
+        let index = messages
+            .iter()
+            .rposition(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .or_else(|| messages.len().checked_sub(1))?;
+        let content = messages.get_mut(index)?.get_mut("content")?;
+        if !content.is_string() {
+            return None;
+        }
+        *content = serde_json::Value::String(payload.to_string());
+        return serde_json::to_string(&value).ok();
+    }
+
+    for field in ["prompt", "input", "text", "question", "query"] {
+        if let Some(slot) = value.get_mut(field) {
+            if slot.is_string() {
+                *slot = serde_json::Value::String(payload.to_string());
+                return serde_json::to_string(&value).ok();
+            }
+        }
+    }
+    None
+}
+
 /// Whether the model obeyed: the canary came back in the response text.
 ///
 /// The canary is random, so its presence is not chance. The caller passes the response text
@@ -200,7 +257,7 @@ fn request_for(target: &Target, payload: &str) -> HttpRequest {
     // Set the length explicitly: a POST whose body a server never reads is a wasted probe.
     request
         .headers
-        .set("Content-Length", body.as_bytes().len().to_string());
+        .set("Content-Length", body.len().to_string());
     request.body = body.into();
     request
 }
@@ -273,6 +330,39 @@ mod tests {
         let canary = Canary::fresh();
         assert!(obeyed(&format!("Sure: {}", canary.as_str()), &canary));
         assert!(!obeyed("I can't help with that.", &canary));
+    }
+
+    #[test]
+    fn llm_paths_are_recognised() {
+        assert!(looks_like_llm_path("/v1/chat/completions"));
+        assert!(looks_like_llm_path("/api/generate"));
+        assert!(looks_like_llm_path("/assistant/ask"));
+        assert!(!looks_like_llm_path("/api/users"));
+        assert!(!looks_like_llm_path("/products?id=5"));
+    }
+
+    #[test]
+    fn injecting_replaces_the_messages_content() {
+        let body = br#"{"model":"x","messages":[{"role":"system","content":"be nice"},{"role":"user","content":"hello"}]}"#;
+        let out = inject_into_body(body, "PWNED").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["messages"][1]["content"], "PWNED");
+        // The system turn is untouched.
+        assert_eq!(v["messages"][0]["content"], "be nice");
+    }
+
+    #[test]
+    fn injecting_replaces_a_prompt_field() {
+        let out = inject_into_body(br#"{"prompt":"hi","max_tokens":50}"#, "PWNED").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["prompt"], "PWNED");
+        assert_eq!(v["max_tokens"], 50);
+    }
+
+    #[test]
+    fn a_body_with_no_prompt_is_not_injectable() {
+        assert!(inject_into_body(br#"{"id":5,"name":"x"}"#, "PWNED").is_none());
+        assert!(inject_into_body(b"not json", "PWNED").is_none());
     }
 
     #[test]
