@@ -1853,3 +1853,100 @@ textarea.editor {
 .decoder-panes textarea.editor {
   border-radius: var(--radius-sm);
 }
+
+/* ============================================================ Sidebar navigation */
+
+/* The app is now a row: a fixed nav rail on the left, the workspace filling the rest.
+   All nav items are always visible (vertical, scrollable) — no more tab strip that
+   scrolls items off at width. */
+.app {
+  flex-direction: row;
+}
+
+.sidebar {
+  flex: 0 0 208px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: linear-gradient(180deg, rgba(30, 34, 42, 0.92), rgba(20, 22, 27, 0.86));
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  border-right: 1px solid var(--hairline);
+}
+
+.sidebar .brand {
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.sidebar .brand strong {
+  font-size: 15px;
+}
+.sidebar .brand span.muted {
+  max-width: none;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.sidebar nav {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.sidebar button.tab {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.sidebar button.tab:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+.sidebar button.tab.active {
+  color: var(--text-bright);
+  background: rgba(217, 139, 58, 0.12);
+  border-left-color: var(--accent);
+}
+/* The top-bar's sliding underline has no place on a vertical item. */
+.sidebar button.tab::after {
+  content: none;
+}
+
+.workspace {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+/* The top bar now carries only the status chips, kept to the right. */
+.workspace .top {
+  justify-content: flex-end;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    flex-basis: 168px;
+  }
+}

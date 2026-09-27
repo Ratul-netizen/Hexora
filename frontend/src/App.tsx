@@ -144,7 +144,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="top">
+      <aside className="sidebar">
         <div className="brand">
           <strong>Hexora</strong>
           <span className="muted small">
@@ -163,7 +163,10 @@ export default function App() {
             </button>
           ))}
         </nav>
+      </aside>
 
+      <div className="workspace">
+        <header className="top">
         <div className="indicators">
           {license && (
             <span
@@ -254,10 +257,11 @@ export default function App() {
         )}
       </main>
 
-      <footer>
-        For authorized security testing only. Do not use Hexora against systems
-        you do not own or have written permission to test.
-      </footer>
+        <footer>
+          For authorized security testing only. Do not use Hexora against systems
+          you do not own or have written permission to test.
+        </footer>
+      </div>
     </div>
   );
 }
