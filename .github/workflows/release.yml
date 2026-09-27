@@ -64,11 +64,21 @@ jobs:
 
       # The licence public key is embedded at build time. Set HEXORA_LICENSE_PUBKEY as a repo
       # secret (see docs/release.md); without it the build runs at the free tier.
+      # macOS ships universal (Intel + Apple Silicon) binaries, so one download works on every
+      # Mac. The two target toolchains are added here, before both the CLI build and the desktop
+      # bundle, so tauri's `--target universal-apple-darwin` can lipo the app too.
       - name: Build CLI
         shell: bash
         env:
           HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
-        run: cargo build -p hexora-cli --release
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            rustup target add x86_64-apple-darwin aarch64-apple-darwin
+            cargo build -p hexora-cli --release --target x86_64-apple-darwin
+            cargo build -p hexora-cli --release --target aarch64-apple-darwin
+          else
+            cargo build -p hexora-cli --release
+          fi
 
       - name: Stage CLI binary
         shell: bash
@@ -77,7 +87,9 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp target/release/hexora.exe "cli-dist/hexora-${{ github.ref_name }}-windows-x86_64.exe"
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            cp target/release/hexora "cli-dist/hexora-${{ github.ref_name }}-macos-x86_64"
+            lipo -create -output "cli-dist/hexora-${{ github.ref_name }}-macos-universal" \
+              target/x86_64-apple-darwin/release/hexora \
+              target/aarch64-apple-darwin/release/hexora
           else
             cp target/release/hexora "cli-dist/hexora-${{ github.ref_name }}-linux-x86_64"
           fi
@@ -99,6 +111,9 @@ jobs:
         with:
           # The directory that holds src-tauri; the config's paths are relative to it.
           projectPath: apps/desktop/src-tauri
+          # macOS: build a universal (Intel + Apple Silicon) app so one .dmg runs on every Mac.
+          # Other OSes take no extra target argument.
+          args: ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
           tagName: ${{ github.ref_name }}
           releaseName: "Hexora ${{ github.ref_name }}"
           releaseDraft: true
