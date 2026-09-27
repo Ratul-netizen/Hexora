@@ -858,6 +858,32 @@ enum OobCommand {
         #[arg(long, value_name = "TOKEN")]
         token: String,
     },
+    /// Inject an OOB payload into each query parameter of a URL and poll for callbacks.
+    ///
+    /// Confirms blind SSRF and out-of-band injection: a callback proves the target used a
+    /// parameter value to reach a server it does not control.
+    Test {
+        /// The target URL, with the ?parameters to test.
+        url: String,
+        /// The collaborator authority (from `oob serve`).
+        #[arg(long, value_name = "AUTHORITY")]
+        server: String,
+        /// HTTP method (default GET).
+        #[arg(long, value_name = "METHOD")]
+        method: Option<String>,
+        /// Extra header, `Name: value`. Repeatable.
+        #[arg(long = "header", value_name = "H")]
+        header: Vec<String>,
+        /// Seconds to wait for callbacks before polling.
+        #[arg(long, value_name = "SECS", default_value_t = 5)]
+        wait: u64,
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+        /// Do not ask before sending.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1404,6 +1430,27 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }) => oob::mint_cmd(server, *subdomain, *https, cli.json),
         Command::Oob(OobCommand::Poll { server, token }) => {
             oob::poll_cmd(server, token, cli.json)
+        }
+        Command::Oob(OobCommand::Test {
+            url,
+            server,
+            method,
+            header,
+            wait,
+            insecure,
+            yes,
+        }) => {
+            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            oob::test_cmd(oob::TestArgs {
+                url,
+                server,
+                method: method.as_deref(),
+                headers: header,
+                wait: *wait,
+                insecure: *insecure,
+                yes: *yes,
+                json: cli.json,
+            })
         }
         Command::Llm {
             url,

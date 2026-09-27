@@ -988,7 +988,7 @@ versus Burp: confirming blind vulnerabilities by making a target reach a server 
 | ---- | ---------------- | ---------- |
 | **OOB.a** — the HTTP collaborator | A self-hosted server that catches HTTP callbacks, records each with the unique token that provoked it, and answers polls; a client that mints payloads (`http://<token>.domain/` or `http://host/<token>`) and polls. A callback proves the target processed the payload out of band — the confirmation a blind SSRF, XXE or injection cannot give from its response. `hexora oob serve|mint|poll`. | — |
 | **OOB.b** — DNS interactions | A DNS server so a target that only *resolves* the payload (never connects) is still caught — the blind cases HTTP alone misses. | OOB.a |
-| **OOB.c** — wired into the tools | Mint a payload from the intruder/repeater/scanner, and correlate the callback automatically into a finding — the OOB analogue of the reflected-input bridge. | OOB.a, active |
+| **OOB.c** — wired into the tools | DONE (parameter scanner). `hexora oob test <url>` injects a collaborator payload into each query parameter, sends, waits, and polls — a callback confirms blind SSRF / OOB injection, correlated to the parameter. | OOB.a |
 
 <!-- OOB.a DONE. New hexora-oob crate: a self-hostable HTTP collaborator (server catches
 callbacks + a /_hexora/poll endpoint; client mints path- or subdomain-token payloads and
