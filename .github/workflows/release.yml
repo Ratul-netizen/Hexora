@@ -88,16 +88,14 @@ jobs:
           # Required by tauri-action to create and upload to the draft release.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
-          # macOS code signing + notarization. Unset -> the .app/.dmg are unsigned.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Tauri updater signing (optional). Unset -> no update signatures are produced.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing + notarization, and Tauri updater signing, are intentionally NOT
+          # wired here: an *empty* APPLE_CERTIFICATE still makes tauri-action attempt a keychain
+          # `security import`, which fails the macOS bundle. Leaving these unset means macOS
+          # ad-hoc-signs the .app and the installers ship unsigned. To sign a GA build, add the
+          # env vars back and set the matching repo secrets (see docs/release.md):
+          #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+          #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID,
+          #   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
         with:
           # The directory that holds src-tauri; the config's paths are relative to it.
           projectPath: apps/desktop/src-tauri
