@@ -4,9 +4,12 @@ import { AuthzView } from "./views/AuthzView";
 import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
 import { CrawlerView } from "./views/CrawlerView";
+import { FuzzerView } from "./views/FuzzerView";
 import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
 import { LicenseView } from "./views/LicenseView";
+import { LlmView } from "./views/LlmView";
+import { OobView } from "./views/OobView";
 import { SitemapView } from "./views/SitemapView";
 import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
@@ -42,7 +45,10 @@ type Tab =
   | "websockets"
   | "identifiers"
   | "scan"
+  | "fuzzer"
   | "authz"
+  | "llm"
+  | "oob"
   | "findings"
   | "crawler"
   | "report"
@@ -59,7 +65,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "websockets", label: "WebSocket" },
   { id: "identifiers", label: "Identifiers" },
   { id: "scan", label: "Scan" },
+  { id: "fuzzer", label: "Fuzzer" },
   { id: "authz", label: "Authorization" },
+  { id: "llm", label: "LLM" },
+  { id: "oob", label: "Collaborator" },
   { id: "findings", label: "Findings" },
   { id: "crawler", label: "Crawler" },
   { id: "sitemap", label: "Site map" },
@@ -227,6 +236,13 @@ export default function App() {
             onOpenExchange={showExchange}
           />
         )}
+        {tab === "fuzzer" && (
+          <FuzzerView
+            hasProject={project !== null}
+            requestId={testing}
+            license={license}
+          />
+        )}
         {tab === "authz" && (
           <AuthzView
             requestId={testing}
@@ -237,6 +253,8 @@ export default function App() {
             onOpenExchange={showExchange}
           />
         )}
+        {tab === "llm" && <LlmView license={license} />}
+        {tab === "oob" && <OobView license={license} />}
         {tab === "findings" && (
           <FindingsView
             hasProject={project !== null}

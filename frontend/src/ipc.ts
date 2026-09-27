@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 13;
+export const EXPECTED_RPC_CONTRACT_VERSION = 14;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -272,6 +272,148 @@ export const runCrawl = (args: {
   insecure: boolean;
   identity: string | null;
 }): Promise<CrawlSummary> => invoke<CrawlSummary>("crawl_run", args);
+
+// --- LLM security testing (M18.9) ---------------------------------------
+
+/** A confirmed prompt injection: the model emitted the injected canary. */
+export interface LlmInjection {
+  probe: string;
+  category: string;
+  canary: string;
+}
+
+/** A possible system-prompt disclosure — a lead to verify, not a confirmation. */
+export interface LlmDisclosure {
+  probe: string;
+  signals: string[];
+  excerpt: string;
+}
+
+/** An insecure-output-handling finding: active characters came back unencoded. */
+export interface LlmUnsafeOutput {
+  probe: string;
+  context: string;
+  marker: string;
+}
+
+/** What an LLM test found. */
+export interface LlmReport {
+  endpoint: string;
+  tested: number;
+  injections: LlmInjection[];
+  disclosures: LlmDisclosure[];
+  unsafe_output: LlmUnsafeOutput[];
+  errors: string[];
+}
+
+/** Runs the injection / disclosure / output-handling probes at one endpoint. Sends traffic. */
+export const runLlmTest = (args: {
+  url: string;
+  template: string | null;
+  method: string | null;
+  headers: string[];
+  insecure: boolean;
+}): Promise<LlmReport> => invoke<LlmReport>("llm_test", args);
+
+// --- Out-of-band testing / Collaborator (M18.95) ------------------------
+
+/** One recorded out-of-band interaction. */
+export interface OobInteraction {
+  protocol: string;
+  method: string;
+  path: string;
+  source: string;
+  at: string;
+}
+
+/** The callbacks one target parameter provoked. */
+export interface OobHit {
+  parameter: string;
+  interactions: OobInteraction[];
+}
+
+/** What an out-of-band parameter test found. */
+export interface OobReport {
+  target: string;
+  collaborator: string;
+  parameters: string[];
+  confirmed: boolean;
+  hits: OobHit[];
+  waited: number;
+}
+
+/** Injects a collaborator payload into each query parameter and polls for callbacks. Sends traffic. */
+export const runOobTest = (args: {
+  url: string;
+  collaborator: string;
+  method: string | null;
+  headers: string[];
+  waitSecs: number;
+  insecure: boolean;
+}): Promise<OobReport> => invoke<OobReport>("oob_test", args);
+
+// --- Intruder / Fuzzer (M6 / CR.f) --------------------------------------
+
+/** A slot in a captured request a payload can be varied in. */
+export interface FuzzSlot {
+  label: string;
+  name: string;
+  kind: string;
+}
+
+/** The slots a captured request offers to vary. */
+export const fuzzSlots = (id: string): Promise<FuzzSlot[]> =>
+  invoke<FuzzSlot[]>("fuzz_slots", { id });
+
+/** One row of the status/bytes histogram. */
+export interface FuzzGroup {
+  status: number;
+  bytes: number;
+  count: number;
+  examples: string[];
+  request: string | null;
+  as_unchanged: boolean;
+}
+
+/** One payload that did not behave like the rest. */
+export interface FuzzOutlier {
+  payload: string;
+  status: number;
+  bytes: number;
+  request: string | null;
+}
+
+/** The unchanged request's own response. */
+export interface FuzzBaseline {
+  status: number;
+  bytes: number;
+  request: string | null;
+  error: string | null;
+}
+
+/** What a fuzz run produced. It concludes nothing — a difference is a difference. */
+export interface FuzzRun {
+  summary: string;
+  complete: boolean;
+  stopped_because: string | null;
+  requests_sent: number;
+  method: string;
+  state_changing: boolean;
+  baseline: FuzzBaseline | null;
+  groups: FuzzGroup[];
+  outliers: FuzzOutlier[];
+}
+
+/** Sends one captured request once per payload, varying one slot. Sends traffic. */
+export const runFuzz = (args: {
+  id: string;
+  at: string | null;
+  replacing: string | null;
+  payloads: string[];
+  delayMs: number | null;
+  maxRequests: number | null;
+  insecure: boolean;
+}): Promise<FuzzRun> => invoke<FuzzRun>("fuzz_run", args);
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

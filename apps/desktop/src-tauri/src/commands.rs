@@ -2911,6 +2911,683 @@ fn content_type_of(headers_raw: &[u8]) -> String {
     String::new()
 }
 
+// ---------------------------------------------------------------------------
+// LLM security testing (M18.9)
+// ---------------------------------------------------------------------------
+
+/// One confirmed prompt injection, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmInjectionView {
+    pub probe: String,
+    pub category: String,
+    pub canary: String,
+}
+
+/// One possible system-prompt disclosure — a lead, not a confirmation.
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmDisclosureView {
+    pub probe: String,
+    pub signals: Vec<String>,
+    pub excerpt: String,
+}
+
+/// One insecure-output-handling finding.
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmUnsafeOutputView {
+    pub probe: String,
+    pub context: String,
+    pub marker: String,
+}
+
+/// The whole of what an LLM test found, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmReportView {
+    pub endpoint: String,
+    /// How many injection probes actually reached the endpoint.
+    pub tested: usize,
+    pub injections: Vec<LlmInjectionView>,
+    pub disclosures: Vec<LlmDisclosureView>,
+    pub unsafe_output: Vec<LlmUnsafeOutputView>,
+    /// Probes that could not be sent, with the reason.
+    pub errors: Vec<String>,
+}
+
+/// The body template default the window offers — an OpenAI-style chat call.
+const LLM_DEFAULT_TEMPLATE: &str = r#"{"messages":[{"role":"user","content":"{{PROMPT}}"}]}"#;
+
+/// Runs the prompt-injection, system-prompt-disclosure and output-handling probes at one
+/// LLM-backed endpoint.
+///
+/// Automated traffic, so it sits behind the same entitlement as the active scanner. The
+/// endpoint's host is the scope — naming it is the tester's consent, and the guard refuses
+/// anything a probe's payload might otherwise steer the request toward. The button that
+/// starts it is the consent to send; nothing goes out before it is pressed.
+#[tauri::command]
+pub async fn llm_test(
+    url: String,
+    template: Option<String>,
+    method: Option<String>,
+    headers: Vec<String>,
+    insecure: bool,
+) -> CommandResult<LlmReportView> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        llm_test_blocking(url, template, method, headers, insecure)
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+/// The test itself, owning everything it touches.
+fn llm_test_blocking(
+    url: String,
+    template: Option<String>,
+    method: Option<String>,
+    headers: Vec<String>,
+    insecure: bool,
+) -> CommandResult<LlmReportView> {
+    use hexora_llm::{test, test_leakage, test_output_handling, Target, PROMPT_PLACEHOLDER};
+
+    let (service, path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+
+    let body_template = match template.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => t.to_string(),
+        None => LLM_DEFAULT_TEMPLATE.to_string(),
+    };
+    if !body_template.contains(PROMPT_PLACEHOLDER) {
+        return Err(format!(
+            "the body template must contain the {PROMPT_PLACEHOLDER} placeholder"
+        ));
+    }
+
+    let parsed_headers = parse_named_headers(&headers)?;
+
+    let target = Target {
+        service: service.clone(),
+        path,
+        method: method
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or("POST")
+            .to_string(),
+        headers: parsed_headers,
+        body_template,
+    };
+
+    // The endpoint's host is the scope: the tester named it, and the guard refuses anything
+    // a probe's payload might otherwise steer the request toward.
+    let scope = Scope::new().include(ScopeRule::host(service.host.clone()));
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, Arc::new(scope));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+    let report = runtime.block_on(test(&guard, &target));
+    let leak = runtime.block_on(test_leakage(&guard, &target));
+    let output = runtime.block_on(test_output_handling(&guard, &target));
+
+    let mut errors = report.errors.clone();
+    errors.extend(leak.errors.iter().cloned());
+    errors.extend(output.errors.iter().cloned());
+
+    Ok(LlmReportView {
+        endpoint: url,
+        tested: report.tested,
+        injections: report
+            .injections
+            .iter()
+            .map(|i| LlmInjectionView {
+                probe: i.probe_id.to_string(),
+                category: i.category.label().to_string(),
+                canary: i.canary.clone(),
+            })
+            .collect(),
+        disclosures: leak
+            .disclosures
+            .iter()
+            .map(|d| LlmDisclosureView {
+                probe: d.probe_id.to_string(),
+                signals: d.signals.iter().map(|s| s.to_string()).collect(),
+                excerpt: d.snippet.clone(),
+            })
+            .collect(),
+        unsafe_output: output
+            .findings
+            .iter()
+            .map(|f| LlmUnsafeOutputView {
+                probe: f.probe_id.to_string(),
+                context: f.context.label().to_string(),
+                marker: f.marker.clone(),
+            })
+            .collect(),
+        errors,
+    })
+}
+
+/// Parses `Name: value` header lines into engine headers.
+fn parse_named_headers(raw: &[String]) -> CommandResult<Vec<hexora_types::http::Header>> {
+    let mut out = Vec::new();
+    for item in raw {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let (name, value) = trimmed
+            .split_once(':')
+            .ok_or_else(|| format!("{item:?} is not `Name: value`"))?;
+        out.push(hexora_types::http::Header::new(name.trim(), value.trim()));
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Out-of-band testing / Collaborator (M18.95)
+// ---------------------------------------------------------------------------
+
+/// One recorded out-of-band interaction, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct OobInteractionView {
+    pub protocol: String,
+    pub method: String,
+    pub path: String,
+    pub source: String,
+    pub at: String,
+}
+
+/// The callbacks one target parameter provoked.
+#[derive(Debug, Clone, Serialize)]
+pub struct OobHitView {
+    pub parameter: String,
+    pub interactions: Vec<OobInteractionView>,
+}
+
+/// What an out-of-band parameter test found.
+#[derive(Debug, Clone, Serialize)]
+pub struct OobReportView {
+    pub target: String,
+    pub collaborator: String,
+    /// The parameters that were probed, whether or not they called back.
+    pub parameters: Vec<String>,
+    /// True when any parameter provoked a callback.
+    pub confirmed: bool,
+    pub hits: Vec<OobHitView>,
+    /// Seconds the test waited before polling.
+    pub waited: u64,
+}
+
+/// Injects a collaborator payload into each query parameter of a target and polls for the
+/// callbacks it provokes.
+///
+/// A callback carrying the payload's token proves the target used the parameter value to make
+/// an out-of-band request — a blind SSRF, or an injection that fetched a URL. Blind by nature:
+/// the response says nothing, so the collaborator is the only witness. Automated traffic, so it
+/// sits behind the active-scanner entitlement, and the button is the tester's consent.
+#[tauri::command]
+pub async fn oob_test(
+    url: String,
+    collaborator: String,
+    method: Option<String>,
+    headers: Vec<String>,
+    wait_secs: u64,
+    insecure: bool,
+) -> CommandResult<OobReportView> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        oob_test_blocking(url, collaborator, method, headers, wait_secs, insecure)
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+/// The test itself, owning everything it touches.
+fn oob_test_blocking(
+    url: String,
+    collaborator_authority: String,
+    method: Option<String>,
+    headers: Vec<String>,
+    wait_secs: u64,
+    insecure: bool,
+) -> CommandResult<OobReportView> {
+    use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
+    use hexora_oob::{Collaborator, PayloadMode};
+    use hexora_types::http::HttpRequest;
+
+    let (service, path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let params = query_param_names(&path);
+    if params.is_empty() {
+        return Err(
+            "no query parameters to test; give a URL with a ?parameter=value to inject into"
+                .to_string(),
+        );
+    }
+    let collaborator_authority = collaborator_authority.trim().to_string();
+    if collaborator_authority.is_empty() {
+        return Err("give the collaborator authority to mint payloads against".to_string());
+    }
+
+    let scope = Scope::new().include(ScopeRule::host(service.host.clone()));
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, Arc::new(scope));
+    let collaborator = Collaborator::new(&collaborator_authority, PayloadMode::Path);
+    let options = SendOptions::automated(Origin::Scanner);
+    let method = method
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("GET")
+        .to_string();
+    let extra = parse_named_headers(&headers)?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+
+    let hits = runtime.block_on(async {
+        let mut probes: Vec<(String, String)> = Vec::new(); // (token, parameter)
+        for param in &params {
+            let (token, payload) = collaborator.mint();
+            let mut request = HttpRequest::get(
+                service.clone(),
+                set_query_param_value(&path, param, &payload),
+            );
+            request.method = method.clone();
+            for header in &extra {
+                request.headers.set(
+                    &header.name,
+                    String::from_utf8_lossy(&header.value).into_owned(),
+                );
+            }
+            // Blind: the response tells us nothing, so it is not read.
+            let _ = guard.send(request, options.clone()).await;
+            probes.push((token, param.clone()));
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+
+        let mut hits: Vec<OobHitView> = Vec::new();
+        for (token, param) in &probes {
+            let interactions = collaborator.poll(token).await.unwrap_or_default();
+            if !interactions.is_empty() {
+                hits.push(OobHitView {
+                    parameter: param.clone(),
+                    interactions: interactions
+                        .iter()
+                        .map(|i| OobInteractionView {
+                            protocol: i.protocol.clone(),
+                            method: i.method.clone(),
+                            path: i.path.clone(),
+                            source: i.source.clone(),
+                            at: i.at.clone(),
+                        })
+                        .collect(),
+                });
+            }
+        }
+        hits
+    });
+
+    Ok(OobReportView {
+        target: url,
+        collaborator: collaborator_authority,
+        parameters: params,
+        confirmed: !hits.is_empty(),
+        hits,
+        waited: wait_secs,
+    })
+}
+
+/// The names of the query parameters in a request target.
+fn query_param_names(path: &str) -> Vec<String> {
+    let Some((_, query)) = path.split_once('?') else {
+        return Vec::new();
+    };
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| pair.split_once('=').map_or(pair, |(k, _)| k).to_string())
+        .collect()
+}
+
+/// Replaces the value of `name` in the target's query string with a percent-encoded `value`.
+fn set_query_param_value(path: &str, name: &str, value: &str) -> String {
+    let (base, query) = path.split_once('?').unwrap_or((path, ""));
+    let pairs: Vec<String> = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let key = pair.split_once('=').map_or(pair, |(k, _)| k);
+            if key == name {
+                format!("{name}={}", percent_encode_query(value))
+            } else {
+                pair.to_string()
+            }
+        })
+        .collect();
+    format!("{base}?{}", pairs.join("&"))
+}
+
+/// Percent-encodes a value for a query string.
+fn percent_encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Intruder / Fuzzer (M6 / CR.f)
+// ---------------------------------------------------------------------------
+
+/// A slot in the request a payload can be sent into — a query parameter or a header.
+#[derive(Debug, Clone, Serialize)]
+pub struct FuzzSlotView {
+    /// A description a tester recognises, e.g. `query parameter "q"`.
+    pub label: String,
+    /// The `--at` name to address this slot.
+    pub name: String,
+    /// `query` or `header`.
+    pub kind: String,
+}
+
+/// The slots the given captured request offers to vary, so the window can list them.
+#[tauri::command]
+pub fn fuzz_slots(state: State<'_, AppState>, id: String) -> CommandResult<Vec<FuzzSlotView>> {
+    let project = open(&state)?;
+    let request_id: RequestId = id
+        .parse()
+        .map_err(|e| format!("{id} is not a request id: {e}"))?;
+    let store = Arc::new(project.traffic());
+    let repeater = Repeater::new(
+        ScopeGuard::new(
+            TcpTransport::new(),
+            Arc::new(project.settings().scope().map_err(fail)?),
+        ),
+        store,
+    );
+    let draft = repeater.draft_from(request_id).map_err(fail)?;
+    Ok(hexora_types::inject::inputs(&draft.request)
+        .into_iter()
+        .filter_map(|slot| match &slot {
+            ObjectLocation::Query { name, .. } => Some(FuzzSlotView {
+                label: hexora_fuzz::describe(&slot),
+                name: name.clone(),
+                kind: "query".to_string(),
+            }),
+            ObjectLocation::Header { name, .. } => Some(FuzzSlotView {
+                label: hexora_fuzz::describe(&slot),
+                name: name.clone(),
+                kind: "header".to_string(),
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
+/// One row of the status/bytes histogram, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct FuzzGroupView {
+    pub status: u16,
+    pub bytes: usize,
+    pub count: usize,
+    pub examples: Vec<String>,
+    pub request: Option<String>,
+    pub as_unchanged: bool,
+}
+
+/// One payload that did not behave like the rest.
+#[derive(Debug, Clone, Serialize)]
+pub struct FuzzOutlierView {
+    pub payload: String,
+    pub status: u16,
+    pub bytes: usize,
+    pub request: Option<String>,
+}
+
+/// The unchanged request's own response, for comparison.
+#[derive(Debug, Clone, Serialize)]
+pub struct FuzzBaselineView {
+    pub status: u16,
+    pub bytes: usize,
+    pub request: Option<String>,
+    pub error: Option<String>,
+}
+
+/// What a fuzz run produced. It concludes nothing — a response that differs is a response
+/// that differs; whether it matters is the tester's judgement.
+#[derive(Debug, Clone, Serialize)]
+pub struct FuzzRunView {
+    pub summary: String,
+    pub complete: bool,
+    /// Set when the run did not finish, e.g. the request ceiling was reached.
+    pub stopped_because: Option<String>,
+    pub requests_sent: usize,
+    pub method: String,
+    /// True when the varied method may change data (POST/PUT/DELETE/PATCH).
+    pub state_changing: bool,
+    pub baseline: Option<FuzzBaselineView>,
+    pub groups: Vec<FuzzGroupView>,
+    pub outliers: Vec<FuzzOutlierView>,
+}
+
+/// Sends one captured request once per payload, varying one slot, and reports the spread.
+///
+/// The scheduler refuses to auto-replay a state-changing method, because a queue deciding that
+/// on its own is not a test anybody consented to — but a tester who presses this button has
+/// decided, so a POST is replayed after the window has said the method and the count. Automated
+/// by volume, so it sits behind the active-scanner entitlement.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn fuzz_run(
+    state: State<'_, AppState>,
+    id: String,
+    at: Option<String>,
+    replacing: Option<String>,
+    payloads: Vec<String>,
+    delay_ms: Option<u64>,
+    max_requests: Option<usize>,
+    insecure: bool,
+) -> CommandResult<FuzzRunView> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+    let path = state.project_path().map_err(fail)?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        fuzz_run_blocking(
+            path,
+            id,
+            at,
+            replacing,
+            payloads,
+            delay_ms,
+            max_requests,
+            insecure,
+        )
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+/// The run itself, owning everything it touches.
+#[allow(clippy::too_many_arguments)]
+fn fuzz_run_blocking(
+    path: PathBuf,
+    id: String,
+    at: Option<String>,
+    replacing: Option<String>,
+    payloads: Vec<String>,
+    delay_ms: Option<u64>,
+    max_requests: Option<usize>,
+    insecure: bool,
+) -> CommandResult<FuzzRunView> {
+    use hexora_active::{Budget, Cancel};
+    use hexora_verify::RepeaterLab;
+
+    let project = Project::open(&path).map_err(fail)?;
+    let request_id: RequestId = id
+        .parse()
+        .map_err(|e| format!("{id} is not a request id: {e}"))?;
+
+    let payloads: Vec<String> = payloads
+        .into_iter()
+        .map(|p| p.trim_end_matches('\r').to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if payloads.is_empty() {
+        return Err("the payload list is empty, so there is nothing to send".to_string());
+    }
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
+    } else {
+        TcpTransport::new().http2(true)
+    };
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+    let store = Arc::new(project.traffic());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store)
+        .attaching(project.settings().attached_headers().map_err(fail)?);
+    let draft = repeater.draft_from(request_id).map_err(fail)?;
+
+    let slot = fuzz_slot(&draft.request, at.as_deref(), replacing.as_deref())?;
+
+    let mut budget = Budget {
+        max_requests: max_requests.unwrap_or(payloads.len() + 1),
+        hosts_at_once: 1,
+        ..Budget::default()
+    };
+    if let Some(delay) = delay_ms {
+        budget.pause = std::time::Duration::from_millis(delay);
+    }
+    budget.check().map_err(fail)?;
+
+    let plan = hexora_fuzz::Plan {
+        draft: &draft,
+        at: slot,
+        payloads: &payloads,
+        budget,
+    };
+    let method = draft.request.method.clone();
+    let state_changing = hexora_active::is_state_changing(&method);
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+    let lab = RepeaterLab::scanner(&repeater);
+    let cancel = Cancel::new();
+    let run = runtime
+        .block_on(hexora_fuzz::run(&plan, &lab, &cancel))
+        .map_err(fail)?;
+
+    Ok(FuzzRunView {
+        summary: run.summary(),
+        complete: run.complete(),
+        stopped_because: run.stopped.map(|why| why.as_str().to_string()),
+        requests_sent: run.requests_sent,
+        method,
+        state_changing,
+        baseline: run.baseline.as_ref().map(|b| FuzzBaselineView {
+            status: b.status,
+            bytes: b.bytes,
+            request: b.request.map(|id| id.to_string()),
+            error: b.error.clone(),
+        }),
+        groups: run
+            .grouped()
+            .into_iter()
+            .map(|g| FuzzGroupView {
+                status: g.status,
+                bytes: g.bytes,
+                count: g.count,
+                examples: g.examples,
+                request: g.request.map(|id| id.to_string()),
+                as_unchanged: g.is_baseline,
+            })
+            .collect(),
+        outliers: run
+            .outliers()
+            .into_iter()
+            .map(|a| FuzzOutlierView {
+                payload: a.payload.clone(),
+                status: a.status,
+                bytes: a.bytes,
+                request: a.request.map(|id| id.to_string()),
+            })
+            .collect(),
+    })
+}
+
+/// Resolves where the payload goes: a `--replacing` value, or an `--at` slot name.
+fn fuzz_slot(
+    request: &hexora_types::http::HttpRequest,
+    at: Option<&str>,
+    replacing: Option<&str>,
+) -> CommandResult<ObjectLocation> {
+    if let Some(value) = replacing.map(str::trim).filter(|v| !v.is_empty()) {
+        return hexora_types::inject::locate(request, value)
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("`{value}` does not appear in this request"));
+    }
+    let available = hexora_types::inject::inputs(request);
+    let Some(name) = at.map(str::trim).filter(|n| !n.is_empty()) else {
+        return Err(format!(
+            "say where the payload goes: a slot name or a value to replace. This request offers {}",
+            fuzz_slot_list(&available)
+        ));
+    };
+    available
+        .into_iter()
+        .find(|slot| match slot {
+            ObjectLocation::Query { name: n, .. } | ObjectLocation::Header { name: n, .. } => {
+                n.eq_ignore_ascii_case(name)
+            }
+            _ => false,
+        })
+        .ok_or_else(|| {
+            format!(
+                "this request has no `{name}` to vary. It offers {}",
+                fuzz_slot_list(&hexora_types::inject::inputs(request))
+            )
+        })
+}
+
+/// A human list of the slots a request offers.
+fn fuzz_slot_list(available: &[ObjectLocation]) -> String {
+    if available.is_empty() {
+        return "nothing this command can address — give a value to replace instead".to_string();
+    }
+    available
+        .iter()
+        .map(hexora_fuzz::describe)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Opens the project the window is working in.
 ///
 /// A fresh handle each time rather than one held open in [`AppState`]: SQLite

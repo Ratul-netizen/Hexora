@@ -1950,3 +1950,45 @@ textarea.editor {
     flex-basis: 168px;
   }
 }
+
+/* ---------------------------------------------- new module views (LLM/OOB/Fuzzer) */
+
+/* A field that should take the free space in a row, next to a fixed control. */
+.field.grow {
+  flex: 1 1 auto;
+}
+
+/* A quoted model excerpt or captured value — set apart, monospace, and scrollable so a
+   long hidden-prompt leak does not stretch the card. */
+.excerpt {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border-bright);
+  background: var(--bg-raised);
+  border-radius: 3px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
+/* One parameter's block of out-of-band callbacks. */
+.hit {
+  margin-top: 8px;
+}
+.hit + .hit {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+/* The fuzzer's status/bytes histogram and outlier lists reuse the base table look; the
+   grid modifier just guarantees full width and a readable payload column. */
+table.grid {
+  width: 100%;
+  margin-top: 8px;
+}
+table.grid td code {
+  word-break: break-all;
+}
