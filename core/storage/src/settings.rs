@@ -12,6 +12,7 @@
 //! portable record of an engagement: the traffic, the identities, the findings, and
 //! the authorization it was all collected under.
 
+use hexora_types::custom::CustomCheck;
 use hexora_types::http::Header;
 use hexora_types::matchreplace::MatchReplaceRule;
 use hexora_types::programme::Programme;
@@ -159,6 +160,45 @@ impl Settings {
             "UPDATE project SET match_replace_rules_json = ?1",
             params![json],
         )?;
+        if updated == 0 {
+            return Err(StorageError::NotFound {
+                entity: "project row",
+                id: PROJECT_ID.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The project's user-defined scan checks, in the order they run.
+    ///
+    /// Empty for a project with no `project` row, the correct reading of "none added".
+    pub fn custom_checks(&self) -> Result<Vec<CustomCheck>> {
+        let conn = self.db.connection()?;
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT custom_checks_json FROM project LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        match json {
+            None => Ok(Vec::new()),
+            Some(json) => serde_json::from_str(&json).map_err(|e| StorageError::Decode {
+                entity: "custom checks",
+                reason: e.to_string(),
+            }),
+        }
+    }
+
+    /// Replaces the project's user-defined scan checks.
+    pub fn set_custom_checks(&self, checks: &[CustomCheck]) -> Result<()> {
+        let json = serde_json::to_string(checks).map_err(|e| StorageError::Decode {
+            entity: "custom checks",
+            reason: e.to_string(),
+        })?;
+        let conn = self.db.connection()?;
+        let updated = conn.execute("UPDATE project SET custom_checks_json = ?1", params![json])?;
         if updated == 0 {
             return Err(StorageError::NotFound {
                 entity: "project row",

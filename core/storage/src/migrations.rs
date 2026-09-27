@@ -87,6 +87,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "match_replace_rules",
         sql: include_str!("../migrations/0012_match_replace_rules.sql"),
     },
+    Migration {
+        version: 13,
+        name: "custom_checks",
+        sql: include_str!("../migrations/0013_custom_checks.sql"),
+    },
 ];
 
 /// The schema version this build expects.

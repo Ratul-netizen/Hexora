@@ -71,6 +71,7 @@
 #![warn(missing_docs, clippy::all)]
 
 pub mod checks;
+pub mod custom;
 pub mod passive;
 
 use hexora_types::finding::Hypothesis;

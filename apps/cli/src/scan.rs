@@ -48,12 +48,19 @@ pub fn passive(args: Args<'_>) -> Result<()> {
 
     if let Some(detector) = args.detector {
         let registry = crate::detectors::registry();
-        if registry.find(detector).is_none() {
+        // A built-in, or one of this project's custom checks — those are not in the static
+        // registry because they live in the project, not the binary.
+        let is_custom = project
+            .settings()
+            .custom_checks()?
+            .iter()
+            .any(|c| c.id == detector);
+        if registry.find(detector).is_none() && !is_custom {
             return Err(hexora_types::HexoraError::invalid_input(
                 "--detector",
                 format!(
-                    "no check called {detector:?}. `hexora detectors` lists the ones \
-                     this build has"
+                    "no check called {detector:?}. `hexora detectors` lists the built-ins, \
+                     and `hexora check list` the custom ones"
                 ),
             ));
         }

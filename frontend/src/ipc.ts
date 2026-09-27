@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 17;
+export const EXPECTED_RPC_CONTRACT_VERSION = 18;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -481,6 +481,41 @@ export const matchReplaceSetEnabled = (
   enabled: boolean,
 ): Promise<MatchReplaceRule[]> =>
   invoke<MatchReplaceRule[]>("matchreplace_set_enabled", { name, enabled });
+
+// --- Custom scan checks (M15.5) -----------------------------------------
+
+/** One user-defined scan check. */
+export interface CustomCheck {
+  id: string;
+  name: string;
+  severity: string;
+  query: string;
+  message: string;
+  enabled: boolean;
+  summary: string;
+}
+
+/** The project's custom checks. */
+export const checkList = (): Promise<CustomCheck[]> =>
+  invoke<CustomCheck[]>("check_list");
+
+/** Adds a custom check; returns the whole list. */
+export const checkAdd = (args: {
+  id: string;
+  name: string;
+  severity: string;
+  query: string;
+  message: string;
+  disabled: boolean;
+}): Promise<CustomCheck[]> => invoke<CustomCheck[]>("check_add", args);
+
+/** Removes a check by id; returns the whole list. */
+export const checkRemove = (id: string): Promise<CustomCheck[]> =>
+  invoke<CustomCheck[]>("check_remove", { id });
+
+/** Enables or disables a check by id; returns the whole list. */
+export const checkSetEnabled = (id: string, enabled: boolean): Promise<CustomCheck[]> =>
+  invoke<CustomCheck[]>("check_set_enabled", { id, enabled });
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

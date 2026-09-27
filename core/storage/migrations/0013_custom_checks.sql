@@ -1,0 +1,11 @@
+-- M15.5: user-defined scan checks (Hexora's answer to Burp's BChecks).
+--
+-- A custom check is a saved query plus a finding template. When the query matches a
+-- captured exchange, the passive scanner records an observation — a lead, never an
+-- actionable finding, and never a hypothesis the active scheduler would try to settle,
+-- because a passive observation cannot say more than "this matched, here is the exchange".
+--
+-- Stored as an ordered JSON array in the single project row, beside the scope, the
+-- attached headers and the match-and-replace rules, so a project file stays a complete,
+-- portable record of the engagement including the checks it was scanned with.
+ALTER TABLE project ADD COLUMN custom_checks_json TEXT NOT NULL DEFAULT '[]';

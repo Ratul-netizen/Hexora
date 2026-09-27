@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthzView } from "./views/AuthzView";
 import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
+import { ChecksView } from "./views/ChecksView";
 import { CrawlerView } from "./views/CrawlerView";
 import { FuzzerView } from "./views/FuzzerView";
 import { HistoryView } from "./views/HistoryView";
@@ -47,6 +48,7 @@ type Tab =
   | "matchreplace"
   | "identifiers"
   | "scan"
+  | "checks"
   | "fuzzer"
   | "authz"
   | "llm"
@@ -68,6 +70,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "matchreplace", label: "Match & Replace" },
   { id: "identifiers", label: "Identifiers" },
   { id: "scan", label: "Scan" },
+  { id: "checks", label: "Custom Checks" },
   { id: "fuzzer", label: "Fuzzer" },
   { id: "authz", label: "Authorization" },
   { id: "llm", label: "LLM" },
@@ -239,6 +242,7 @@ export default function App() {
             onOpenExchange={showExchange}
           />
         )}
+        {tab === "checks" && <ChecksView hasProject={project !== null} />}
         {tab === "fuzzer" && (
           <FuzzerView
             hasProject={project !== null}

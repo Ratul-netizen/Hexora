@@ -1813,6 +1813,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "hexora-query",
  "hexora-storage",
  "hexora-types",
  "hexora-verify",

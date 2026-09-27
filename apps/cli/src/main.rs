@@ -16,6 +16,7 @@ use hexora_storage::{migrations, Project};
 
 mod active;
 mod authz;
+mod check;
 mod crawl;
 mod detectors;
 mod findings;
@@ -395,6 +396,14 @@ enum Command {
     /// response rules on the way back.
     #[command(subcommand)]
     Matchreplace(MatchReplaceCommand),
+
+    /// User-defined scan checks — Hexora's answer to Burp's BChecks.
+    ///
+    /// A check is a query plus a finding template; it runs during `hexora scan passive`
+    /// and files a lead when it matches. Checks match on metadata and headers, and can
+    /// only ever produce a lead — never an actionable finding.
+    #[command(subcommand)]
+    Check(CheckCommand),
 
     /// Replay a captured request as several identities and compare what came back.
     ///
@@ -1409,6 +1418,61 @@ enum MatchReplaceCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum CheckCommand {
+    /// List the project's custom checks.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Add a custom check.
+    ///
+    /// The query matches on metadata and headers (see `hexora history --query` for the
+    /// fields); body fields are refused. A match files a lead at the given severity.
+    Add {
+        /// Project directory.
+        path: PathBuf,
+        /// A unique id, e.g. `custom.exposed-actuator`.
+        id: String,
+        /// The query that decides a match, e.g. `resp.header:x-debug`.
+        #[arg(long, value_name = "QUERY")]
+        query: String,
+        /// A human name for the finding it raises.
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        /// What a match means, shown as the finding text.
+        #[arg(long, value_name = "TEXT")]
+        message: String,
+        /// Severity: info, low, medium, high or critical.
+        #[arg(long, value_name = "SEVERITY", default_value = "info")]
+        severity: String,
+        /// Add the check but leave it switched off.
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// Remove a check by id.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// The check's id.
+        id: String,
+    },
+    /// Switch a check on.
+    Enable {
+        /// Project directory.
+        path: PathBuf,
+        /// The check's id.
+        id: String,
+    },
+    /// Switch a check off, keeping it in the list.
+    Disable {
+        /// Project directory.
+        path: PathBuf,
+        /// The check's id.
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ProjectCommand {
     /// Create a new project.
     Init {
@@ -1857,6 +1921,32 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }
         Command::Matchreplace(MatchReplaceCommand::Disable { path, name }) => {
             matchreplace::set_enabled(path, name, false, cli.json)
+        }
+        Command::Check(CheckCommand::List { path }) => check::list(path, cli.json),
+        Command::Check(CheckCommand::Add {
+            path,
+            id,
+            query,
+            name,
+            message,
+            severity,
+            disabled,
+        }) => check::add(check::AddArgs {
+            project: path,
+            id,
+            name,
+            severity,
+            query,
+            message,
+            disabled: *disabled,
+            json: cli.json,
+        }),
+        Command::Check(CheckCommand::Remove { path, id }) => check::remove(path, id, cli.json),
+        Command::Check(CheckCommand::Enable { path, id }) => {
+            check::set_enabled(path, id, true, cli.json)
+        }
+        Command::Check(CheckCommand::Disable { path, id }) => {
+            check::set_enabled(path, id, false, cli.json)
         }
         Command::Authz {
             path,

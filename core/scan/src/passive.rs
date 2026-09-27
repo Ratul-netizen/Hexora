@@ -203,7 +203,13 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
     // actually applied to this pass.
     let programme = project.settings().programme()?;
 
-    let checks: Vec<Box<dyn PassiveCheck>> = checks::all()
+    // The built-ins, plus the project's user-defined checks. Custom checks emit observations
+    // only (they leave `suspect` at its default), so they can never raise a hypothesis the
+    // active scheduler would try to settle — the scanner concludes them as leads like any
+    // other passive observation.
+    let mut all_checks = checks::all();
+    all_checks.extend(crate::custom::load(&project.settings().custom_checks()?));
+    let checks: Vec<Box<dyn PassiveCheck>> = all_checks
         .into_iter()
         .filter(|check| match &selection.detector {
             Some(wanted) => check.about().id.0 == wanted,

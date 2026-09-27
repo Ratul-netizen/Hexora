@@ -11,6 +11,7 @@ repository.workspace = true
 hexora-types.workspace = true
 hexora-storage.workspace = true
 hexora-verify.workspace = true
+hexora-query.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 tracing.workspace = true

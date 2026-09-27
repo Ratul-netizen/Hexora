@@ -1067,6 +1067,119 @@ pub fn matchreplace_set_enabled(
 }
 
 // ---------------------------------------------------------------------------
+// Custom scan checks (M15.5)
+// ---------------------------------------------------------------------------
+
+/// One user-defined scan check, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct CustomCheckView {
+    pub id: String,
+    pub name: String,
+    pub severity: String,
+    pub query: String,
+    pub message: String,
+    pub enabled: bool,
+    pub summary: String,
+}
+
+fn check_view(check: &hexora_types::custom::CustomCheck) -> CustomCheckView {
+    CustomCheckView {
+        id: check.id.clone(),
+        name: check.name.clone(),
+        severity: check.severity.as_str().to_string(),
+        query: check.query.clone(),
+        message: check.message.clone(),
+        enabled: check.enabled,
+        summary: check.summary(),
+    }
+}
+
+/// The project's custom checks, in the order they run.
+#[tauri::command]
+pub fn check_list(state: State<'_, AppState>) -> CommandResult<Vec<CustomCheckView>> {
+    let project = open(&state)?;
+    Ok(project
+        .settings()
+        .custom_checks()
+        .map_err(fail)?
+        .iter()
+        .map(check_view)
+        .collect())
+}
+
+/// Adds a custom check. Returns the whole list.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn check_add(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    severity: String,
+    query: String,
+    message: String,
+    disabled: bool,
+) -> CommandResult<Vec<CustomCheckView>> {
+    use hexora_types::custom::CustomCheck;
+    use hexora_types::finding::Severity;
+
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err("a check needs an id".to_string());
+    }
+    let severity = Severity::parse(&severity).ok_or_else(|| {
+        format!("{severity:?} is not a severity (info, low, medium, high, critical)")
+    })?;
+
+    let mut check = CustomCheck::new(id.clone(), name, severity, query, message);
+    check.enabled = !disabled;
+    hexora_scan::custom::validate(&check).map_err(fail)?;
+
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut checks = settings.custom_checks().map_err(fail)?;
+    if checks.iter().any(|c| c.id == id) {
+        return Err(format!("a check with id {id:?} already exists"));
+    }
+    checks.push(check);
+    settings.set_custom_checks(&checks).map_err(fail)?;
+    Ok(checks.iter().map(check_view).collect())
+}
+
+/// Removes a check by id.
+#[tauri::command]
+pub fn check_remove(state: State<'_, AppState>, id: String) -> CommandResult<Vec<CustomCheckView>> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut checks = settings.custom_checks().map_err(fail)?;
+    let before = checks.len();
+    checks.retain(|c| c.id != id);
+    if checks.len() == before {
+        return Err(format!("no custom check with id {id:?}"));
+    }
+    settings.set_custom_checks(&checks).map_err(fail)?;
+    Ok(checks.iter().map(check_view).collect())
+}
+
+/// Enables or disables a check by id.
+#[tauri::command]
+pub fn check_set_enabled(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> CommandResult<Vec<CustomCheckView>> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut checks = settings.custom_checks().map_err(fail)?;
+    let check = checks
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or_else(|| format!("no custom check with id {id:?}"))?;
+    check.enabled = enabled;
+    settings.set_custom_checks(&checks).map_err(fail)?;
+    Ok(checks.iter().map(check_view).collect())
+}
+
+// ---------------------------------------------------------------------------
 // Identities
 // ---------------------------------------------------------------------------
 

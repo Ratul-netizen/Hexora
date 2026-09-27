@@ -259,6 +259,11 @@ impl Query {
         self.uses(&[Field::ResponseBody])
     }
 
+    /// Whether the query mentions a given field anywhere.
+    pub fn references(&self, field: Field) -> bool {
+        self.uses(&[field])
+    }
+
     fn uses(&self, fields: &[Field]) -> bool {
         fn walk(expr: &Expr, fields: &[Field]) -> bool {
             match expr {

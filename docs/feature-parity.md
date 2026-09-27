@@ -89,7 +89,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Active scanner | ✅ | ❌ | PLANNED M13.3–M13.7 | |
 | Crawler | ✅ | ❌ | PLANNED M13.8 | Scoped in `roadmap.md` as CR.a–f: a static extractor + a scheduled, scope-guarded frontier, GET-only and never auto-submitting, feeding the scanner's project; JS-rendered discovery merges with browser integration (M18) |
 | **Caido ships no active scanner at all** | — | — | — | Strong evidence the market adopts on manual quality first |
-| Custom scan checks | BChecks | ❌ | PLANNED M15 | |
+| Custom scan checks | BChecks | ❌ | **DONE M15.5** | `hexora check`: a check is a saved query (the `hexora-query` language) plus a finding template; it runs in the passive scanner and files a lead when it matches. Matches on metadata and headers (body fields refused at add time). By construction it can only ever raise a lead capped at `Confidence::Reported` — never an actionable finding, never an active hypothesis — so a user-written check cannot overclaim. Caido has no check DSL at all |
 | Evidence-verified findings | ⚠️ | ⚠️ | **IMPLEMENTED M13.1** | The store accepts only a `Verified`, which only a verification produces — a detector's suspicion does not compile into a finding |
 | OAST / Collaborator | ✅ | ⚠️ hosted | PLANNED M16 | Self-hostable is a selling point |
 | Findings with Markdown + export | ⚠️ | ✅ | **IMPLEMENTED M12.3** | |

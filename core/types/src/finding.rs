@@ -41,6 +41,29 @@ impl Severity {
             Self::Info => 4,
         }
     }
+
+    /// The lowercase name, matching the serde spelling.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+
+    /// Parses a severity from its lowercase name.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "info" | "informational" => Some(Self::Info),
+            "low" => Some(Self::Low),
+            "medium" | "med" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "critical" | "crit" => Some(Self::Critical),
+            _ => None,
+        }
+    }
 }
 
 /// How firmly a finding is established.
