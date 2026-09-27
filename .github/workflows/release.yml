@@ -85,6 +85,8 @@ jobs:
       - name: Build & bundle desktop, publish draft release
         uses: tauri-apps/tauri-action@v0
         env:
+          # Required by tauri-action to create and upload to the draft release.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
           # macOS code signing + notarization. Unset -> the .app/.dmg are unsigned.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
