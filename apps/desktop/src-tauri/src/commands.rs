@@ -442,13 +442,46 @@ pub fn history_list(
     state: State<'_, AppState>,
     after: Option<String>,
     limit: u32,
+    query: Option<String>,
 ) -> CommandResult<HistoryPage> {
     let store = state.traffic().map_err(fail)?;
+    let total = store.count().map_err(fail)?;
+
+    // With a filter, scan the project and keep matching rows up to the limit; the query engine
+    // reads back only the request/response detail the filter mentions. Without one, page.
+    if let Some(q) = query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+        let query = hexora_query::Query::parse(q).map_err(|e| e.message)?;
+        let mut rows = Vec::new();
+        let mut cursor: Option<Cursor> = None;
+        'pages: loop {
+            let page = store
+                .history(cursor.as_ref(), Limit::new(500))
+                .map_err(fail)?;
+            for item in &page.items {
+                let record = store.query_record(item, &query).map_err(fail)?;
+                if query.matches(&record) {
+                    rows.push(row(item.clone()));
+                    if rows.len() >= limit as usize {
+                        break 'pages;
+                    }
+                }
+            }
+            match page.next {
+                Some(n) => cursor = Some(n),
+                None => break,
+            }
+        }
+        return Ok(HistoryPage {
+            rows,
+            next: None,
+            total,
+        });
+    }
+
     let cursor = after.map(Cursor);
     let page = store
         .history(cursor.as_ref(), Limit::new(limit))
         .map_err(fail)?;
-    let total = store.count().map_err(fail)?;
 
     Ok(HistoryPage {
         rows: page.items.into_iter().map(row).collect(),

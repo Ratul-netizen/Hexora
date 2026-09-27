@@ -26,6 +26,7 @@ hexora-crawl.workspace = true
 hexora-llm.workspace = true
 hexora-oob.workspace = true
 hexora-fuzz.workspace = true
+hexora-query.workspace = true
 hexora-report.workspace = true
 tokio.workspace = true
 bytes.workspace = true

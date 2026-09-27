@@ -2009,3 +2009,10 @@ table.grid td code {
 .position-row button.secondary {
   padding: 4px 10px;
 }
+
+/* The history query box is the powerful, whole-project filter, so it gets the room. */
+.history .toolbar input.query {
+  flex: 1 1 auto;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}

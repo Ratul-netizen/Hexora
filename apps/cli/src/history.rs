@@ -15,6 +15,9 @@ pub struct HistoryArgs<'a> {
     pub project: &'a Path,
     pub limit: u32,
     pub after: Option<&'a str>,
+    /// A filter query (see `hexora-query`). When set, the whole project is scanned and only
+    /// matching rows are shown, up to `limit`.
+    pub query: Option<&'a str>,
     pub json: bool,
 }
 
@@ -31,13 +34,46 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
     let project = open(args.project)?;
     let store = project.traffic();
 
-    let after = args.after.map(|c| Cursor(c.to_owned()));
-    let page = store.history(after.as_ref(), Limit::new(args.limit))?;
     let total = store.count()?;
 
+    // With a query, scan the whole project and keep the matching rows up to the limit; the
+    // query engine reads back only the request/response detail the filter actually mentions.
+    // Without one, page normally from the cursor.
+    let (items, next, scanned): (Vec<_>, Option<Cursor>, Option<u64>) = match args.query {
+        Some(q) => {
+            let query = hexora_query::Query::parse(q)
+                .map_err(|e| HexoraError::invalid_input("--query", e.message))?;
+            let mut matched = Vec::new();
+            let mut scanned = 0u64;
+            let mut cursor: Option<Cursor> = None;
+            'pages: loop {
+                let page = store.history(cursor.as_ref(), Limit::new(500))?;
+                for item in &page.items {
+                    scanned += 1;
+                    let record = store.query_record(item, &query)?;
+                    if query.matches(&record) {
+                        matched.push(item.clone());
+                        if matched.len() >= args.limit as usize {
+                            break 'pages;
+                        }
+                    }
+                }
+                match page.next {
+                    Some(n) => cursor = Some(n),
+                    None => break,
+                }
+            }
+            (matched, None, Some(scanned))
+        }
+        None => {
+            let after = args.after.map(|c| Cursor(c.to_owned()));
+            let page = store.history(after.as_ref(), Limit::new(args.limit))?;
+            (page.items, page.next, None)
+        }
+    };
+
     if args.json {
-        let items: Vec<_> = page
-            .items
+        let json_items: Vec<_> = items
             .iter()
             .map(|item| {
                 serde_json::json!({
@@ -57,18 +93,26 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
             .collect();
         let payload = serde_json::json!({
             "total": total,
-            "items": items,
-            "next": page.next.as_ref().map(|c| c.0.clone()),
+            "scanned": scanned,
+            "items": json_items,
+            "next": next.as_ref().map(|c| c.0.clone()),
         });
         println!("{payload}");
         return Ok(());
     }
 
-    if page.items.is_empty() {
-        println!("No captured traffic in {}.", args.project.display());
-        println!();
-        println!("Run the proxy against this project to record some:");
-        println!("  hexora proxy --project {}", args.project.display());
+    if items.is_empty() {
+        if args.query.is_some() {
+            println!(
+                "No rows match that query (scanned {} of {total}).",
+                scanned.unwrap_or(0)
+            );
+        } else {
+            println!("No captured traffic in {}.", args.project.display());
+            println!();
+            println!("Run the proxy against this project to record some:");
+            println!("  hexora proxy --project {}", args.project.display());
+        }
         return Ok(());
     }
 
@@ -76,7 +120,7 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
         "{:<38} {:>3} {:<6} {:>8} {:>7}  URL",
         "ID", "", "METHOD", "BYTES", "TIME"
     );
-    for item in &page.items {
+    for item in &items {
         let status = item
             .status
             .map(|s| s.to_string())
@@ -115,8 +159,14 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
     }
 
     println!();
-    println!("{} of {total} shown", page.items.len());
-    if let Some(next) = &page.next {
+    match scanned {
+        Some(scanned) => println!(
+            "{} match(es) shown (scanned {scanned} of {total})",
+            items.len()
+        ),
+        None => println!("{} of {total} shown", items.len()),
+    }
+    if let Some(next) = &next {
         println!(
             "Next page: hexora history {} --after {}",
             args.project.display(),
@@ -207,6 +257,7 @@ mod tests {
             project: &path,
             limit: 100,
             after: None,
+            query: None,
             json: false,
         })
         .unwrap();
@@ -219,6 +270,7 @@ mod tests {
             project: &dir.path().join("nope"),
             limit: 100,
             after: None,
+            query: None,
             json: false,
         })
         .unwrap_err();
@@ -232,6 +284,7 @@ mod tests {
             project: &path,
             limit: 100,
             after: None,
+            query: None,
             json: true,
         })
         .unwrap();

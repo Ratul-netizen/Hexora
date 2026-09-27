@@ -49,7 +49,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Client certificates / mTLS | ✅ | ✅ | PLANNED M5 | |
 | Match & Replace rules | ✅ | ✅ | **DONE M7** | `hexora matchreplace`: literal or regex rules over request/response headers, bodies and the request first line; empty pattern adds a header, empty replacement removes what matched; applied to in-scope traffic only |
 | Traffic history + filtering | ✅ | ✅ | PLANNED M3 | |
-| Query language over traffic | Bambda | **HTTPQL** | PLANNED M8 | See §6 |
+| Query language over traffic | Bambda | **HTTPQL** | **DONE M8** | See §6 |
 
 ## 2. Manual testing toolkit
 
@@ -130,7 +130,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Traffic query language | Bambda (Java) | HTTPQL | PLANNED M8 | HTTPQL's approach is far friendlier than compiling Java lambdas |
+| Traffic query language | Bambda (Java) | HTTPQL | **DONE M8** | `hexora-query`: boolean logic (AND/OR/NOT, implicit AND, parens) over `field OP value` clauses — `:` contains, `= != > < >= <=`, `~ !~` regex — across method/host/path/url/scheme/port/ext/status/duration/identity/origin/secure/sizes and the header/body fields. Wired into `hexora history --query` and the desktop History query box; bodies are read back only when a query mentions them |
 | Node-based workflows | ❌ | ✅ | PLANNED M10 | |
 | Scripted automation | Bambda | JS nodes | PLANNED M10 | |
 | Headless / CLI | ⚠️ Enterprise | ✅ server mode | PLANNED M11 | Caido's client/server split (run on a VPS) is genuinely better |

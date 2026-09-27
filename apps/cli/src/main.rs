@@ -247,6 +247,11 @@ enum Command {
         #[arg(long, value_name = "CURSOR", conflicts_with = "body")]
         after: Option<String>,
 
+        /// Filter with a query, e.g. `status>=500 AND host:api`. Scans the whole project and
+        /// shows matches up to --limit. See the fields in `hexora help history`.
+        #[arg(short, long, value_name = "QUERY", conflicts_with = "body")]
+        query: Option<String>,
+
         /// Write one exchange's response body to stdout, by request id.
         #[arg(long, value_name = "ID")]
         body: Option<String>,
@@ -1939,6 +1944,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             path,
             limit,
             after,
+            query,
             body,
             wire,
         } => match body {
@@ -1951,6 +1957,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 project: path,
                 limit: *limit,
                 after: after.as_deref(),
+                query: query.as_deref(),
                 json: cli.json,
             }),
         },

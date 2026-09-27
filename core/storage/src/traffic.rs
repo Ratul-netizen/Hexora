@@ -450,6 +450,61 @@ impl TrafficStore {
         Ok(Page { items, next })
     }
 
+    /// Builds a query [`hexora_query::Record`] for a history row, reading back only the
+    /// request/response detail the query actually uses.
+    ///
+    /// The cheap fields come straight from the row. The request, the response header block and
+    /// the response body are each read back only when the query mentions a field that needs
+    /// them — a query that never looks at a body never pays to load one.
+    pub fn query_record(
+        &self,
+        row: &StoredTraffic,
+        query: &hexora_query::Query,
+    ) -> Result<hexora_query::Record> {
+        let (host, port, path) = match hexora_types::http::HttpService::parse_url(&row.url) {
+            Ok((service, path)) => (service.host, service.port, path),
+            Err(_) => (String::new(), 0, row.url.clone()),
+        };
+        let mut record = hexora_query::Record {
+            method: row.method.clone(),
+            host,
+            path,
+            url: row.url.clone(),
+            scheme: if row.secure {
+                "https".into()
+            } else {
+                "http".into()
+            },
+            port,
+            status: row.status,
+            duration_ms: row.duration_ms,
+            identity: row.identity.clone(),
+            secure: row.secure,
+            response_size: row.response_bytes,
+            ..Default::default()
+        };
+
+        if query.uses_request_detail() {
+            if let Ok(req) = self.request(row.id) {
+                record.origin = Some(req.origin);
+                record.request_size = Some(req.body.len() as u64);
+                record.request_headers = Some(header_lines(&req.headers_raw));
+                record.request_body = Some(String::from_utf8_lossy(&req.body).into_owned());
+            }
+        }
+        if query.uses_response_headers() {
+            if let Ok((_, _, _, headers)) = self.response_head(row.id) {
+                record.response_headers = Some(header_lines(&headers));
+            }
+        }
+        if query.uses_response_body() {
+            if let Ok(body) = self.response_body(row.id, false) {
+                record.response_body = Some(String::from_utf8_lossy(&body).into_owned());
+            }
+        }
+        Ok(record)
+    }
+
     /// Reads back a stored response body.
     ///
     /// `wire` selects the bytes as they arrived rather than the decoded form. For an
@@ -823,6 +878,14 @@ fn encoded_hash(reference: &Option<BlobRef>) -> Option<String> {
 
 fn encoded_size(reference: &Option<BlobRef>) -> i64 {
     reference.as_ref().map(|r| r.size() as i64).unwrap_or(0)
+}
+
+/// Parses a raw header block into `Name: value` lines, for the query evaluator.
+fn header_lines(block: &[u8]) -> Vec<String> {
+    hexora_types::http::Headers::from_block(block)
+        .iter()
+        .map(|h| format!("{}: {}", h.name, h.value_lossy()))
+        .collect()
 }
 
 /// Serializes a header block back to its wire form.

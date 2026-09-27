@@ -39,18 +39,20 @@ export function HistoryView({
   const [detail, setDetail] = useState<ExchangeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!hasProject) return;
     try {
-      const page = await listHistory(null, PAGE_SIZE);
+      const page = await listHistory(null, PAGE_SIZE, appliedQuery);
       setRows(page.rows);
       setTotal(page.total);
       setError(null);
     } catch (e) {
       setError(describeError(e));
     }
-  }, [hasProject]);
+  }, [hasProject, appliedQuery]);
 
   useEffect(() => {
     void reload();
@@ -96,19 +98,51 @@ export function HistoryView({
             (row.identity ?? "").toLowerCase().includes(needle),
         );
 
+  function applyQuery() {
+    setAppliedQuery(query.trim() === "" ? null : query.trim());
+  }
+
   return (
     <div className="history">
       <div className="toolbar">
         <input
           type="text"
+          className="query"
+          value={query}
+          placeholder="Query, e.g. status>=500 AND host:api AND resp.body:error"
+          spellCheck={false}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") applyQuery();
+          }}
+        />
+        <button onClick={applyQuery} title="Filter the whole project by query">
+          {appliedQuery ? "Requery" : "Query"}
+        </button>
+        {appliedQuery && (
+          <button
+            className="secondary"
+            onClick={() => {
+              setQuery("");
+              setAppliedQuery(null);
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="toolbar">
+        <input
+          type="text"
           value={filter}
-          placeholder="Filter by URL, method or status"
+          placeholder="Narrow the shown rows (URL, method, status)"
           spellCheck={false}
           onChange={(e) => setFilter(e.target.value)}
         />
         <span className="muted">
-          {shown.length.toLocaleString()} of {total.toLocaleString()}
-          {total > PAGE_SIZE && ` (newest ${PAGE_SIZE})`}
+          {shown.length.toLocaleString()}
+          {appliedQuery ? " match(es)" : ""} of {total.toLocaleString()}
+          {!appliedQuery && total > PAGE_SIZE && ` (newest ${PAGE_SIZE})`}
         </span>
         <button onClick={() => void reload()}>Reload</button>
       </div>

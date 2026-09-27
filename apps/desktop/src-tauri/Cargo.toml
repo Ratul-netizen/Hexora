@@ -30,6 +30,7 @@ hexora-report.workspace = true
 hexora-llm.workspace = true
 hexora-oob.workspace = true
 hexora-fuzz.workspace = true
+hexora-query.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 tokio.workspace = true

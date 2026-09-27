@@ -1605,6 +1605,7 @@ dependencies = [
  "hexora-llm",
  "hexora-oob",
  "hexora-proxy",
+ "hexora-query",
  "hexora-repeater",
  "hexora-report",
  "hexora-scan",
@@ -1645,6 +1646,7 @@ dependencies = [
  "hexora-llm",
  "hexora-oob",
  "hexora-proxy",
+ "hexora-query",
  "hexora-repeater",
  "hexora-report",
  "hexora-scan",
@@ -1771,6 +1773,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hexora-query"
+version = "0.1.0"
+dependencies = [
+ "hexora-types",
+ "regex",
+]
+
+[[package]]
 name = "hexora-repeater"
 version = "0.1.0"
 dependencies = [
@@ -1817,6 +1827,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "hexora-query",
  "hexora-types",
  "r2d2",
  "r2d2_sqlite",

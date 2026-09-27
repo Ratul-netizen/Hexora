@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 16;
+export const EXPECTED_RPC_CONTRACT_VERSION = 17;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -191,7 +191,9 @@ export const proxyStatus = (): Promise<ProxyStatus> =>
 export const listHistory = (
   after: string | null,
   limit: number,
-): Promise<HistoryPage> => invoke<HistoryPage>("history_list", { after, limit });
+  query?: string | null,
+): Promise<HistoryPage> =>
+  invoke<HistoryPage>("history_list", { after, limit, query: query ?? null });
 
 export const exchangeDetail = (id: string): Promise<ExchangeDetail> =>
   invoke<ExchangeDetail>("history_detail", { id });

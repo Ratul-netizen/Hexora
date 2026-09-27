@@ -67,6 +67,7 @@ exceptions = [
     { name = "hexora-browser", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-llm", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-oob", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-query", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-report", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-cli", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-desktop", allow = ["AGPL-3.0-or-later"] },
