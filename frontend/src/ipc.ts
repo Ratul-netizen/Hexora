@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 19;
+export const EXPECTED_RPC_CONTRACT_VERSION = 20;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -555,6 +555,30 @@ export const importSend = (args: {
   includeWrites: boolean;
   insecure: boolean;
 }): Promise<ImportResult> => invoke<ImportResult>("import_send", args);
+
+// --- Sequencer (token randomness, M9) -----------------------------------
+
+/** What analysing a set of tokens found. */
+export interface SequencerReport {
+  samples: number;
+  unique: number;
+  min_len: number;
+  max_len: number;
+  charset_size: number;
+  bits_per_char: number;
+  bits_per_token: number;
+  signals: string[];
+  verdict: string;
+}
+
+/** Analyses pasted tokens, or tokens extracted from captured traffic by header/cookie. */
+export const sequencerRun = (args: {
+  tokens: string | null;
+  header: string | null;
+  cookie: string | null;
+  query: string | null;
+  limit: number | null;
+}): Promise<SequencerReport> => invoke<SequencerReport>("sequencer_run", args);
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

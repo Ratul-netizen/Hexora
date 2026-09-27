@@ -1180,6 +1180,145 @@ pub fn check_set_enabled(
 }
 
 // ---------------------------------------------------------------------------
+// Sequencer (token randomness, M9)
+// ---------------------------------------------------------------------------
+
+/// What analysing a set of tokens found, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct SequencerReportView {
+    pub samples: usize,
+    pub unique: usize,
+    pub min_len: usize,
+    pub max_len: usize,
+    pub charset_size: usize,
+    pub bits_per_char: f64,
+    pub bits_per_token: f64,
+    pub signals: Vec<String>,
+    pub verdict: String,
+}
+
+fn sequencer_view(report: &hexora_sequencer::Report) -> SequencerReportView {
+    SequencerReportView {
+        samples: report.samples,
+        unique: report.unique,
+        min_len: report.min_len,
+        max_len: report.max_len,
+        charset_size: report.charset_size,
+        bits_per_char: report.bits_per_char,
+        bits_per_token: report.bits_per_token,
+        signals: report.signals.clone(),
+        verdict: report.verdict.label().to_string(),
+    }
+}
+
+/// Analyses pasted tokens, or tokens extracted from captured traffic by header or cookie name.
+#[tauri::command]
+pub fn sequencer_run(
+    state: State<'_, AppState>,
+    tokens: Option<String>,
+    header: Option<String>,
+    cookie: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> CommandResult<SequencerReportView> {
+    // Pasted tokens win when present; otherwise pull them from traffic.
+    let collected = match tokens.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        Some(text) => text
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+        None => sequencer_extract(
+            &state,
+            header.as_deref(),
+            cookie.as_deref(),
+            query.as_deref(),
+            limit.unwrap_or(2000),
+        )?,
+    };
+    if collected.is_empty() {
+        return Err(
+            "no tokens to analyse — paste some, or give a header/cookie to extract".to_string(),
+        );
+    }
+    Ok(sequencer_view(&hexora_sequencer::analyze(&collected)))
+}
+
+/// Pulls token values out of captured traffic by response header or cookie name.
+fn sequencer_extract(
+    state: &State<'_, AppState>,
+    header: Option<&str>,
+    cookie: Option<&str>,
+    query: Option<&str>,
+    limit: usize,
+) -> CommandResult<Vec<String>> {
+    let source_header = match (header, cookie) {
+        (Some(h), None) => h.to_string(),
+        (None, Some(_)) => "set-cookie".to_string(),
+        (None, None) => {
+            return Err(
+                "give a source: paste tokens, or a header or cookie name to extract".to_string(),
+            )
+        }
+        (Some(_), Some(_)) => return Err("pass a header or a cookie, not both".to_string()),
+    };
+
+    let project = open(state)?;
+    let store = project.traffic();
+    let query = match query.map(str::trim).filter(|q| !q.is_empty()) {
+        Some(q) => Some(hexora_query::Query::parse(q).map_err(|e| e.message)?),
+        None => None,
+    };
+
+    let mut tokens = Vec::new();
+    let mut cursor: Option<Cursor> = None;
+    'pages: loop {
+        let page = store
+            .history(cursor.as_ref(), Limit::new(500))
+            .map_err(fail)?;
+        for row in &page.items {
+            if let Some(query) = &query {
+                let record = store.query_record(row, query).map_err(fail)?;
+                if !query.matches(&record) {
+                    continue;
+                }
+            }
+            let Ok((_, _, _, headers_raw)) = store.response_head(row.id) else {
+                continue;
+            };
+            let headers = hexora_types::http::Headers::from_block(&headers_raw);
+            match cookie {
+                Some(name) => {
+                    for h in headers.get_all("set-cookie") {
+                        let value = h.value_lossy();
+                        let pair = value.split(';').next().unwrap_or("");
+                        if let Some((k, v)) = pair.split_once('=') {
+                            if k.trim().eq_ignore_ascii_case(name) {
+                                tokens.push(v.trim().to_string());
+                            }
+                        }
+                    }
+                }
+                None => {
+                    for h in headers.get_all(&source_header) {
+                        tokens.push(h.value_lossy().trim().to_string());
+                    }
+                }
+            }
+            if tokens.len() >= limit {
+                break 'pages;
+            }
+        }
+        match page.next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    tokens.retain(|t| !t.is_empty());
+    Ok(tokens)
+}
+
+// ---------------------------------------------------------------------------
 // API import (M5 — OpenAPI/Swagger)
 // ---------------------------------------------------------------------------
 

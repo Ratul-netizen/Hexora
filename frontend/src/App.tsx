@@ -13,6 +13,7 @@ import { LicenseView } from "./views/LicenseView";
 import { LlmView } from "./views/LlmView";
 import { MatchReplaceView } from "./views/MatchReplaceView";
 import { OobView } from "./views/OobView";
+import { SequencerView } from "./views/SequencerView";
 import { SitemapView } from "./views/SitemapView";
 import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
@@ -52,6 +53,7 @@ type Tab =
   | "scan"
   | "checks"
   | "fuzzer"
+  | "sequencer"
   | "authz"
   | "llm"
   | "oob"
@@ -75,6 +77,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "scan", label: "Scan" },
   { id: "checks", label: "Custom Checks" },
   { id: "fuzzer", label: "Fuzzer" },
+  { id: "sequencer", label: "Sequencer" },
   { id: "authz", label: "Authorization" },
   { id: "llm", label: "LLM" },
   { id: "oob", label: "Collaborator" },
@@ -263,6 +266,7 @@ export default function App() {
             onOpenExchange={showExchange}
           />
         )}
+        {tab === "sequencer" && <SequencerView hasProject={project !== null} />}
         {tab === "llm" && <LlmView license={license} />}
         {tab === "oob" && <OobView license={license} />}
         {tab === "matchreplace" && <MatchReplaceView hasProject={project !== null} />}

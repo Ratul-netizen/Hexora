@@ -32,6 +32,7 @@ hexora-oob.workspace = true
 hexora-fuzz.workspace = true
 hexora-query.workspace = true
 hexora-import.workspace = true
+hexora-sequencer.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 tokio.workspace = true

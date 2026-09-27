@@ -61,7 +61,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Request pipelines (race conditions) | ⚠️ single-packet | ✅ Pipeline | PLANNED M7 | Caido's Pipeline is the reference |
 | Comparer (response diff) | ✅ | ⚠️ | PLANNED M4 | |
 | Decoder | ✅ | ✅ | PLANNED M7 | |
-| Sequencer (token randomness) | ✅ | ❌ | PLANNED M9 | Rarely used but pros expect it |
+| Sequencer (token randomness) | ✅ | ❌ | **DONE M9** | `hexora sequencer`: from a file of tokens or extracted from captured traffic by response header or cookie name. Reports per-character Shannon entropy and effective bits/token, and flags predictable ones — a sequential/evenly-spaced counter (which fixed length and charset hide), a tiny alphabet, repeats — with a conservative verdict that says plainly when the sample is too small. Caido has no sequencer |
 | Site map / target tree | ✅ | ✅ Sitemap | PLANNED M5 | |
 | Scope definition | ✅ | ✅ | **DONE M0** | Already enforced, not just represented |
 | Session handling rules / macros | ✅ | ⚠️ | PLANNED M9 | The thing people hate configuring; big UX opportunity |
@@ -176,7 +176,7 @@ below are mostly cheap, and several are things we would have had to invent anywa
 | Adopt | Effort | Where | Why |
 | ----- | ------ | ----- | --- |
 | **Declarative YAML automation plans** | low | M10 | ZAP's Automation Framework is the entire CI story in one file. Visual workflows are for humans; YAML is for pipelines. We need both, and currently plan only the first |
-| **SARIF output** | very low | M11 | The DevSecOps lingua franca — GitHub code scanning ingests it natively. Almost free, and it feeds the time-to-report thesis |
+| **SARIF output** | very low | M11 | **DONE** — `hexora report --format sarif` renders SARIF 2.1.0 (valid against the schema; findings at their severity level, leads as notes, no credentials). GitHub code scanning ingests it natively |
 | **Docker images + daemon mode** | medium | M11 | Already planned, but ZAP proves it must be first-class rather than an afterthought |
 | **Contexts** | medium | M9 | ZAP groups URLs + auth + session + technology into one object. A distinctly better model than Burp's scattered scope / session-rule / macro configuration, and session handling is the thing everyone hates |
 | **Browser-driven crawling** | high | M13+M18 | In July 2026 ZAP made its **Client Spider the recommended crawler**, replacing the AJAX Spider. This independently confirms the "drive a real browser over CDP" decision — and means the crawler and browser-integration milestones should merge rather than be built twice |

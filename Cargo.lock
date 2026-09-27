@@ -1610,6 +1610,7 @@ dependencies = [
  "hexora-repeater",
  "hexora-report",
  "hexora-scan",
+ "hexora-sequencer",
  "hexora-storage",
  "hexora-types",
  "hexora-verify",
@@ -1652,6 +1653,7 @@ dependencies = [
  "hexora-repeater",
  "hexora-report",
  "hexora-scan",
+ "hexora-sequencer",
  "hexora-storage",
  "hexora-types",
  "hexora-verify",
@@ -1831,6 +1833,10 @@ dependencies = [
  "tempfile",
  "tracing",
 ]
+
+[[package]]
+name = "hexora-sequencer"
+version = "0.1.0"
 
 [[package]]
 name = "hexora-storage"

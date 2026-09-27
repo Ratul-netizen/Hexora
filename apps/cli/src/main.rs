@@ -40,6 +40,7 @@ mod report;
 mod scan;
 mod scope;
 mod send;
+mod sequencer;
 mod setup;
 mod sitemap;
 mod snapshot;
@@ -412,6 +413,30 @@ enum Command {
     /// map instead. Dry-run by default; `--send` fetches the safe operations.
     #[command(subcommand)]
     Import(ImportCommand),
+
+    /// Measure how unpredictable a token is — session ids, CSRF and reset tokens.
+    ///
+    /// Feed it a file of tokens, or extract them from captured traffic by response header or
+    /// cookie name. It reports the entropy the sample shows and flags predictable ones.
+    Sequencer {
+        /// Project directory.
+        path: PathBuf,
+        /// A file of tokens, one per line.
+        #[arg(long, value_name = "FILE")]
+        file: Option<PathBuf>,
+        /// Extract the value of this response header from captured traffic.
+        #[arg(long, value_name = "NAME", conflicts_with = "file")]
+        header: Option<String>,
+        /// Extract this named cookie's value from Set-Cookie in captured traffic.
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["file", "header"])]
+        cookie: Option<String>,
+        /// Only consider exchanges matching this query when extracting.
+        #[arg(long, value_name = "QUERY", conflicts_with = "file")]
+        query: Option<String>,
+        /// The most exchanges to scan when extracting.
+        #[arg(long, value_name = "N", default_value_t = 2000)]
+        limit: usize,
+    },
 
     /// Replay a captured request as several identities and compare what came back.
     ///
@@ -2011,6 +2036,22 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 json: cli.json,
             })
         }
+        Command::Sequencer {
+            path,
+            file,
+            header,
+            cookie,
+            query,
+            limit,
+        } => sequencer::run(sequencer::Args {
+            project: path,
+            file: file.as_deref(),
+            header: header.as_deref(),
+            cookie: cookie.as_deref(),
+            query: query.as_deref(),
+            limit: *limit,
+            json: cli.json,
+        }),
         Command::Authz {
             path,
             id,
