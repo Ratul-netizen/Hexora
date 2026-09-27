@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use hexora_engine::guard::ScopeGuard;
 use hexora_http::{TcpTransport, TlsConfig};
-use hexora_llm::{test, test_leakage, Target, PROMPT_PLACEHOLDER};
+use hexora_llm::{test, test_leakage, test_output_handling, Target, PROMPT_PLACEHOLDER};
 use hexora_types::http::{Header, HttpService};
 use hexora_types::scope::{Scope, ScopeRule};
 use hexora_types::{HexoraError, Result};
@@ -72,9 +72,9 @@ pub fn run(args: Args<'_>) -> Result<()> {
     if !args.json {
         println!("Prompt-injection test");
         println!("  endpoint: {} {}", target.method, args.url);
-        let total = hexora_llm::probes().len() + hexora_llm::extraction_probes().len() + 1;
+        let total = hexora_llm::probes().len() + hexora_llm::extraction_probes().len() + 1 + 2;
         println!(
-            "  probes:   {} injection, {} extraction (+1 control)",
+            "  probes:   {} injection, {} extraction (+1 control), 2 output-handling",
             hexora_llm::probes().len(),
             hexora_llm::extraction_probes().len()
         );
@@ -108,11 +108,12 @@ pub fn run(args: Args<'_>) -> Result<()> {
         .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
     let report = runtime.block_on(test(&guard, &target));
     let leak = runtime.block_on(test_leakage(&guard, &target));
+    let output = runtime.block_on(test_output_handling(&guard, &target));
 
     if args.json {
-        print_json(args.url, &report, &leak);
+        print_json(args.url, &report, &leak, &output);
     } else {
-        print_human(&report, &leak);
+        print_human(&report, &leak, &output);
     }
     Ok(())
 }
@@ -128,7 +129,11 @@ fn parse_headers(raw: &[String]) -> Result<Vec<Header>> {
     Ok(out)
 }
 
-fn print_human(report: &hexora_llm::Report, leak: &hexora_llm::LeakReport) {
+fn print_human(
+    report: &hexora_llm::Report,
+    leak: &hexora_llm::LeakReport,
+    output: &hexora_llm::OutputReport,
+) {
     println!();
     println!("{} injection probe(s) sent.", report.tested);
     if report.vulnerable() {
@@ -173,7 +178,33 @@ fn print_human(report: &hexora_llm::Report, leak: &hexora_llm::LeakReport) {
         println!("No system-prompt disclosure elicited by the extraction probes.");
     }
 
-    let errors: Vec<&String> = report.errors.iter().chain(leak.errors.iter()).collect();
+    // Insecure output handling — the injection-to-impact chain.
+    println!();
+    if output.any() {
+        println!("INSECURE OUTPUT HANDLING ({}):", output.findings.len());
+        for finding in &output.findings {
+            println!(
+                "  [{}] the model emitted `<`/`>` unencoded — {}",
+                finding.probe_id,
+                finding.context.label()
+            );
+            println!("    marker returned raw: {}", finding.marker);
+        }
+        println!();
+        println!("The model can be made to emit active characters that came back unencoded.");
+        println!("Anywhere this output is rendered as markup — a chat UI, an email, a report —");
+        println!("that is cross-site scripting via the model. Encode model output at the sink.");
+    } else {
+        println!("Model output came back encoded (or the marker did not survive): no unsafe");
+        println!("output handling seen at this endpoint.");
+    }
+
+    let errors: Vec<&String> = report
+        .errors
+        .iter()
+        .chain(leak.errors.iter())
+        .chain(output.errors.iter())
+        .collect();
     if !errors.is_empty() {
         println!();
         println!("Not sent ({}):", errors.len());
@@ -183,13 +214,23 @@ fn print_human(report: &hexora_llm::Report, leak: &hexora_llm::LeakReport) {
     }
 }
 
-fn print_json(url: &str, report: &hexora_llm::Report, leak: &hexora_llm::LeakReport) {
+fn print_json(
+    url: &str,
+    report: &hexora_llm::Report,
+    leak: &hexora_llm::LeakReport,
+    output: &hexora_llm::OutputReport,
+) {
     println!(
         "{}",
         serde_json::json!({
             "endpoint": url,
             "tested": report.tested,
             "vulnerable": report.vulnerable(),
+            "unsafe_output": output.findings.iter().map(|f| serde_json::json!({
+                "probe": f.probe_id,
+                "context": f.context.label(),
+                "marker": f.marker,
+            })).collect::<Vec<_>>(),
             "disclosures": leak.disclosures.iter().map(|d| serde_json::json!({
                 "probe": d.probe_id,
                 "signals": d.signals,

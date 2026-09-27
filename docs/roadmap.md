@@ -969,7 +969,7 @@ a capability neither Burp nor Caido ships natively.
 | **LLM.a** — prompt injection | Send injection/jailbreak probes to an LLM endpoint, each carrying a **canary** — a random token the model would never emit — inside an instruction to output it. If the canary comes back, the application's system instructions were overridden by user input: prompt injection, *demonstrated with evidence*, the same shape as the reflected-input check. `hexora llm <url>`. | scope guard, HttpTransport |
 | **LLM.b** — auto-discovery | A passive detector that recognises LLM-backed endpoints (a JSON body to a chat-shaped path) and surfaces them as a **lead**, so a crawl/proxy feeds discovery. | LLM.a, scan |
 | **LLM.c** — system-prompt & data leakage | DONE. Extraction probes + a control-baselined signal oracle: `hexora llm` now also reports likely system-prompt disclosure as leads (heuristic, framed for a human to verify). | LLM.a |
-| **LLM.d** — insecure output handling | Where a model's output flows into a sink (HTML, SQL, a shell, a tool call) — the injection-to-impact chain, joined to the existing reflection/injection checks. | LLM.a, M18.d |
+| **LLM.d** — insecure output handling | DONE. A probe makes the model emit a marker with active characters (`<`,`>`); if they come back unencoded, its output is the XSS-via-LLM chain. `hexora llm` reports it with the response context (HTML / raw-in-JSON). | LLM.a |
 
 <!-- LLM.a DONE. New `hexora-llm` crate: a canary-based prompt-injection tester. `probes()` is
 the corpus (direct override, role confusion, jailbreak, delimiter escape), each rendering a

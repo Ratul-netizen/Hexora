@@ -41,11 +41,13 @@ impl HttpTransport for MockLlm {
         };
 
         let reply = serde_json::json!({ "choices": [{ "message": { "content": answer } }] });
+        let mut headers = Headers::new();
+        headers.set("Content-Type", "application/json");
         let response = HttpResponse {
             status: 200,
             reason: None,
             version: HttpVersion::Http11,
-            headers: Headers::new(),
+            headers,
             body: reply.to_string().into(),
             truncated: false,
         };
@@ -136,9 +138,11 @@ impl HttpTransport for LeakyLlm {
             "The capital of France is Paris."
         };
         let reply = serde_json::json!({ "choices": [{ "message": { "content": answer } }] });
+        let mut headers = Headers::new();
+        headers.set("Content-Type", "application/json");
         let response = HttpResponse {
             status: 200, reason: None, version: HttpVersion::Http11,
-            headers: Headers::new(), body: reply.to_string().into(), truncated: false,
+            headers, body: reply.to_string().into(), truncated: false,
         };
         Ok(Exchange { request, response, encoded_body: None, content_encoding: None, raw_request: None, duration: Duration::ZERO, tls: None })
     }
@@ -165,4 +169,47 @@ async fn a_defended_endpoint_leaks_nothing() {
     let guard = ScopeGuard::new(MockLlm { vulnerable: false }, Arc::new(scope));
     let report = hexora_llm::test_leakage(&guard, &target()).await;
     assert!(!report.any());
+}
+
+/// A model that HTML-encodes its output — the safe case for output handling.
+struct EncodingLlm;
+
+#[async_trait]
+impl HttpTransport for EncodingLlm {
+    async fn send(&self, request: HttpRequest, _o: SendOptions) -> Result<Exchange> {
+        let body = String::from_utf8_lossy(&request.body);
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+        let prompt = value["messages"][0]["content"].as_str().unwrap_or("");
+        let raw = if prompt.contains(':') { prompt.rsplit_once(':').unwrap().1.trim() } else { "" };
+        let encoded = raw.replace('<', "&lt;").replace('>', "&gt;");
+        let reply = serde_json::json!({ "choices": [{ "message": { "content": encoded } }] });
+        let mut headers = Headers::new();
+        headers.set("Content-Type", "application/json");
+        let response = HttpResponse {
+            status: 200, reason: None, version: HttpVersion::Http11,
+            headers, body: reply.to_string().into(), truncated: false,
+        };
+        Ok(Exchange { request, response, encoded_body: None, content_encoding: None, raw_request: None, duration: Duration::ZERO, tls: None })
+    }
+    async fn send_raw(&self, _r: RawRequest, _o: SendOptions) -> Result<Exchange> { unreachable!() }
+    async fn send_raw_h2(&self, _r: RawH2Request, _o: SendOptions) -> Result<Exchange> { unreachable!() }
+}
+
+#[tokio::test]
+async fn unencoded_output_is_flagged() {
+    let scope = Scope::new().include(ScopeRule::host("api.test"));
+    // The vulnerable mock echoes the marker verbatim; JSON does not encode `<`, so it survives.
+    let guard = ScopeGuard::new(MockLlm { vulnerable: true }, Arc::new(scope));
+    let report = hexora_llm::test_output_handling(&guard, &target()).await;
+    assert!(report.any(), "expected unsafe-output findings");
+    assert!(report.findings[0].marker.contains("<hxllm>"));
+    assert_eq!(report.findings[0].context, hexora_llm::OutputContext::Json);
+}
+
+#[tokio::test]
+async fn html_encoded_output_is_safe() {
+    let scope = Scope::new().include(ScopeRule::host("api.test"));
+    let guard = ScopeGuard::new(EncodingLlm, Arc::new(scope));
+    let report = hexora_llm::test_output_handling(&guard, &target()).await;
+    assert!(!report.any(), "encoded output should not be flagged");
 }
