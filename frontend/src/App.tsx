@@ -15,6 +15,7 @@ import { LicenseView } from "./views/LicenseView";
 import { LlmView } from "./views/LlmView";
 import { MatchReplaceView } from "./views/MatchReplaceView";
 import { OobView } from "./views/OobView";
+import { ProgrammeView } from "./views/ProgrammeView";
 import { SequencerView } from "./views/SequencerView";
 import { SitemapView } from "./views/SitemapView";
 import { RepeaterView } from "./views/RepeaterView";
@@ -66,6 +67,7 @@ type Tab =
   | "report"
   | "sitemap"
   | "snapshots"
+  | "programme"
   | "license";
 
 /** The tab strip, in the order the work happens in. */
@@ -92,6 +94,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sitemap", label: "Site map" },
   { id: "report", label: "Report" },
   { id: "snapshots", label: "Snapshots" },
+  { id: "programme", label: "Programme" },
   { id: "license", label: "Licence" },
 ];
 
@@ -298,6 +301,7 @@ export default function App() {
         {tab === "snapshots" && (
           <SnapshotsView hasProject={project !== null} />
         )}
+        {tab === "programme" && <ProgrammeView hasProject={project !== null} />}
         {tab === "license" && (
           <LicenseView license={license} onChange={setLicense} />
         )}

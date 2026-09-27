@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 22;
+export const EXPECTED_RPC_CONTRACT_VERSION = 23;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -648,6 +648,61 @@ export const raceRun = (args: {
   count: number;
   insecure: boolean;
 }): Promise<RaceReport> => invoke<RaceReport>("race_run", args);
+
+// --- Attached headers (M14.2) -------------------------------------------
+
+/** A header put on every request Hexora sends. */
+export interface AttachedHeader {
+  name: string;
+  value: string;
+}
+
+/** The project's attached headers. */
+export const headerList = (): Promise<AttachedHeader[]> =>
+  invoke<AttachedHeader[]>("header_list");
+
+/** Adds (or replaces) an attached header, given as `Name: value`. */
+export const headerAdd = (header: string): Promise<AttachedHeader[]> =>
+  invoke<AttachedHeader[]>("header_add", { header });
+
+/** Removes an attached header by name. */
+export const headerRemove = (name: string): Promise<AttachedHeader[]> =>
+  invoke<AttachedHeader[]>("header_remove", { name });
+
+// --- Programme terms (M14.3) --------------------------------------------
+
+/** A finding class the programme will not accept. */
+export interface Exclusion {
+  detector: string;
+  reason: string;
+}
+
+/** The engagement's programme terms. */
+export interface Programme {
+  name: string | null;
+  policy_url: string | null;
+  exclusions: Exclusion[];
+}
+
+/** The programme terms this engagement is conducted under. */
+export const programmeShow = (): Promise<Programme> =>
+  invoke<Programme>("programme_show");
+
+/** Sets the programme's name and/or policy URL. */
+export const programmeSet = (
+  name: string | null,
+  policyUrl: string | null,
+): Promise<Programme> => invoke<Programme>("programme_set", { name, policyUrl });
+
+/** Excludes a finding class (still looked for and listed, not filed). */
+export const programmeExclude = (
+  detector: string,
+  reason: string,
+): Promise<Programme> => invoke<Programme>("programme_exclude", { detector, reason });
+
+/** Stops excluding a finding class. */
+export const programmeAllow = (detector: string): Promise<Programme> =>
+  invoke<Programme>("programme_allow", { detector });
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {

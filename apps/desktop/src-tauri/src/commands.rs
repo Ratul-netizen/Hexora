@@ -1814,6 +1814,182 @@ fn race_run_blocking(
 }
 
 // ---------------------------------------------------------------------------
+// Attached headers (M14.2)
+// ---------------------------------------------------------------------------
+
+/// One header put on every request Hexora sends.
+#[derive(Debug, Clone, Serialize)]
+pub struct AttachedHeaderView {
+    pub name: String,
+    pub value: String,
+}
+
+fn attached_header_views(headers: &[hexora_types::http::Header]) -> Vec<AttachedHeaderView> {
+    headers
+        .iter()
+        .map(|h| AttachedHeaderView {
+            name: h.name.clone(),
+            value: String::from_utf8_lossy(&h.value).into_owned(),
+        })
+        .collect()
+}
+
+/// The headers put on every request (for programme identification, e.g. X-HackerOne-Research).
+#[tauri::command]
+pub fn header_list(state: State<'_, AppState>) -> CommandResult<Vec<AttachedHeaderView>> {
+    let project = open(&state)?;
+    Ok(attached_header_views(
+        &project.settings().attached_headers().map_err(fail)?,
+    ))
+}
+
+/// Adds (or replaces) an attached header, given as `Name: value`. Returns the whole list.
+#[tauri::command]
+pub fn header_add(
+    state: State<'_, AppState>,
+    header: String,
+) -> CommandResult<Vec<AttachedHeaderView>> {
+    let (name, value) = header
+        .split_once(':')
+        .ok_or_else(|| format!("{header:?} is not `Name: value`"))?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a header needs a name".to_string());
+    }
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut headers = settings.attached_headers().map_err(fail)?;
+    headers.retain(|h| !h.name.eq_ignore_ascii_case(name));
+    headers.push(hexora_types::http::Header::new(name, value.trim()));
+    settings.set_attached_headers(&headers).map_err(fail)?;
+    Ok(attached_header_views(&headers))
+}
+
+/// Removes an attached header by name. Returns the whole list.
+#[tauri::command]
+pub fn header_remove(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<Vec<AttachedHeaderView>> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut headers = settings.attached_headers().map_err(fail)?;
+    let before = headers.len();
+    headers.retain(|h| !h.name.eq_ignore_ascii_case(name.trim()));
+    if headers.len() == before {
+        return Err(format!("no attached header named {name:?}"));
+    }
+    settings.set_attached_headers(&headers).map_err(fail)?;
+    Ok(attached_header_views(&headers))
+}
+
+// ---------------------------------------------------------------------------
+// Programme terms (M14.3)
+// ---------------------------------------------------------------------------
+
+/// A finding class the programme will not accept.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExclusionView {
+    pub detector: String,
+    pub reason: String,
+}
+
+/// The engagement's programme terms, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProgrammeView {
+    pub name: Option<String>,
+    pub policy_url: Option<String>,
+    pub exclusions: Vec<ExclusionView>,
+}
+
+fn programme_view(p: &hexora_types::programme::Programme) -> ProgrammeView {
+    ProgrammeView {
+        name: p.name.clone(),
+        policy_url: p.policy_url.clone(),
+        exclusions: p
+            .exclusions
+            .iter()
+            .map(|e| ExclusionView {
+                detector: e.detector.clone(),
+                reason: e.reason.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// The programme terms this engagement is conducted under.
+#[tauri::command]
+pub fn programme_show(state: State<'_, AppState>) -> CommandResult<ProgrammeView> {
+    let project = open(&state)?;
+    Ok(programme_view(
+        &project.settings().programme().map_err(fail)?,
+    ))
+}
+
+/// Sets the programme's name and/or policy URL.
+#[tauri::command]
+pub fn programme_set(
+    state: State<'_, AppState>,
+    name: Option<String>,
+    policy_url: Option<String>,
+) -> CommandResult<ProgrammeView> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut programme = settings.programme().map_err(fail)?;
+    if let Some(name) = name.map(|s| s.trim().to_string()) {
+        programme.name = if name.is_empty() { None } else { Some(name) };
+    }
+    if let Some(url) = policy_url.map(|s| s.trim().to_string()) {
+        programme.policy_url = if url.is_empty() { None } else { Some(url) };
+    }
+    settings.set_programme(&programme).map_err(fail)?;
+    Ok(programme_view(&programme))
+}
+
+/// Excludes a finding class (still looked for and listed, not filed). Returns the programme.
+#[tauri::command]
+pub fn programme_exclude(
+    state: State<'_, AppState>,
+    detector: String,
+    reason: String,
+) -> CommandResult<ProgrammeView> {
+    let detector = detector.trim().to_string();
+    let reason = reason.trim().to_string();
+    if detector.is_empty() || reason.is_empty() {
+        return Err("an exclusion needs a detector id and a reason".to_string());
+    }
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut programme = settings.programme().map_err(fail)?;
+    programme.exclusions.retain(|e| e.detector != detector);
+    programme
+        .exclusions
+        .push(hexora_types::programme::Exclusion::new(detector, reason));
+    settings.set_programme(&programme).map_err(fail)?;
+    Ok(programme_view(&programme))
+}
+
+/// Stops excluding a finding class. Returns the programme.
+#[tauri::command]
+pub fn programme_allow(
+    state: State<'_, AppState>,
+    detector: String,
+) -> CommandResult<ProgrammeView> {
+    let project = open(&state)?;
+    let settings = project.settings();
+    let mut programme = settings.programme().map_err(fail)?;
+    let before = programme.exclusions.len();
+    programme
+        .exclusions
+        .retain(|e| e.detector != detector.trim());
+    if programme.exclusions.len() == before {
+        return Err(format!("{detector:?} is not excluded"));
+    }
+    settings.set_programme(&programme).map_err(fail)?;
+    Ok(programme_view(&programme))
+}
+
+// ---------------------------------------------------------------------------
 // Identities
 // ---------------------------------------------------------------------------
 
