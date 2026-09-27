@@ -219,6 +219,70 @@ impl Cdp {
     pub fn drain_events(&mut self) -> Vec<CdpEvent> {
         self.events.drain(..).collect()
     }
+
+    /// Evaluates a JavaScript expression in the page and returns its value.
+    ///
+    /// The by-value result of `Runtime.evaluate`; a non-serialisable value comes back as
+    /// [`Value::Null`]. Used to read the rendered DOM (M18.d) and, here, the current URL.
+    pub async fn eval(&mut self, expression: &str) -> Result<Value> {
+        let result = self
+            .call(
+                "Runtime.evaluate",
+                serde_json::json!({ "expression": expression, "returnByValue": true }),
+            )
+            .await?;
+        Ok(result
+            .get("result")
+            .and_then(|r| r.get("value"))
+            .cloned()
+            .unwrap_or(Value::Null))
+    }
+
+    /// The page's current URL.
+    pub async fn current_url(&mut self) -> Result<String> {
+        Ok(self
+            .eval("location.href")
+            .await?
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    /// Navigates to `url` and waits for the page's load event, or `timeout`.
+    ///
+    /// Enables the `Page` domain, issues `Page.navigate` (a CDP error such as an invalid URL
+    /// is returned), then waits for `Page.loadEventFired`. When the browser is pointed at
+    /// Hexora's proxy, the requests this triggers are captured and scope-checked there — this
+    /// only drives the browser; the proxy is the chokepoint.
+    pub async fn navigate(&mut self, url: &str, timeout: Duration) -> Result<()> {
+        self.call("Page.enable", serde_json::json!({})).await?;
+        let result = self
+            .call("Page.navigate", serde_json::json!({ "url": url }))
+            .await?;
+        if let Some(error) = result.get("errorText").and_then(Value::as_str) {
+            return Err(malformed(format!("navigation to {url} failed: {error}")));
+        }
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                // Not an error: some pages never fire load (long-poll, streaming). The caller
+                // decides whether what rendered so far is enough.
+                return Ok(());
+            }
+            match self.next_event(remaining).await? {
+                Some(event)
+                    if event.method == "Page.loadEventFired"
+                        || event.method == "Page.frameStoppedLoading" =>
+                {
+                    return Ok(());
+                }
+                Some(_) => continue,
+                None => return Ok(()),
+            }
+        }
+    }
 }
 
 /// Discovers the browser-level DevTools WebSocket URL from its `/json/version` endpoint.

@@ -22,3 +22,7 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 [[example]]
 name = "screenshot"
 path = "examples/screenshot.rs"
+
+[[example]]
+name = "capture"
+path = "examples/capture.rs"

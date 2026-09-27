@@ -44,11 +44,39 @@ impl BrowserKind {
 pub struct LaunchOptions {
     /// Run without a visible window. On for automated crawling; off to watch it work.
     pub headless: bool,
+    /// Route all the browser's traffic through this proxy (`host:port`), so it flows through
+    /// Hexora's scope guard and capture like any other proxied browsing. `None` lets the
+    /// browser talk to targets directly (no capture).
+    pub proxy: Option<String>,
+    /// Do not verify TLS certificates. Set when pointing the browser at Hexora's intercepting
+    /// proxy without installing its CA into the browser's trust store.
+    pub ignore_certificate_errors: bool,
 }
 
 impl Default for LaunchOptions {
     fn default() -> Self {
-        Self { headless: true }
+        Self {
+            headless: true,
+            proxy: None,
+            ignore_certificate_errors: false,
+        }
+    }
+}
+
+impl LaunchOptions {
+    /// Options that route the browser through `proxy` (`host:port`) and trust it, the shape a
+    /// capture session uses: everything the browser fetches goes through Hexora.
+    ///
+    /// Pair with a proxy in **in-scope-only** recording mode: a driven browser generates a lot
+    /// of out-of-scope noise — its own telemetry and third-party resources — and scope
+    /// filtering at the proxy is what keeps the captured traffic the target's, definitively,
+    /// rather than relying on browser flags to mute every phone-home.
+    pub fn through_proxy(proxy: impl Into<String>) -> Self {
+        Self {
+            headless: true,
+            proxy: Some(proxy.into()),
+            ignore_certificate_errors: true,
+        }
     }
 }
 
@@ -177,12 +205,37 @@ impl Browser {
             .arg(format!("--user-data-dir={}", profile.path().display()))
             .arg("--no-first-run")
             .arg("--no-default-browser-check")
-            .arg("--disable-extensions")
-            .arg("--disable-background-networking")
-            .arg("about:blank");
+            .arg("--disable-extensions");
+        // Quiet the browser's own phone-home, so a proxied capture is the target's traffic and
+        // not Chrome talking to Google. Without these, update/sync/telemetry requests land in
+        // the project alongside the page's real requests. This is the well-worn automation set.
+        for flag in [
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-sync",
+            "--disable-domain-reliability",
+            "--disable-client-side-phishing-detection",
+            "--disable-default-apps",
+            "--no-service-autorun",
+            "--metrics-recording-only",
+            "--disable-background-timer-throttling",
+            "--disable-breakpad",
+            "--disable-features=Translate,OptimizationHints,MediaRouter,InterestFeedContentSuggestions,CalculateNativeWinOcclusion",
+        ] {
+            command.arg(flag);
+        }
+        command.arg("about:blank");
         if options.headless {
             command.arg("--headless=new");
             command.arg("--disable-gpu");
+        }
+        if let Some(proxy) = &options.proxy {
+            command.arg(format!("--proxy-server={proxy}"));
+            // Even localhost must be proxied, or captured coverage would have holes.
+            command.arg("--proxy-bypass-list=<-loopback>");
+        }
+        if options.ignore_certificate_errors {
+            command.arg("--ignore-certificate-errors");
         }
 
         let mut child = command.spawn().map_err(|e| {
@@ -295,5 +348,25 @@ mod tests {
         let product = browser.version().await.expect("get version");
         assert!(!product.is_empty());
         eprintln!("product: {product}");
+    }
+
+    /// Live: launches, navigates to a self-contained page and reads the rendered DOM back.
+    /// A `data:` URL keeps it hermetic — the navigate/eval path is exercised with no server.
+    #[tokio::test]
+    #[ignore = "launches a real browser"]
+    async fn live_navigate_and_read_dom() {
+        let browser = Browser::launch().expect("launch a browser");
+        let mut cdp = browser.connect().await.expect("connect");
+        cdp.navigate(
+            "data:text/html,<title>Hexora Nav</title><h1>hi there</h1>",
+            Duration::from_secs(10),
+        )
+        .await
+        .expect("navigate");
+
+        let title = cdp.eval("document.title").await.expect("title");
+        assert_eq!(title.as_str(), Some("Hexora Nav"));
+        let text = cdp.eval("document.body.innerText").await.expect("text");
+        assert!(text.as_str().unwrap_or("").contains("hi there"), "{text:?}");
     }
 }

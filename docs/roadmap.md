@@ -942,6 +942,15 @@ Chrome 154 with zero orphaned processes left. attach(port) connects to an alread
 instance without owning its lifecycle. -->
 
 | **M18.c** — navigate and capture | Drive `Page.navigate`, wait for load, enable the `Network` domain, and capture the requests the page actually made — **through the scope guard**, recorded like proxy traffic so the scanner sees a SPA's real surface. | M18.b, scope guard |
+<!-- M18.c DONE. The architecture is browser → Hexora's proxy → scope guard + capture: the
+browser is launched routed through the proxy (`LaunchOptions::through_proxy`, adding
+--proxy-server + --ignore-certificate-errors), and CDP only DRIVES it (`Cdp::navigate` waits
+for Page.loadEventFired; `Cdp::eval`/`current_url` read the DOM). The proxy is the chokepoint
+that captures and scope-checks. Verified end to end against a local site: the browser's page +
+all subresources (CSS/JS/image/favicon) were captured through the proxy; with the proxy in
+--in-scope-only mode the capture is exactly the target's 5 requests, Chrome's telemetry
+dropped. Quieting flags added too, but scope filtering is the definitive noise control. -->
+
 | **M18.d** — the JS-rendered crawl | After load, extract links and endpoints from the **rendered DOM** and the network the page generated, feed them to CR.a/CR.f, and crawl under the same bounds and safety policy — closing the SPA coverage gap CR.f named. `rel="nofollow"` from the live DOM lands here. | M18.c, CR.b–f |
 | **M18.e** — DOM XSS testing | The flagship: drive a source, observe the sink in the live DOM, and settle it with the verification model — a finding no request/response scanner can make. | M18.d, verify |
 
