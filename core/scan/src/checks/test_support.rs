@@ -48,6 +48,35 @@ pub fn plaintext() -> Build {
     build
 }
 
+/// A `GET` exchange to an arbitrary URL, with the path (and any query) derived from it.
+pub fn exchange_get(url: &str) -> Exchange {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let (authority, path) = match after_scheme.find('/') {
+        Some(i) => (&after_scheme[..i], &after_scheme[i..]),
+        None => (after_scheme, "/"),
+    };
+    let host = authority.split(':').next().unwrap_or(authority).to_string();
+    let secure = url.starts_with("https");
+    Exchange {
+        id: RequestId::new(),
+        target: TargetId::new(),
+        host,
+        port: if secure { 443 } else { 80 },
+        secure,
+        method: "GET".into(),
+        url: url.to_string(),
+        path: path.to_string(),
+        status: 200,
+        request_headers: Headers::new(),
+        response_headers: Headers::new(),
+        response_bytes: 128,
+        authenticated: false,
+        tls: None,
+        sent_at: "2026-01-01T00:00:00Z".into(),
+        origin: "proxy".into(),
+    }
+}
+
 impl Build {
     /// Sets the response status and content headers.
     pub fn response(mut self, status: u16, headers: &[(&str, &str)]) -> Self {
