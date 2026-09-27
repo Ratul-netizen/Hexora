@@ -1502,6 +1502,141 @@ fn import_send_blocking(
     })
 }
 
+/// One GraphQL operation an introspection result implies, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct GraphqlOpView {
+    pub kind: String,
+    pub field: String,
+    pub document: String,
+    pub mutation: bool,
+}
+
+/// Parses a GraphQL introspection result and lists its operations. Sends nothing.
+#[tauri::command]
+pub fn graphql_parse(spec: String) -> CommandResult<Vec<GraphqlOpView>> {
+    let api = hexora_import::parse_introspection(spec.as_bytes()).map_err(|e| e.message)?;
+    Ok(api
+        .operations
+        .iter()
+        .map(|op| GraphqlOpView {
+            kind: op.kind.clone(),
+            field: op.field.clone(),
+            document: op.document.clone(),
+            mutation: op.is_mutation(),
+        })
+        .collect())
+}
+
+/// POSTs a GraphQL schema's operations to the endpoint and records them.
+#[tauri::command]
+pub async fn graphql_send(
+    state: State<'_, AppState>,
+    spec: String,
+    url: String,
+    include_mutations: bool,
+    insecure: bool,
+) -> CommandResult<ImportResult> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+    let path = state.project_path().map_err(fail)?;
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        graphql_send_blocking(path, spec, url, include_mutations, insecure)
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+fn graphql_send_blocking(
+    path: PathBuf,
+    spec: String,
+    url: String,
+    include_mutations: bool,
+    insecure: bool,
+) -> CommandResult<ImportResult> {
+    use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
+
+    let api = hexora_import::parse_introspection(spec.as_bytes()).map_err(|e| e.message)?;
+    let (service, req_path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+
+    let project = Project::open(&path).map_err(fail)?;
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+    let attached = project.settings().attached_headers().map_err(fail)?;
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, scope);
+    let store = project.traffic();
+    let options = SendOptions::automated(Origin::Crawler);
+
+    let planned: Vec<&hexora_import::GraphqlOp> = api
+        .operations
+        .iter()
+        .filter(|op| !op.is_mutation() || include_mutations)
+        .collect();
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+
+    let (recorded, failed) = runtime.block_on(async {
+        let mut recorded = 0usize;
+        let mut failed = 0usize;
+        for op in &planned {
+            let mut request =
+                hexora_types::http::HttpRequest::get(service.clone(), req_path.clone());
+            request.method = "POST".to_string();
+            request.headers.set("Content-Type", "application/json");
+            for header in &attached {
+                request.headers.set(
+                    &header.name,
+                    String::from_utf8_lossy(&header.value).into_owned(),
+                );
+            }
+            request
+                .headers
+                .set("Content-Length", op.body.len().to_string());
+            request.body = op.body.clone().into_bytes().into();
+
+            match guard.send(request, options.clone()).await {
+                Ok(exchange) => {
+                    let captured = hexora_storage::CapturedExchange {
+                        request: exchange.request.clone(),
+                        raw_request: exchange.raw_request.clone(),
+                        response: exchange.response.clone(),
+                        encoded_body: exchange.encoded_body.clone(),
+                        content_encoding: exchange.content_encoding.clone(),
+                        origin: Origin::Crawler.as_str(),
+                        identity: None,
+                        parent: None,
+                        quirks: Vec::new(),
+                        tls: exchange.tls.clone(),
+                        duration_ms: exchange.duration.as_millis().min(u128::from(u32::MAX)) as u32,
+                    };
+                    if store.record(&captured).is_ok() {
+                        recorded += 1;
+                    } else {
+                        failed += 1;
+                    }
+                }
+                Err(_) => failed += 1,
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        (recorded, failed)
+    });
+
+    Ok(ImportResult {
+        recorded,
+        failed,
+        base: url,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Identities
 // ---------------------------------------------------------------------------

@@ -2,21 +2,29 @@ import { useState } from "react";
 
 import {
   describeError,
+  graphqlParse,
+  graphqlSend,
   importParse,
   importSend,
+  type GraphqlOp,
   type ImportPreview,
   type ImportResult,
   type LicenseStatus,
 } from "../ipc";
 
 /**
- * Import an API description (OpenAPI 3.x / Swagger 2.0) and turn it into traffic the scanner
- * can work over. An API has no HTML links for the crawler to follow; its spec is the map.
+ * Import an API description and turn it into traffic the scanner can work over. An API has no
+ * HTML links for the crawler to follow; its spec is the map.
  *
- * Paste the spec, preview the operations it implies (path parameters filled, required query
- * parameters appended), then send the safe ones through the project's scope guard — writes are
- * sent only when explicitly included. Nothing is sent until you press Send.
+ * - **OpenAPI 3.x / Swagger 2.0** (JSON or YAML): each operation becomes a request, path params
+ *   filled and required query params appended.
+ * - **GraphQL introspection** (JSON): each root field becomes a sendable query, required
+ *   arguments filled and a `{ __typename }` selection where it returns an object.
+ *
+ * Preview first; nothing is sent until you press Send. Writes/mutations go only when included.
  */
+type Kind = "openapi" | "graphql";
+
 export function ImportView({
   hasProject,
   license,
@@ -24,29 +32,41 @@ export function ImportView({
   hasProject: boolean;
   license: LicenseStatus | null;
 }) {
+  const [kind, setKind] = useState<Kind>("openapi");
   const [spec, setSpec] = useState("");
   const [base, setBase] = useState("");
   const [includeWrites, setIncludeWrites] = useState(false);
   const [insecure, setInsecure] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [gqlOps, setGqlOps] = useState<GraphqlOp[] | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const free = (license?.tier ?? "Free") === "Free";
+  const graphql = kind === "graphql";
 
   if (!hasProject) {
     return <p className="placeholder">Open a project to import an API spec into it.</p>;
   }
 
-  async function parse() {
-    setError(null);
+  function reset() {
+    setPreview(null);
+    setGqlOps(null);
     setResult(null);
+    setError(null);
+  }
+
+  async function parse() {
+    reset();
     try {
-      setPreview(await importParse(spec, base.trim() === "" ? null : base.trim()));
+      if (graphql) {
+        setGqlOps(await graphqlParse(spec));
+      } else {
+        setPreview(await importParse(spec, base.trim() === "" ? null : base.trim()));
+      }
     } catch (e) {
       setError(describeError(e));
-      setPreview(null);
     }
   }
 
@@ -55,12 +75,19 @@ export function ImportView({
     setError(null);
     setResult(null);
     try {
-      const r = await importSend({
-        spec,
-        base: base.trim() === "" ? null : base.trim(),
-        includeWrites,
-        insecure,
-      });
+      const r = graphql
+        ? await graphqlSend({
+            spec,
+            url: base.trim(),
+            includeMutations: includeWrites,
+            insecure,
+          })
+        : await importSend({
+            spec,
+            base: base.trim() === "" ? null : base.trim(),
+            includeWrites,
+            insecure,
+          });
       setResult(r);
     } catch (e) {
       setError(describeError(e));
@@ -69,36 +96,55 @@ export function ImportView({
     }
   }
 
-  const writes = preview?.operations.filter((o) => !o.safe).length ?? 0;
+  const openApiWrites = preview?.operations.filter((o) => !o.safe).length ?? 0;
+  const gqlMutations = gqlOps?.filter((o) => o.mutation).length ?? 0;
 
   return (
     <div className="import">
       <section className="card">
         <h2>Import an API spec</h2>
         <p className="muted">
-          OpenAPI 3.x or Swagger 2.0, JSON or YAML. Preview the operations, then send the safe
-          ones (GET/HEAD/OPTIONS) through the scope guard and record them for scanning. Writes are
-          sent only when you tick “include writes”.
+          Preview the operations, then send the safe ones through the scope guard and record them
+          for scanning. Writes/mutations are sent only when included.
         </p>
 
+        <div className="row">
+          <label className="field">
+            <span>Kind</span>
+            <select
+              value={kind}
+              onChange={(e) => {
+                setKind(e.target.value as Kind);
+                reset();
+              }}
+            >
+              <option value="openapi">OpenAPI / Swagger</option>
+              <option value="graphql">GraphQL introspection</option>
+            </select>
+          </label>
+          <label className="field grow">
+            <span>{graphql ? "GraphQL endpoint URL" : "Base URL — override, or supply one the spec omits"}</span>
+            <input
+              type="text"
+              placeholder={graphql ? "https://api.target.com/graphql" : "https://api.target.com"}
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+            />
+          </label>
+        </div>
+
         <label className="field">
-          <span>Spec — paste the JSON or YAML</span>
+          <span>
+            {graphql
+              ? "Introspection result — paste the JSON from the introspection query"
+              : "Spec — paste the JSON or YAML"}
+          </span>
           <textarea
             rows={8}
             className="query"
-            placeholder={'{ "openapi": "3.0.0", "servers": [...], "paths": { ... } }'}
+            placeholder={graphql ? '{ "data": { "__schema": { ... } } }' : '{ "openapi": "3.0.0", ... }'}
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
-          />
-        </label>
-
-        <label className="field">
-          <span>Base URL — override, or supply one the spec omits</span>
-          <input
-            type="text"
-            placeholder="https://api.target.com"
-            value={base}
-            onChange={(e) => setBase(e.target.value)}
           />
         </label>
 
@@ -109,7 +155,7 @@ export function ImportView({
               checked={includeWrites}
               onChange={(e) => setIncludeWrites(e.target.checked)}
             />
-            Include writes (POST/PUT/PATCH/DELETE)
+            {graphql ? "Include mutations" : "Include writes (POST/PUT/PATCH/DELETE)"}
           </label>
           <label className="check">
             <input type="checkbox" checked={insecure} onChange={(e) => setInsecure(e.target.checked)} />
@@ -120,7 +166,6 @@ export function ImportView({
         {free && (
           <p className="callout warn">
             Sending an import needs the Pro tier (it is automated traffic). Previewing is free.
-            Start a trial or activate a licence on the Licence tab.
           </p>
         )}
 
@@ -128,7 +173,11 @@ export function ImportView({
           <button className="secondary" disabled={spec.trim() === ""} onClick={parse}>
             Preview
           </button>
-          <button className="primary" disabled={busy || free || spec.trim() === ""} onClick={send}>
+          <button
+            className="primary"
+            disabled={busy || free || spec.trim() === "" || (graphql && base.trim() === "")}
+            onClick={send}
+          >
             {busy ? "Sending…" : "Send (records traffic)"}
           </button>
         </div>
@@ -148,7 +197,7 @@ export function ImportView({
         <section className="card">
           <h2>{preview.title ?? "Operations"}</h2>
           <p className="muted small">
-            Base {preview.base} — {preview.operations.length} operation(s), {writes} write(s).
+            Base {preview.base} — {preview.operations.length} operation(s), {openApiWrites} write(s).
           </p>
           <table className="grid">
             <thead>
@@ -169,6 +218,36 @@ export function ImportView({
                     <code>{op.url}</code>
                   </td>
                   <td>{op.summary ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {gqlOps && (
+        <section className="card">
+          <h2>GraphQL operations</h2>
+          <p className="muted small">
+            {gqlOps.length} operation(s), {gqlMutations} mutation(s).
+          </p>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Document</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gqlOps.map((op, i) => (
+                <tr key={i} className={op.mutation ? "muted" : ""}>
+                  <td>
+                    {op.kind}
+                    {op.mutation && <span className="tag">mutation</span>}
+                  </td>
+                  <td>
+                    <code>{op.document}</code>
+                  </td>
                 </tr>
               ))}
             </tbody>

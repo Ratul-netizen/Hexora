@@ -49,6 +49,187 @@ fn is_safe(method: &str) -> bool {
     matches!(method, "GET" | "HEAD" | "OPTIONS")
 }
 
+/// Options for `hexora import graphql`.
+pub struct GraphqlArgs<'a> {
+    pub project: &'a Path,
+    /// The introspection result (JSON).
+    pub spec: &'a Path,
+    /// The GraphQL endpoint to POST operations to.
+    pub url: &'a str,
+    /// Send the operations, rather than only listing.
+    pub send: bool,
+    /// Also send mutations (they change data).
+    pub include_mutations: bool,
+    /// The most requests to send.
+    pub max: Option<usize>,
+    pub insecure: bool,
+    pub yes: bool,
+    pub json: bool,
+}
+
+/// Reads a GraphQL introspection result and either lists or POSTs the operations it implies.
+pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
+    let bytes = std::fs::read(args.spec)
+        .map_err(|e| HexoraError::invalid_input("spec", format!("{}: {e}", args.spec.display())))?;
+    let api = hexora_import::parse_introspection(&bytes)
+        .map_err(|e| HexoraError::invalid_input("spec", e.message))?;
+
+    if !args.send {
+        if args.json {
+            let ops: Vec<_> = api
+                .operations
+                .iter()
+                .map(|op| {
+                    serde_json::json!({
+                        "kind": op.kind,
+                        "field": op.field,
+                        "document": op.document,
+                        "mutation": op.is_mutation(),
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::json!({ "endpoint": args.url, "operations": ops })
+            );
+            return Ok(());
+        }
+        println!("GraphQL endpoint: {}", args.url);
+        println!("{} operation(s):", api.operations.len());
+        for op in &api.operations {
+            let mark = if op.is_mutation() {
+                "  [mutation — needs --include-mutations]"
+            } else {
+                ""
+            };
+            println!("  {}{mark}", op.document);
+        }
+        println!();
+        println!("Nothing was sent. Re-run with --send to POST the queries into the project.");
+        return Ok(());
+    }
+
+    if args.json && !args.yes {
+        return Err(HexoraError::invalid_input(
+            "--yes",
+            "an import sends traffic, and --json cannot ask; pass --yes to confirm",
+        ));
+    }
+
+    let (service, path) = HttpService::parse_url(args.url)?;
+    let project = crate::open_project(args.project)?;
+    let scope = Arc::new(project.settings().scope()?);
+    let attached = project.settings().attached_headers()?;
+
+    let planned: Vec<&hexora_import::GraphqlOp> = api
+        .operations
+        .iter()
+        .filter(|op| !op.is_mutation() || args.include_mutations)
+        .take(args.max.unwrap_or(usize::MAX))
+        .collect();
+    let mutations = planned.iter().filter(|op| op.is_mutation()).count();
+
+    if planned.is_empty() {
+        println!(
+            "No operations to send (all are mutations; pass --include-mutations to send them)."
+        );
+        return Ok(());
+    }
+
+    if !args.json {
+        println!(
+            "Importing {} GraphQL operation(s) to {}",
+            planned.len(),
+            args.url
+        );
+        if mutations > 0 {
+            println!("{mutations} of them are mutations and will be sent because --include-mutations was given.");
+        }
+        println!();
+        println!("This sends requests to the API. Only import schemas for systems you are authorized to test.");
+        if !args.yes && !crate::proxy::confirm("Send these queries?")? {
+            println!("Nothing was sent.");
+            return Ok(());
+        }
+    }
+
+    let transport = if args.insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, scope);
+    let store = project.traffic();
+    let options = SendOptions::automated(Origin::Crawler);
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+
+    let mut recorded = 0usize;
+    let mut failed = 0usize;
+    runtime.block_on(async {
+        for op in &planned {
+            let mut request = HttpRequest::get(service.clone(), path.clone());
+            request.method = "POST".to_string();
+            request.headers.set("Content-Type", "application/json");
+            for header in &attached {
+                request
+                    .headers
+                    .set(&header.name, header.value_lossy().into_owned());
+            }
+            request
+                .headers
+                .set("Content-Length", op.body.len().to_string());
+            request.body = op.body.clone().into_bytes().into();
+
+            match guard.send(request, options.clone()).await {
+                Ok(exchange) => {
+                    let captured = CapturedExchange {
+                        request: exchange.request.clone(),
+                        raw_request: exchange.raw_request.clone(),
+                        response: exchange.response.clone(),
+                        encoded_body: exchange.encoded_body.clone(),
+                        content_encoding: exchange.content_encoding.clone(),
+                        origin: Origin::Crawler.as_str(),
+                        identity: None,
+                        parent: None,
+                        quirks: Vec::new(),
+                        tls: exchange.tls.clone(),
+                        duration_ms: exchange.duration.as_millis().min(u128::from(u32::MAX)) as u32,
+                    };
+                    if store.record(&captured).is_ok() {
+                        recorded += 1;
+                    } else {
+                        failed += 1;
+                    }
+                }
+                Err(_) => failed += 1,
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    });
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({ "recorded": recorded, "failed": failed })
+        );
+    } else {
+        println!();
+        println!("{recorded} operation(s) recorded into the project.");
+        if failed > 0 {
+            println!("{failed} did not complete (out of scope, or the host did not answer).");
+        }
+        println!(
+            "Scan the new traffic with `hexora scan passive {}`.",
+            args.project.display()
+        );
+    }
+    Ok(())
+}
+
 /// Reads and parses the spec, resolves the base URL, and either lists or sends.
 pub fn openapi(args: Args<'_>) -> Result<()> {
     let bytes = std::fs::read(args.spec)

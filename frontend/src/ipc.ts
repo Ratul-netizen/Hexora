@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 20;
+export const EXPECTED_RPC_CONTRACT_VERSION = 21;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -555,6 +555,26 @@ export const importSend = (args: {
   includeWrites: boolean;
   insecure: boolean;
 }): Promise<ImportResult> => invoke<ImportResult>("import_send", args);
+
+/** One GraphQL operation an introspection result implies. */
+export interface GraphqlOp {
+  kind: string;
+  field: string;
+  document: string;
+  mutation: boolean;
+}
+
+/** Parses a GraphQL introspection result and lists its operations. Sends nothing. */
+export const graphqlParse = (spec: string): Promise<GraphqlOp[]> =>
+  invoke<GraphqlOp[]>("graphql_parse", { spec });
+
+/** POSTs a GraphQL schema's operations to the endpoint and records them. Sends traffic. */
+export const graphqlSend = (args: {
+  spec: string;
+  url: string;
+  includeMutations: boolean;
+  insecure: boolean;
+}): Promise<ImportResult> => invoke<ImportResult>("graphql_send", args);
 
 // --- Sequencer (token randomness, M9) -----------------------------------
 

@@ -1532,6 +1532,31 @@ enum ImportCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Import a GraphQL schema from an introspection result (JSON).
+    Graphql {
+        /// Project directory.
+        path: PathBuf,
+        /// The introspection result file.
+        spec: PathBuf,
+        /// The GraphQL endpoint to POST operations to.
+        #[arg(long, value_name = "URL")]
+        url: String,
+        /// Send the operations and record them, rather than only listing.
+        #[arg(long)]
+        send: bool,
+        /// Also send mutations (they change data).
+        #[arg(long, requires = "send")]
+        include_mutations: bool,
+        /// The most requests to send.
+        #[arg(long, value_name = "N")]
+        max: Option<usize>,
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+        /// Send without asking.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2030,6 +2055,31 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 base: base.as_deref(),
                 send: *send,
                 include_writes: *include_writes,
+                max: *max,
+                insecure: *insecure,
+                yes: *yes,
+                json: cli.json,
+            })
+        }
+        Command::Import(ImportCommand::Graphql {
+            path,
+            spec,
+            url,
+            send,
+            include_mutations,
+            max,
+            insecure,
+            yes,
+        }) => {
+            if *send {
+                license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            }
+            import::graphql(import::GraphqlArgs {
+                project: path,
+                spec,
+                url,
+                send: *send,
+                include_mutations: *include_mutations,
                 max: *max,
                 insecure: *insecure,
                 yes: *yes,

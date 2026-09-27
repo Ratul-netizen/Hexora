@@ -19,6 +19,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]
 
+pub mod graphql;
+
+pub use graphql::{parse_introspection, GraphqlApi, GraphqlOp};
+
 use serde_json::Value;
 
 /// The HTTP methods an operation object may key, in a stable order.
