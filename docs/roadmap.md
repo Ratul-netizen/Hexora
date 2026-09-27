@@ -961,6 +961,26 @@ honestly when neither Chrome nor Edge is found rather than pretending to a capab
 The static crawl still reports what it could not reach; the browser is where a SPA's real
 surface is found, not a replacement for the honest static answer.
 
+**M18.9 — LLM security testing** · IN PROGRESS (LLM.a DONE) — testing LLM-backed endpoints,
+a capability neither Burp nor Caido ships natively.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **LLM.a** — prompt injection | Send injection/jailbreak probes to an LLM endpoint, each carrying a **canary** — a random token the model would never emit — inside an instruction to output it. If the canary comes back, the application's system instructions were overridden by user input: prompt injection, *demonstrated with evidence*, the same shape as the reflected-input check. `hexora llm <url>`. | scope guard, HttpTransport |
+| **LLM.b** — auto-discovery | A passive detector that recognises LLM-backed endpoints (request fields like `prompt`/`messages`, chat-completion response shapes) and raises the injection hypothesis, so a crawl/proxy feeds it — the input.reflected → input.reflection bridge, for LLM inputs. | LLM.a, scan |
+| **LLM.c** — system-prompt & data leakage | Extraction probes and an oracle for when the model discloses its system prompt or context it should not. | LLM.a |
+| **LLM.d** — insecure output handling | Where a model's output flows into a sink (HTML, SQL, a shell, a tool call) — the injection-to-impact chain, joined to the existing reflection/injection checks. | LLM.a, M18.d |
+
+<!-- LLM.a DONE. New `hexora-llm` crate: a canary-based prompt-injection tester. `probes()` is
+the corpus (direct override, role confusion, jailbreak, delimiter escape), each rendering a
+random canary; `obeyed()` is the oracle (the canary came back); `test(guard, target)` sends
+every probe through the scope guard and reports confirmed injections with the canary as
+evidence. Body template uses a {{PROMPT}} placeholder, JSON-escaped. `hexora llm <url>
+[--template|--template-file] [--method] [--header] [--insecure] [--yes]`, gated behind Pro,
+host auto-scoped. Verified live against a vulnerable local endpoint (all 4 probes confirmed
+with canaries) and by mock tests (vulnerable → confirmed, defended → refuted, out-of-scope →
+refused). LLM.b wires it into passive/active auto-discovery next. -->
+
 **M19 — Extension runtime, sandboxing (WASM) and store** · PLANNED
 
 ---

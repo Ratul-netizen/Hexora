@@ -25,6 +25,7 @@ mod history;
 mod identifiers;
 mod identity;
 mod license;
+mod llm;
 mod object;
 mod poc;
 mod programme;
@@ -669,6 +670,40 @@ enum Command {
         /// Print what was found without writing the pages into the project.
         #[arg(long)]
         no_save: bool,
+    },
+
+    /// Test an LLM-backed endpoint for prompt injection.
+    ///
+    /// Sends injection probes that instruct the model to emit a random token; if the token
+    /// comes back, the application's instructions were overridden by user input. Point it at
+    /// an endpoint you are authorized to test.
+    Llm {
+        /// The endpoint URL.
+        url: String,
+
+        /// Request body template, with {{PROMPT}} where the user prompt goes.
+        #[arg(long, value_name = "JSON", conflicts_with = "template_file")]
+        template: Option<String>,
+
+        /// Read the body template from a file instead.
+        #[arg(long, value_name = "PATH")]
+        template_file: Option<PathBuf>,
+
+        /// HTTP method (default POST).
+        #[arg(long, value_name = "METHOD")]
+        method: Option<String>,
+
+        /// Extra header, `Name: value`. Repeatable (e.g. an Authorization bearer).
+        #[arg(long = "header", value_name = "H")]
+        header: Vec<String>,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+
+        /// Do not ask before sending.
+        #[arg(long)]
+        yes: bool,
     },
 
     /// Show a host → path coverage tree of what the project has reached.
@@ -1322,6 +1357,27 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 yes: *yes,
                 insecure: *insecure,
                 no_save: *no_save,
+                json: cli.json,
+            })
+        }
+        Command::Llm {
+            url,
+            template,
+            template_file,
+            method,
+            header,
+            insecure,
+            yes,
+        } => {
+            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            llm::run(llm::Args {
+                url,
+                template: template.as_deref(),
+                template_file: template_file.as_deref(),
+                method: method.as_deref(),
+                headers: header,
+                insecure: *insecure,
+                yes: *yes,
                 json: cli.json,
             })
         }

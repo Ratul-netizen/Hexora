@@ -1602,6 +1602,7 @@ dependencies = [
  "hexora-engine",
  "hexora-fuzz",
  "hexora-http",
+ "hexora-llm",
  "hexora-proxy",
  "hexora-repeater",
  "hexora-report",
@@ -1710,6 +1711,19 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "x509-parser",
+]
+
+[[package]]
+name = "hexora-llm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hexora-engine",
+ "hexora-types",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
