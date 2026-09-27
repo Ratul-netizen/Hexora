@@ -11,14 +11,15 @@ use hexora_types::error::{HexoraError, Result};
 
 use crate::{token_of, Interaction};
 
-/// The recorded interactions, keyed by token. Cloneable and shared across connections.
+/// The recorded interactions, keyed by token. Cloneable and shared across connections and
+/// across the HTTP and DNS listeners, so a poll returns callbacks of either kind.
 #[derive(Clone, Default)]
-pub struct Store {
+pub(crate) struct Store {
     inner: Arc<Mutex<HashMap<String, Vec<Interaction>>>>,
 }
 
 impl Store {
-    fn record(&self, interaction: Interaction) {
+    pub(crate) fn record(&self, interaction: Interaction) {
         if let Ok(mut map) = self.inner.lock() {
             map.entry(interaction.token.clone()).or_default().push(interaction);
         }
@@ -34,55 +35,30 @@ impl Store {
     }
 }
 
-/// A bound collaborator, ready to run.
-pub struct Server {
-    listener: TcpListener,
-    store: Store,
-}
-
-impl Server {
-    /// Binds the collaborator to `addr` (e.g. `0.0.0.0:80` in production, `127.0.0.1:0` in a test).
-    pub async fn bind(addr: &str) -> Result<Server> {
-        let listener = TcpListener::bind(addr)
-            .await
-            .map_err(|e| HexoraError::invalid_input("listen", format!("{addr}: {e}")))?;
-        Ok(Server {
-            listener,
-            store: Store::default(),
-        })
+/// Runs the collaborator's HTTP listener on `addr`, recording callbacks into `store`.
+pub(crate) async fn run_http(addr: &str, store: Store) -> Result<()> {
+    let listener = TcpListener::bind(addr)
+        .await
+        .map_err(|e| HexoraError::invalid_input("listen", format!("{addr}: {e}")))?;
+    if let Ok(local) = listener.local_addr() {
+        tracing::info!(%local, "collaborator HTTP listening");
     }
-
-    /// The address it is actually listening on (the real port, when `:0` was requested).
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.listener.local_addr().ok()
-    }
-
-    /// Serves interactions forever.
-    pub async fn run(self) {
-        loop {
-            match self.listener.accept().await {
-                Ok((stream, peer)) => {
-                    let store = self.store.clone();
-                    tokio::spawn(async move {
-                        let _ = handle(stream, peer, store).await;
-                    });
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "collaborator accept failed");
-                }
+    loop {
+        match listener.accept().await {
+            Ok((stream, peer)) => {
+                let store = store.clone();
+                tokio::spawn(async move {
+                    let _ = handle(stream, peer, store).await;
+                });
             }
+            Err(error) => tracing::warn!(%error, "collaborator accept failed"),
         }
     }
 }
 
-/// Binds and runs the collaborator on `addr`. The one call a server binary makes.
+/// Binds and runs the HTTP collaborator on `addr`. The one call an HTTP-only server makes.
 pub async fn serve(addr: &str) -> Result<()> {
-    let server = Server::bind(addr).await?;
-    if let Some(local) = server.local_addr() {
-        tracing::info!(%local, "collaborator listening");
-    }
-    server.run().await;
-    Ok(())
+    run_http(addr, Store::default()).await
 }
 
 /// Reads one request, records or answers it, and replies.

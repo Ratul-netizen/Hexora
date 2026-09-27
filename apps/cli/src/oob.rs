@@ -10,7 +10,7 @@ use std::time::Duration;
 use hexora_engine::guard::ScopeGuard;
 use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
 use hexora_http::{TcpTransport, TlsConfig};
-use hexora_oob::{poll, serve, Collaborator, PayloadMode};
+use hexora_oob::{poll, serve, serve_all, Collaborator, PayloadMode};
 use hexora_types::http::{HttpRequest, HttpService};
 use hexora_types::scope::{Scope, ScopeRule};
 use hexora_types::{HexoraError, Result};
@@ -23,11 +23,24 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
         .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))
 }
 
-/// `hexora oob serve` — run the collaborator, catching HTTP callbacks.
-pub fn serve_cmd(listen: &str) -> Result<()> {
-    println!("Collaborator listening on {listen}. Payloads that call back here are recorded.");
-    println!("Mint one with `hexora oob mint --server <this host>`; Ctrl-C to stop.");
-    runtime()?.block_on(serve(listen))
+/// `hexora oob serve` — run the collaborator, catching HTTP (and optionally DNS) callbacks.
+pub fn serve_cmd(listen: &str, dns: Option<&str>, answer_ip: &str) -> Result<()> {
+    println!("Collaborator listening on {listen} (HTTP). Payloads that call back here are recorded.");
+    let runtime = runtime()?;
+    match dns {
+        Some(dns_addr) => {
+            let ip = answer_ip.parse().map_err(|_| {
+                HexoraError::invalid_input("answer-ip", format!("{answer_ip:?} is not an IPv4 address"))
+            })?;
+            println!("DNS listening on {dns_addr}, answering A queries with {answer_ip}.");
+            println!("Mint a subdomain payload with `oob mint --server <domain> --subdomain`; Ctrl-C to stop.");
+            runtime.block_on(serve_all(listen, dns_addr, ip))
+        }
+        None => {
+            println!("Mint one with `hexora oob mint --server <this host>`; Ctrl-C to stop.");
+            runtime.block_on(serve(listen))
+        }
+    }
 }
 
 /// `hexora oob mint` — print a fresh payload URL and its token.

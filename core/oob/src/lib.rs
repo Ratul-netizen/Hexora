@@ -21,12 +21,28 @@
 #![warn(missing_docs)]
 
 mod client;
+mod dns;
 mod server;
 
 pub use client::{poll, Collaborator, PayloadMode};
 pub use server::serve;
 
+use std::net::Ipv4Addr;
+
 use serde::{Deserialize, Serialize};
+
+use hexora_types::error::Result;
+
+/// Runs the collaborator's HTTP and DNS listeners together, sharing one interaction store so a
+/// poll returns callbacks of either kind. `answer_ip` is the address A queries are answered
+/// with — a resolved payload then connects there, chaining DNS to HTTP.
+pub async fn serve_all(http_addr: &str, dns_addr: &str, answer_ip: Ipv4Addr) -> Result<()> {
+    let store = server::Store::default();
+    let http = server::run_http(http_addr, store.clone());
+    let dns = dns::run_dns(dns_addr, store, answer_ip);
+    tokio::try_join!(http, dns)?;
+    Ok(())
+}
 
 /// One recorded out-of-band interaction: a target reached the collaborator.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

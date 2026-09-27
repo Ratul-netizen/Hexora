@@ -831,11 +831,17 @@ enum LicenseCommand {
 
 #[derive(Debug, Subcommand)]
 enum OobCommand {
-    /// Run the collaborator, catching HTTP callbacks.
+    /// Run the collaborator, catching HTTP (and optionally DNS) callbacks.
     Serve {
-        /// Address to listen on (e.g. 0.0.0.0:80 in production).
+        /// HTTP address to listen on (e.g. 0.0.0.0:80 in production).
         #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:8888")]
         listen: String,
+        /// Also run a DNS listener on this address (e.g. 0.0.0.0:53) to catch lookups.
+        #[arg(long, value_name = "ADDR")]
+        dns: Option<String>,
+        /// The IPv4 address DNS A queries are answered with (a resolved payload connects here).
+        #[arg(long, value_name = "IP", default_value = "127.0.0.1")]
+        answer_ip: String,
     },
     /// Mint a fresh payload URL and its correlation token.
     Mint {
@@ -1422,7 +1428,11 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 json: cli.json,
             })
         }
-        Command::Oob(OobCommand::Serve { listen }) => oob::serve_cmd(listen),
+        Command::Oob(OobCommand::Serve {
+            listen,
+            dns,
+            answer_ip,
+        }) => oob::serve_cmd(listen, dns.as_deref(), answer_ip),
         Command::Oob(OobCommand::Mint {
             server,
             subdomain,
