@@ -1180,6 +1180,190 @@ pub fn check_set_enabled(
 }
 
 // ---------------------------------------------------------------------------
+// API import (M5 — OpenAPI/Swagger)
+// ---------------------------------------------------------------------------
+
+/// One operation an imported spec describes, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportOpView {
+    pub method: String,
+    pub url: String,
+    pub template: String,
+    pub summary: Option<String>,
+    /// Whether it is a safe method (sent by default) rather than a write.
+    pub safe: bool,
+}
+
+/// A parsed spec, before anything is sent.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportPreview {
+    pub title: Option<String>,
+    pub base: String,
+    pub operations: Vec<ImportOpView>,
+}
+
+/// Resolves the base URL: an override, or the spec's first server.
+fn import_base(spec: &hexora_import::ApiSpec, base: Option<&str>) -> CommandResult<String> {
+    if let Some(base) = base.map(str::trim).filter(|b| !b.is_empty()) {
+        return Ok(base.trim_end_matches('/').to_string());
+    }
+    spec.servers
+        .first()
+        .map(|s| s.trim_end_matches('/').to_string())
+        .ok_or_else(|| "the spec declares no server URL; give a base URL".to_string())
+}
+
+fn import_url(base: &str, op: &hexora_import::Operation) -> String {
+    let sep = if op.target.starts_with('/') { "" } else { "/" };
+    format!("{base}{sep}{}", op.target)
+}
+
+fn import_is_safe(method: &str) -> bool {
+    matches!(method, "GET" | "HEAD" | "OPTIONS")
+}
+
+/// Parses an OpenAPI/Swagger spec and lists its operations. Sends nothing.
+#[tauri::command]
+pub fn import_parse(spec: String, base: Option<String>) -> CommandResult<ImportPreview> {
+    let parsed = hexora_import::parse(spec.as_bytes()).map_err(|e| e.message)?;
+    let base = import_base(&parsed, base.as_deref())?;
+    Ok(ImportPreview {
+        title: parsed.title.clone(),
+        operations: parsed
+            .operations
+            .iter()
+            .map(|op| ImportOpView {
+                method: op.method.clone(),
+                url: import_url(&base, op),
+                template: op.template.clone(),
+                summary: op.summary.clone(),
+                safe: import_is_safe(&op.method),
+            })
+            .collect(),
+        base,
+    })
+}
+
+/// What an import sent.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportResult {
+    pub recorded: usize,
+    pub failed: usize,
+    pub base: String,
+}
+
+/// Sends the operations of a spec through the scope guard and records them.
+#[tauri::command]
+pub async fn import_send(
+    state: State<'_, AppState>,
+    spec: String,
+    base: Option<String>,
+    include_writes: bool,
+    insecure: bool,
+) -> CommandResult<ImportResult> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+    let path = state.project_path().map_err(fail)?;
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        import_send_blocking(path, spec, base, include_writes, insecure)
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+fn import_send_blocking(
+    path: PathBuf,
+    spec: String,
+    base: Option<String>,
+    include_writes: bool,
+    insecure: bool,
+) -> CommandResult<ImportResult> {
+    use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
+
+    let parsed = hexora_import::parse(spec.as_bytes()).map_err(|e| e.message)?;
+    let base = import_base(&parsed, base.as_deref())?;
+
+    let project = Project::open(&path).map_err(fail)?;
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+    let attached = project.settings().attached_headers().map_err(fail)?;
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, scope);
+    let store = project.traffic();
+    let options = SendOptions::automated(Origin::Crawler);
+
+    let planned: Vec<&hexora_import::Operation> = parsed
+        .operations
+        .iter()
+        .filter(|op| import_is_safe(&op.method) || include_writes)
+        .collect();
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+
+    let (recorded, failed) = runtime.block_on(async {
+        let mut recorded = 0usize;
+        let mut failed = 0usize;
+        for op in &planned {
+            let url = import_url(&base, op);
+            let (service, req_path) = match hexora_types::http::HttpService::parse_url(&url) {
+                Ok(parts) => parts,
+                Err(_) => {
+                    failed += 1;
+                    continue;
+                }
+            };
+            let mut request = hexora_types::http::HttpRequest::get(service, req_path);
+            request.method = op.method.clone();
+            for header in &attached {
+                request.headers.set(
+                    &header.name,
+                    String::from_utf8_lossy(&header.value).into_owned(),
+                );
+            }
+            match guard.send(request, options.clone()).await {
+                Ok(exchange) => {
+                    let captured = hexora_storage::CapturedExchange {
+                        request: exchange.request.clone(),
+                        raw_request: exchange.raw_request.clone(),
+                        response: exchange.response.clone(),
+                        encoded_body: exchange.encoded_body.clone(),
+                        content_encoding: exchange.content_encoding.clone(),
+                        origin: Origin::Crawler.as_str(),
+                        identity: None,
+                        parent: None,
+                        quirks: Vec::new(),
+                        tls: exchange.tls.clone(),
+                        duration_ms: exchange.duration.as_millis().min(u128::from(u32::MAX)) as u32,
+                    };
+                    if store.record(&captured).is_ok() {
+                        recorded += 1;
+                    } else {
+                        failed += 1;
+                    }
+                }
+                Err(_) => failed += 1,
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        (recorded, failed)
+    });
+
+    Ok(ImportResult {
+        recorded,
+        failed,
+        base,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Identities
 // ---------------------------------------------------------------------------
 

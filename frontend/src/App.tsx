@@ -8,6 +8,7 @@ import { CrawlerView } from "./views/CrawlerView";
 import { FuzzerView } from "./views/FuzzerView";
 import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
+import { ImportView } from "./views/ImportView";
 import { LicenseView } from "./views/LicenseView";
 import { LlmView } from "./views/LlmView";
 import { MatchReplaceView } from "./views/MatchReplaceView";
@@ -46,6 +47,7 @@ type Tab =
   | "decoder"
   | "websockets"
   | "matchreplace"
+  | "import"
   | "identifiers"
   | "scan"
   | "checks"
@@ -68,6 +70,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "decoder", label: "Decoder" },
   { id: "websockets", label: "WebSocket" },
   { id: "matchreplace", label: "Match & Replace" },
+  { id: "import", label: "Import API" },
   { id: "identifiers", label: "Identifiers" },
   { id: "scan", label: "Scan" },
   { id: "checks", label: "Custom Checks" },
@@ -263,6 +266,9 @@ export default function App() {
         {tab === "llm" && <LlmView license={license} />}
         {tab === "oob" && <OobView license={license} />}
         {tab === "matchreplace" && <MatchReplaceView hasProject={project !== null} />}
+        {tab === "import" && (
+          <ImportView hasProject={project !== null} license={license} />
+        )}
         {tab === "findings" && (
           <FindingsView
             hasProject={project !== null}

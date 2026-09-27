@@ -19,6 +19,7 @@ members = [
     "core/llm",
     "core/oob",
     "core/query",
+    "core/import",
     "core/report",
     "apps/cli",
     "apps/desktop/src-tauri",
@@ -52,6 +53,7 @@ hexora-browser = { path = "core/browser" }
 hexora-llm = { path = "core/llm" }
 hexora-oob = { path = "core/oob" }
 hexora-query = { path = "core/query" }
+hexora-import = { path = "core/import" }
 hexora-report = { path = "core/report" }
 
 # Async runtime. Needed at M0 only for the engine trait signatures.
@@ -77,6 +79,10 @@ serde_json = "1.0"
 
 # Regular expressions — match & replace rules on proxied traffic (M7).
 regex = "1"
+
+# YAML — OpenAPI/Swagger specs are commonly YAML (M5 importers). Maintained fork of the
+# archived serde_yaml.
+serde_yaml_ng = "0.10"
 
 # Storage
 rusqlite = { version = "0.32", features = ["bundled"] }

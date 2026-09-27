@@ -25,6 +25,7 @@ mod header;
 mod history;
 mod identifiers;
 mod identity;
+mod import;
 mod license;
 mod llm;
 mod matchreplace;
@@ -404,6 +405,13 @@ enum Command {
     /// only ever produce a lead — never an actionable finding.
     #[command(subcommand)]
     Check(CheckCommand),
+
+    /// Import an API description and turn it into traffic the scanner can work over.
+    ///
+    /// An API has no HTML links for the crawler to follow; its OpenAPI/Swagger spec is the
+    /// map instead. Dry-run by default; `--send` fetches the safe operations.
+    #[command(subcommand)]
+    Import(ImportCommand),
 
     /// Replay a captured request as several identities and compare what came back.
     ///
@@ -1473,6 +1481,35 @@ enum CheckCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ImportCommand {
+    /// Import an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML).
+    Openapi {
+        /// Project directory.
+        path: PathBuf,
+        /// The spec file.
+        spec: PathBuf,
+        /// Override the base URL (or supply one the spec omits).
+        #[arg(long, value_name = "URL")]
+        base: Option<String>,
+        /// Send the safe operations and record them, rather than only listing.
+        #[arg(long)]
+        send: bool,
+        /// Also send body-bearing / deleting operations (POST/PUT/PATCH/DELETE).
+        #[arg(long, requires = "send")]
+        include_writes: bool,
+        /// The most requests to send.
+        #[arg(long, value_name = "N")]
+        max: Option<usize>,
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+        /// Send without asking.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ProjectCommand {
     /// Create a new project.
     Init {
@@ -1947,6 +1984,32 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }
         Command::Check(CheckCommand::Disable { path, id }) => {
             check::set_enabled(path, id, false, cli.json)
+        }
+        Command::Import(ImportCommand::Openapi {
+            path,
+            spec,
+            base,
+            send,
+            include_writes,
+            max,
+            insecure,
+            yes,
+        }) => {
+            // Sending is automated traffic, gated like the crawler; a dry run is free.
+            if *send {
+                license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            }
+            import::openapi(import::Args {
+                project: path,
+                spec,
+                base: base.as_deref(),
+                send: *send,
+                include_writes: *include_writes,
+                max: *max,
+                insecure: *insecure,
+                yes: *yes,
+                json: cli.json,
+            })
         }
         Command::Authz {
             path,

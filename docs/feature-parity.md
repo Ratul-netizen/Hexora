@@ -180,7 +180,7 @@ below are mostly cheap, and several are things we would have had to invent anywa
 | **Docker images + daemon mode** | medium | M11 | Already planned, but ZAP proves it must be first-class rather than an afterthought |
 | **Contexts** | medium | M9 | ZAP groups URLs + auth + session + technology into one object. A distinctly better model than Burp's scattered scope / session-rule / macro configuration, and session handling is the thing everyone hates |
 | **Browser-driven crawling** | high | M13+M18 | In July 2026 ZAP made its **Client Spider the recommended crawler**, replacing the AJAX Spider. This independently confirms the "drive a real browser over CDP" decision — and means the crawler and browser-integration milestones should merge rather than be built twice |
-| **OpenAPI / GraphQL / SOAP importers** | low | M5 | Cheap, high value for API work |
+| **OpenAPI / GraphQL / SOAP importers** | low | M5 | **OpenAPI 3.x + Swagger 2.0 DONE** (`hexora import openapi`, JSON/YAML): parses the spec, fills path params and required query params, and — with `--send` — fetches the safe operations through the scope guard and records them for scanning, the frontier the crawler cannot find because an API has no HTML links. GraphQL/SOAP still to do |
 | **Alert filters** | low | M13.2 | False-positive suppression. Consultancies need it; Caido lacks it |
 
 ### What we will not take from ZAP

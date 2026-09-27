@@ -83,6 +83,8 @@ pub fn run() {
             commands::check_add,
             commands::check_remove,
             commands::check_set_enabled,
+            commands::import_parse,
+            commands::import_send,
             commands::identities_list,
             commands::identity_add,
             commands::identity_remove,

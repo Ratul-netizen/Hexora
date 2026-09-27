@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 18;
+export const EXPECTED_RPC_CONTRACT_VERSION = 19;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -516,6 +516,45 @@ export const checkRemove = (id: string): Promise<CustomCheck[]> =>
 /** Enables or disables a check by id; returns the whole list. */
 export const checkSetEnabled = (id: string, enabled: boolean): Promise<CustomCheck[]> =>
   invoke<CustomCheck[]>("check_set_enabled", { id, enabled });
+
+// --- API import (OpenAPI / Swagger, M5) ---------------------------------
+
+/** One operation an imported spec describes. */
+export interface ImportOp {
+  method: string;
+  url: string;
+  template: string;
+  summary: string | null;
+  safe: boolean;
+}
+
+/** A parsed spec, before anything is sent. */
+export interface ImportPreview {
+  title: string | null;
+  base: string;
+  operations: ImportOp[];
+}
+
+/** Parses a spec and lists its operations. Sends nothing. */
+export const importParse = (
+  spec: string,
+  base: string | null,
+): Promise<ImportPreview> => invoke<ImportPreview>("import_parse", { spec, base });
+
+/** What an import sent. */
+export interface ImportResult {
+  recorded: number;
+  failed: number;
+  base: string;
+}
+
+/** Sends the spec's operations through the scope guard and records them. Sends traffic. */
+export const importSend = (args: {
+  spec: string;
+  base: string | null;
+  includeWrites: boolean;
+  insecure: boolean;
+}): Promise<ImportResult> => invoke<ImportResult>("import_send", args);
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {
