@@ -1638,6 +1638,182 @@ fn graphql_send_blocking(
 }
 
 // ---------------------------------------------------------------------------
+// DOM-XSS (M18 — DOM Invader)
+// ---------------------------------------------------------------------------
+
+/// One source→sink flow, for the window.
+#[derive(Debug, Clone, Serialize)]
+pub struct DomXssHitView {
+    pub source: String,
+    pub sink: String,
+    pub sample: String,
+}
+
+/// What a DOM-XSS test found.
+#[derive(Debug, Clone, Serialize)]
+pub struct DomXssReportView {
+    pub target: String,
+    pub vulnerable: bool,
+    pub sources_tested: Vec<String>,
+    pub hits: Vec<DomXssHitView>,
+}
+
+/// Drives a real browser to test one page for DOM XSS.
+///
+/// Automated browser work, so it sits behind the active-scanner entitlement. Runs headless by
+/// default; the throwaway browser is killed when the run ends.
+#[tauri::command]
+pub async fn domxss_run(
+    url: String,
+    headed: bool,
+    timeout_secs: Option<u64>,
+) -> CommandResult<DomXssReportView> {
+    gate()
+        .require(hexora_engine::license::Feature::ActiveScanner)
+        .map_err(fail)?;
+    let report = hexora_browser::domxss::test(
+        &url,
+        !headed,
+        std::time::Duration::from_secs(timeout_secs.unwrap_or(20)),
+    )
+    .await
+    .map_err(fail)?;
+    Ok(DomXssReportView {
+        target: report.target.clone(),
+        vulnerable: report.vulnerable(),
+        sources_tested: report.sources_tested.clone(),
+        hits: report
+            .hits
+            .iter()
+            .map(|h| DomXssHitView {
+                source: h.source.clone(),
+                sink: h.sink.clone(),
+                sample: h.sample.clone(),
+            })
+            .collect(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Race conditions (M7)
+// ---------------------------------------------------------------------------
+
+/// One row of the race outcome histogram.
+#[derive(Debug, Clone, Serialize)]
+pub struct RaceGroupView {
+    pub status: u16,
+    pub bytes: usize,
+    pub count: usize,
+}
+
+/// What racing a request produced.
+#[derive(Debug, Clone, Serialize)]
+pub struct RaceReportView {
+    pub sent: usize,
+    pub answered: usize,
+    pub failed: usize,
+    /// How many concurrent requests returned a 2xx — the number a single-use race hinges on.
+    pub successes_2xx: usize,
+    pub groups: Vec<RaceGroupView>,
+}
+
+/// Replays a captured request `count` times concurrently and reports the spread.
+#[tauri::command]
+pub async fn race_run(
+    state: State<'_, AppState>,
+    id: String,
+    count: usize,
+    insecure: bool,
+) -> CommandResult<RaceReportView> {
+    gate()
+        .require(hexora_engine::license::Feature::Intruder)
+        .map_err(fail)?;
+    if count < 2 {
+        return Err("racing needs at least 2 concurrent requests".to_string());
+    }
+    let path = state.project_path().map_err(fail)?;
+    let outcome =
+        tauri::async_runtime::spawn_blocking(move || race_run_blocking(path, id, count, insecure))
+            .await;
+    outcome.map_err(fail)?
+}
+
+fn race_run_blocking(
+    path: PathBuf,
+    id: String,
+    count: usize,
+    insecure: bool,
+) -> CommandResult<RaceReportView> {
+    let project = Project::open(&path).map_err(fail)?;
+    let request_id: RequestId = id
+        .parse()
+        .map_err(|e| format!("{id} is not a request id: {e}"))?;
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any()).http2(true)
+    } else {
+        TcpTransport::new().http2(true)
+    };
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+    let store = Arc::new(project.traffic());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store)
+        .attaching(project.settings().attached_headers().map_err(fail)?);
+    let draft = repeater.draft_from(request_id).map_err(fail)?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+
+    let outcomes: Vec<(u16, usize, bool)> = runtime.block_on(async {
+        let repeater = &repeater;
+        let futures = (0..count).map(|_| {
+            let draft = draft.clone();
+            async move {
+                match repeater
+                    .send_as(&draft, hexora_repeater::SendAs::repeater())
+                    .await
+                {
+                    Ok(sent) => (
+                        sent.exchange.response.status,
+                        sent.exchange.response.body.len(),
+                        true,
+                    ),
+                    Err(_) => (0u16, 0usize, false),
+                }
+            }
+        });
+        futures::future::join_all(futures).await
+    });
+
+    let answered = outcomes.iter().filter(|(_, _, ok)| *ok).count();
+    let successes_2xx = outcomes
+        .iter()
+        .filter(|(status, _, ok)| *ok && (200..300).contains(status))
+        .count();
+    let mut grouped: std::collections::BTreeMap<(u16, usize), usize> = Default::default();
+    for (status, bytes, ok) in &outcomes {
+        if *ok {
+            *grouped.entry((*status, *bytes)).or_insert(0) += 1;
+        }
+    }
+    Ok(RaceReportView {
+        sent: outcomes.len(),
+        answered,
+        failed: outcomes.len() - answered,
+        successes_2xx,
+        groups: grouped
+            .into_iter()
+            .map(|((status, bytes), count)| RaceGroupView {
+                status,
+                bytes,
+                count,
+            })
+            .collect(),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Identities
 // ---------------------------------------------------------------------------
 

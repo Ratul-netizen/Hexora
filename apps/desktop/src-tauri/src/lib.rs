@@ -88,6 +88,8 @@ pub fn run() {
             commands::graphql_parse,
             commands::graphql_send,
             commands::sequencer_run,
+            commands::domxss_run,
+            commands::race_run,
             commands::identities_list,
             commands::identity_add,
             commands::identity_remove,

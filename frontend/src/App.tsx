@@ -5,7 +5,9 @@ import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
 import { ChecksView } from "./views/ChecksView";
 import { CrawlerView } from "./views/CrawlerView";
+import { DomXssView } from "./views/DomXssView";
 import { FuzzerView } from "./views/FuzzerView";
+import { RaceView } from "./views/RaceView";
 import { HistoryView } from "./views/HistoryView";
 import { IdentifiersView } from "./views/IdentifiersView";
 import { ImportView } from "./views/ImportView";
@@ -53,7 +55,9 @@ type Tab =
   | "scan"
   | "checks"
   | "fuzzer"
+  | "race"
   | "sequencer"
+  | "domxss"
   | "authz"
   | "llm"
   | "oob"
@@ -77,7 +81,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "scan", label: "Scan" },
   { id: "checks", label: "Custom Checks" },
   { id: "fuzzer", label: "Fuzzer" },
+  { id: "race", label: "Race" },
   { id: "sequencer", label: "Sequencer" },
+  { id: "domxss", label: "DOM XSS" },
   { id: "authz", label: "Authorization" },
   { id: "llm", label: "LLM" },
   { id: "oob", label: "Collaborator" },
@@ -266,7 +272,11 @@ export default function App() {
             onOpenExchange={showExchange}
           />
         )}
+        {tab === "race" && (
+          <RaceView hasProject={project !== null} requestId={testing} license={license} />
+        )}
         {tab === "sequencer" && <SequencerView hasProject={project !== null} />}
+        {tab === "domxss" && <DomXssView license={license} />}
         {tab === "llm" && <LlmView license={license} />}
         {tab === "oob" && <OobView license={license} />}
         {tab === "matchreplace" && <MatchReplaceView hasProject={project !== null} />}

@@ -1644,8 +1644,10 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "futures",
  "hexora-active",
  "hexora-authz",
+ "hexora-browser",
  "hexora-crawl",
  "hexora-engine",
  "hexora-fuzz",

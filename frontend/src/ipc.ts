@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 21;
+export const EXPECTED_RPC_CONTRACT_VERSION = 22;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -599,6 +599,55 @@ export const sequencerRun = (args: {
   query: string | null;
   limit: number | null;
 }): Promise<SequencerReport> => invoke<SequencerReport>("sequencer_run", args);
+
+// --- DOM-XSS (M18) ------------------------------------------------------
+
+/** One source→sink flow found in the page. */
+export interface DomXssHit {
+  source: string;
+  sink: string;
+  sample: string;
+}
+
+/** What a DOM-XSS test found. */
+export interface DomXssReport {
+  target: string;
+  vulnerable: boolean;
+  sources_tested: string[];
+  hits: DomXssHit[];
+}
+
+/** Drives a real browser to test a page for DOM XSS. */
+export const domxssRun = (args: {
+  url: string;
+  headed: boolean;
+  timeoutSecs: number | null;
+}): Promise<DomXssReport> => invoke<DomXssReport>("domxss_run", args);
+
+// --- Race conditions (M7) -----------------------------------------------
+
+/** One row of the race outcome histogram. */
+export interface RaceGroup {
+  status: number;
+  bytes: number;
+  count: number;
+}
+
+/** What racing a request produced. */
+export interface RaceReport {
+  sent: number;
+  answered: number;
+  failed: number;
+  successes_2xx: number;
+  groups: RaceGroup[];
+}
+
+/** Replays a captured request N times concurrently to find a race. Sends traffic. */
+export const raceRun = (args: {
+  id: string;
+  count: number;
+  insecure: boolean;
+}): Promise<RaceReport> => invoke<RaceReport>("race_run", args);
 
 /** A captured WebSocket session, for the sessions list. */
 export interface WsSessionView {
