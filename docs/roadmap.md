@@ -981,6 +981,22 @@ host auto-scoped. Verified live against a vulnerable local endpoint (all 4 probe
 with canaries) and by mock tests (vulnerable → confirmed, defended → refuted, out-of-scope →
 refused). LLM.b wires it into passive/active auto-discovery next. -->
 
+**M18.95 — Out-of-band testing (Collaborator)** · IN PROGRESS (OOB.a DONE) — the biggest gap
+versus Burp: confirming blind vulnerabilities by making a target reach a server you control.
+
+| Step | What it gives us | Depends on |
+| ---- | ---------------- | ---------- |
+| **OOB.a** — the HTTP collaborator | A self-hosted server that catches HTTP callbacks, records each with the unique token that provoked it, and answers polls; a client that mints payloads (`http://<token>.domain/` or `http://host/<token>`) and polls. A callback proves the target processed the payload out of band — the confirmation a blind SSRF, XXE or injection cannot give from its response. `hexora oob serve|mint|poll`. | — |
+| **OOB.b** — DNS interactions | A DNS server so a target that only *resolves* the payload (never connects) is still caught — the blind cases HTTP alone misses. | OOB.a |
+| **OOB.c** — wired into the tools | Mint a payload from the intruder/repeater/scanner, and correlate the callback automatically into a finding — the OOB analogue of the reflected-input bridge. | OOB.a, active |
+
+<!-- OOB.a DONE. New hexora-oob crate: a self-hostable HTTP collaborator (server catches
+callbacks + a /_hexora/poll endpoint; client mints path- or subdomain-token payloads and
+polls; interactions drain per poll so each returns what is new). Nothing ships a public
+domain — the tester runs `hexora oob serve` on a host they control. Verified end to end
+locally: served, minted a payload, a simulated target callback was caught and correlated back
+to its token via poll. DNS callbacks (OOB.b) and tool integration (OOB.c) are the remainder. -->
+
 **M19 — Extension runtime, sandboxing (WASM) and store** · PLANNED
 
 ---

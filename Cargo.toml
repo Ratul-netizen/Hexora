@@ -17,6 +17,7 @@ members = [
     "core/crawl",
     "core/browser",
     "core/llm",
+    "core/oob",
     "core/report",
     "apps/cli",
     "apps/desktop/src-tauri",
@@ -48,6 +49,7 @@ hexora-authz = { path = "core/authz" }
 hexora-crawl = { path = "core/crawl" }
 hexora-browser = { path = "core/browser" }
 hexora-llm = { path = "core/llm" }
+hexora-oob = { path = "core/oob" }
 hexora-report = { path = "core/report" }
 
 # Async runtime. Needed at M0 only for the engine trait signatures.

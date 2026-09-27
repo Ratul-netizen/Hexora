@@ -1603,6 +1603,7 @@ dependencies = [
  "hexora-fuzz",
  "hexora-http",
  "hexora-llm",
+ "hexora-oob",
  "hexora-proxy",
  "hexora-repeater",
  "hexora-report",
@@ -1720,6 +1721,19 @@ dependencies = [
  "async-trait",
  "hexora-engine",
  "hexora-types",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "hexora-oob"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hexora-types",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

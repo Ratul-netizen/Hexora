@@ -26,6 +26,7 @@ mod identifiers;
 mod identity;
 mod license;
 mod llm;
+mod oob;
 mod object;
 mod poc;
 mod programme;
@@ -672,6 +673,10 @@ enum Command {
         no_save: bool,
     },
 
+    /// Out-of-band collaborator: confirm blind vulnerabilities via callbacks you catch.
+    #[command(subcommand)]
+    Oob(OobCommand),
+
     /// Test an LLM-backed endpoint for prompt injection.
     ///
     /// Sends injection probes that instruct the model to emit a random token; if the token
@@ -821,6 +826,37 @@ enum LicenseCommand {
         /// Where to write the licence. Printed to stdout when omitted.
         #[arg(long, value_name = "PATH")]
         out: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum OobCommand {
+    /// Run the collaborator, catching HTTP callbacks.
+    Serve {
+        /// Address to listen on (e.g. 0.0.0.0:80 in production).
+        #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:8888")]
+        listen: String,
+    },
+    /// Mint a fresh payload URL and its correlation token.
+    Mint {
+        /// The collaborator's authority — host or host:port, or the base domain.
+        #[arg(long, value_name = "AUTHORITY")]
+        server: String,
+        /// Use a `<token>.domain` subdomain payload (needs a wildcard DNS record).
+        #[arg(long)]
+        subdomain: bool,
+        /// Mint an https:// payload URL.
+        #[arg(long)]
+        https: bool,
+    },
+    /// Poll the collaborator for callbacks recorded against a token.
+    Poll {
+        /// The collaborator's authority — host or host:port.
+        #[arg(long, value_name = "AUTHORITY")]
+        server: String,
+        /// The token from `oob mint`.
+        #[arg(long, value_name = "TOKEN")]
+        token: String,
     },
 }
 
@@ -1359,6 +1395,15 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 no_save: *no_save,
                 json: cli.json,
             })
+        }
+        Command::Oob(OobCommand::Serve { listen }) => oob::serve_cmd(listen),
+        Command::Oob(OobCommand::Mint {
+            server,
+            subdomain,
+            https,
+        }) => oob::mint_cmd(server, *subdomain, *https, cli.json),
+        Command::Oob(OobCommand::Poll { server, token }) => {
+            oob::poll_cmd(server, token, cli.json)
         }
         Command::Llm {
             url,

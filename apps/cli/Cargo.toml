@@ -24,6 +24,7 @@ hexora-scan.workspace = true
 hexora-active.workspace = true
 hexora-crawl.workspace = true
 hexora-llm.workspace = true
+hexora-oob.workspace = true
 hexora-fuzz.workspace = true
 hexora-report.workspace = true
 tokio.workspace = true
