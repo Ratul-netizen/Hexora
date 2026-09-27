@@ -9,7 +9,7 @@
 //! # Immutable, and structurally so
 //!
 //! There is no update method here, and there is no path that takes a
-//! [`SnapshotId`](hexora_types::ids::SnapshotId) and writes to it. A snapshot is
+//! [`SnapshotId`](nullhawk_types::ids::SnapshotId) and writes to it. A snapshot is
 //! created, read and deleted. That is what makes the summary columns on the row safe:
 //! they are computed from the contents at insert time, and nothing exists that could
 //! change one without the other.
@@ -23,8 +23,8 @@
 //! are the largest thing in a project by orders of magnitude, and a snapshot exists to
 //! be diffed, not restored.
 
-use hexora_types::ids::SnapshotId;
-use hexora_types::snapshot::{
+use nullhawk_types::ids::SnapshotId;
+use nullhawk_types::snapshot::{
     Claim, Contents, FindingRecord, FindingState, IdentityRecord, ObjectRecord, Snapshot,
 };
 use rusqlite::{params, OptionalExtension};
@@ -348,15 +348,15 @@ fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::finding::{
+    use nullhawk_types::finding::{
         Confidence, Evidence, Finding, FindingSource, FindingStatus, Location, MessagePart,
         Severity,
     };
-    use hexora_types::identity::{Identity, PrivilegeLevel};
-    use hexora_types::ids::{FindingId, RequestId, TargetId};
-    use hexora_types::object::{ObjectDeclaration, ObjectLocation};
-    use hexora_types::scope::{Scope, ScopeRule};
-    use hexora_types::snapshot::{compare, Change, WhyGone};
+    use nullhawk_types::identity::{Identity, PrivilegeLevel};
+    use nullhawk_types::ids::{FindingId, RequestId, TargetId};
+    use nullhawk_types::object::{ObjectDeclaration, ObjectLocation};
+    use nullhawk_types::scope::{Scope, ScopeRule};
+    use nullhawk_types::snapshot::{compare, Change, WhyGone};
 
     use super::*;
 
@@ -386,8 +386,8 @@ mod tests {
     }
 
     /// Wraps a finding the way a verification would. Tests only; see `findings.rs`.
-    fn verified(finding: Finding) -> hexora_types::verify::Verified {
-        hexora_types::verify::Verified::from_trusted_finding(finding)
+    fn verified(finding: Finding) -> nullhawk_types::verify::Verified {
+        nullhawk_types::verify::Verified::from_trusted_finding(finding)
     }
 
     fn finding(target: TargetId, title: &str, severity: Severity) -> Finding {

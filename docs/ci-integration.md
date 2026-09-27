@@ -1,10 +1,10 @@
 # CI integration
 
-Hexora's CLI and desktop app run the same engine, so anything you can conclude in the
+Nullhawk's CLI and desktop app run the same engine, so anything you can conclude in the
 window you can produce headless in a pipeline. The bridge is **SARIF** — the format
-GitHub code scanning and GitLab ingest natively — via `hexora report --format sarif`.
+GitHub code scanning and GitLab ingest natively — via `nullhawk report --format sarif`.
 
-## What makes Hexora's SARIF worth more than a scanner's
+## What makes Nullhawk's SARIF worth more than a scanner's
 
 Two properties fall out of the data model rather than being bolted on:
 
@@ -27,7 +27,7 @@ redaction policy) for the transcript.
 ## GitHub
 
 A composite action lives at [`ci/github-action`](../ci/github-action/action.yml). It
-renders a Hexora **project** — the directory a run produced — into a SARIF file. It does
+renders a Nullhawk **project** — the directory a run produced — into a SARIF file. It does
 not run the engagement: capture and testing are things a person does, and the project
 that produces is the input here (check it in, restore it from a cache, or download it as
 a build artifact from an earlier job).
@@ -42,7 +42,7 @@ permissions:
   security-events: write
 
 jobs:
-  hexora:
+  nullhawk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,12 +57,12 @@ jobs:
       - uses: ./ci/github-action
         with:
           project: ./engagement
-          output: hexora.sarif
+          output: nullhawk.sarif
           severity: low          # optional: drop info-level noise
 
       - uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: hexora.sarif
+          sarif_file: nullhawk.sarif
 ```
 
 Once uploaded, findings appear under **Security → Code scanning**, keyed so that
@@ -74,11 +74,11 @@ re-running shows which are new. Branch protection can then require the check, wh
 GitLab reads SARIF too, exposed as a SAST report artifact:
 
 ```yaml
-hexora:
+nullhawk:
   image: rust:latest
   script:
-    - cargo build --release -p hexora-cli
-    - ./target/release/hexora report ./engagement --format sarif --output gl-sast.sarif
+    - cargo build --release -p nullhawk-cli
+    - ./target/release/nullhawk report ./engagement --format sarif --output gl-sast.sarif
   artifacts:
     reports:
       sast: gl-sast.sarif
@@ -86,7 +86,7 @@ hexora:
 
 ## Any other system
 
-`hexora report <project> --format sarif` writes SARIF 2.1.0 to stdout (or to `--output`).
+`nullhawk report <project> --format sarif` writes SARIF 2.1.0 to stdout (or to `--output`).
 The exit code is `0` when the report renders; gating logic that wants to fail on new
 findings should diff the SARIF against a stored baseline, which is exactly what the
 GitHub upload does for you. A machine-readable summary is also available with

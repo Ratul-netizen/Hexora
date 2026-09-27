@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use hexora_types::error::{HexoraError, Result};
+use nullhawk_types::error::{NullhawkError, Result};
 
 use crate::Cdp;
 
@@ -45,10 +45,10 @@ pub struct LaunchOptions {
     /// Run without a visible window. On for automated crawling; off to watch it work.
     pub headless: bool,
     /// Route all the browser's traffic through this proxy (`host:port`), so it flows through
-    /// Hexora's scope guard and capture like any other proxied browsing. `None` lets the
+    /// Nullhawk's scope guard and capture like any other proxied browsing. `None` lets the
     /// browser talk to targets directly (no capture).
     pub proxy: Option<String>,
-    /// Do not verify TLS certificates. Set when pointing the browser at Hexora's intercepting
+    /// Do not verify TLS certificates. Set when pointing the browser at Nullhawk's intercepting
     /// proxy without installing its CA into the browser's trust store.
     pub ignore_certificate_errors: bool,
 }
@@ -65,7 +65,7 @@ impl Default for LaunchOptions {
 
 impl LaunchOptions {
     /// Options that route the browser through `proxy` (`host:port`) and trust it, the shape a
-    /// capture session uses: everything the browser fetches goes through Hexora.
+    /// capture session uses: everything the browser fetches goes through Nullhawk.
     ///
     /// Pair with a proxy in **in-scope-only** recording mode: a driven browser generates a lot
     /// of out-of-scope noise — its own telemetry and third-party resources — and scope
@@ -82,10 +82,10 @@ impl LaunchOptions {
 
 /// Finds an installed Chrome, Edge or Chromium, or `None` if none is present.
 ///
-/// `HEXORA_BROWSER` overrides the search with an explicit executable path, so a tester can
+/// `NULLHAWK_BROWSER` overrides the search with an explicit executable path, so a tester can
 /// point at a build the search does not know.
 pub fn find_browser() -> Option<(PathBuf, BrowserKind)> {
-    if let Some(explicit) = std::env::var_os("HEXORA_BROWSER") {
+    if let Some(explicit) = std::env::var_os("NULLHAWK_BROWSER") {
         let path = PathBuf::from(explicit);
         if path.exists() {
             let kind = classify(&path);
@@ -185,9 +185,9 @@ impl Browser {
     /// Launches with explicit options.
     pub fn launch_with(options: &LaunchOptions) -> Result<Browser> {
         let (exe, kind) = find_browser().ok_or_else(|| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "browser",
-                "no Chrome, Edge or Chromium found; install one or set HEXORA_BROWSER to its path",
+                "no Chrome, Edge or Chromium found; install one or set NULLHAWK_BROWSER to its path",
             )
         })?;
         Self::launch_exe(&exe, kind, options)
@@ -196,7 +196,7 @@ impl Browser {
     /// Launches a specific executable.
     pub fn launch_exe(exe: &Path, kind: BrowserKind, options: &LaunchOptions) -> Result<Browser> {
         let profile = tempfile::TempDir::new()
-            .map_err(|e| HexoraError::Internal(format!("creating a browser profile dir: {e}")))?;
+            .map_err(|e| NullhawkError::Internal(format!("creating a browser profile dir: {e}")))?;
 
         let mut command = Command::new(exe);
         command
@@ -239,7 +239,10 @@ impl Browser {
         }
 
         let mut child = command.spawn().map_err(|e| {
-            HexoraError::invalid_input("browser", format!("could not start {}: {e}", exe.display()))
+            NullhawkError::invalid_input(
+                "browser",
+                format!("could not start {}: {e}", exe.display()),
+            )
         })?;
 
         let port = match read_devtools_port(profile.path(), Duration::from_secs(15)) {
@@ -285,7 +288,7 @@ impl Browser {
 impl Drop for Browser {
     fn drop(&mut self) {
         // Kill the browser process; its child processes exit with it. The profile dir is
-        // removed by TempDir's own Drop. Both are best-effort — a tester quitting Hexora
+        // removed by TempDir's own Drop. Both are best-effort — a tester quitting Nullhawk
         // should never see an error because a headless helper was slow to die.
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -313,7 +316,7 @@ fn read_devtools_port(profile: &Path, timeout: Duration) -> Result<u16> {
             }
         }
         if Instant::now() >= deadline {
-            return Err(HexoraError::Internal(
+            return Err(NullhawkError::Internal(
                 "the browser did not report a DevTools port in time".into(),
             ));
         }
@@ -368,14 +371,14 @@ mod tests {
         let browser = Browser::launch().expect("launch a browser");
         let mut cdp = browser.connect().await.expect("connect");
         cdp.navigate(
-            "data:text/html,<title>Hexora Nav</title><h1>hi there</h1>",
+            "data:text/html,<title>Nullhawk Nav</title><h1>hi there</h1>",
             Duration::from_secs(10),
         )
         .await
         .expect("navigate");
 
         let title = cdp.eval("document.title").await.expect("title");
-        assert_eq!(title.as_str(), Some("Hexora Nav"));
+        assert_eq!(title.as_str(), Some("Nullhawk Nav"));
         let text = cdp.eval("document.body.innerText").await.expect("text");
         assert!(text.as_str().unwrap_or("").contains("hi there"), "{text:?}");
     }

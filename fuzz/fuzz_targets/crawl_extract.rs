@@ -13,5 +13,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    hexora_crawl::fuzz_extract(data);
+    nullhawk_crawl::fuzz_extract(data);
 });

@@ -62,7 +62,7 @@ jobs:
           pnpm build
         working-directory: frontend
 
-      # The licence public key is embedded at build time. Set HEXORA_LICENSE_PUBKEY as a repo
+      # The licence public key is embedded at build time. Set NULLHAWK_LICENSE_PUBKEY as a repo
       # secret (see docs/release.md); without it the build runs at the free tier.
       # macOS ships universal (Intel + Apple Silicon) binaries, so one download works on every
       # Mac. The two target toolchains are added here, before both the CLI build and the desktop
@@ -70,14 +70,14 @@ jobs:
       - name: Build CLI
         shell: bash
         env:
-          HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
+          NULLHAWK_LICENSE_PUBKEY: ${{ secrets.NULLHAWK_LICENSE_PUBKEY }}
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             rustup target add x86_64-apple-darwin aarch64-apple-darwin
-            cargo build -p hexora-cli --release --target x86_64-apple-darwin
-            cargo build -p hexora-cli --release --target aarch64-apple-darwin
+            cargo build -p nullhawk-cli --release --target x86_64-apple-darwin
+            cargo build -p nullhawk-cli --release --target aarch64-apple-darwin
           else
-            cargo build -p hexora-cli --release
+            cargo build -p nullhawk-cli --release
           fi
 
       - name: Stage CLI binary
@@ -85,13 +85,13 @@ jobs:
         run: |
           mkdir -p cli-dist
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/release/hexora.exe "cli-dist/hexora-${{ github.ref_name }}-windows-x86_64.exe"
+            cp target/release/nullhawk.exe "cli-dist/nullhawk-${{ github.ref_name }}-windows-x86_64.exe"
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            lipo -create -output "cli-dist/hexora-${{ github.ref_name }}-macos-universal" \
-              target/x86_64-apple-darwin/release/hexora \
-              target/aarch64-apple-darwin/release/hexora
+            lipo -create -output "cli-dist/nullhawk-${{ github.ref_name }}-macos-universal" \
+              target/x86_64-apple-darwin/release/nullhawk \
+              target/aarch64-apple-darwin/release/nullhawk
           else
-            cp target/release/hexora "cli-dist/hexora-${{ github.ref_name }}-linux-x86_64"
+            cp target/release/nullhawk "cli-dist/nullhawk-${{ github.ref_name }}-linux-x86_64"
           fi
 
       - name: Build & bundle desktop, publish draft release
@@ -99,7 +99,7 @@ jobs:
         env:
           # Required by tauri-action to create and upload to the draft release.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEXORA_LICENSE_PUBKEY: ${{ secrets.HEXORA_LICENSE_PUBKEY }}
+          NULLHAWK_LICENSE_PUBKEY: ${{ secrets.NULLHAWK_LICENSE_PUBKEY }}
           # macOS code signing + notarization, and Tauri updater signing, are intentionally NOT
           # wired here: an *empty* APPLE_CERTIFICATE still makes tauri-action attempt a keychain
           # `security import`, which fails the macOS bundle. Leaving these unset means macOS
@@ -115,7 +115,7 @@ jobs:
           # Other OSes take no extra target argument.
           args: ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
           tagName: ${{ github.ref_name }}
-          releaseName: "Hexora ${{ github.ref_name }}"
+          releaseName: "Nullhawk ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
 

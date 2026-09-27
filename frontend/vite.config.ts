@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The dev server is bound to localhost only. Hexora holds a client's traffic and
+// The dev server is bound to localhost only. Nullhawk holds a client's traffic and
 // credentials, so nothing about it should be reachable from the network.
 export default defineConfig({
   plugins: [react()],

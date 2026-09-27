@@ -6,7 +6,7 @@
 --     Reports resulting in testing without headers can result in the forfeiture
 --     of the eligible bounty.
 --
--- Until now the only way to attach a header to a Hexora request was to put it on an
+-- Until now the only way to attach a header to a Nullhawk request was to put it on an
 -- identity, which covers authenticated replays and nothing else — not the scanner's
 -- probes, not the intruder, not an anonymous control. A requirement that holds for
 -- *every* request needs to live where every request can see it, which is the project.

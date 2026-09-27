@@ -1,6 +1,6 @@
-//! # hexora-import
+//! # nullhawk-import
 //!
-//! Reads an API description and turns it into the requests it implies — Hexora's answer to
+//! Reads an API description and turns it into the requests it implies — Nullhawk's answer to
 //! Burp's and Postman's "import an OpenAPI file", and the frontier a crawler cannot find because
 //! an API has no HTML links to follow.
 //!

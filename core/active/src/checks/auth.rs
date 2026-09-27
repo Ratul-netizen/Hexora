@@ -32,19 +32,21 @@
 //! # The probe credential never reaches a report
 //!
 //! A credential with one character changed is, for disclosure purposes, the
-//! credential. [`Tampered`](hexora_types::credential::Tampered) has no `Display`, a
+//! credential. [`Tampered`](nullhawk_types::credential::Tampered) has no `Display`, a
 //! redacting `Debug`, and an evidence note that says *what was done* rather than what
 //! was sent. See invariant 17.
 
 use async_trait::async_trait;
-use hexora_types::credential::Credential;
-use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
-use hexora_types::structure::{Comparable, Diff, Policy};
-use hexora_types::verify::{
+use nullhawk_types::credential::Credential;
+use nullhawk_types::finding::{
+    Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
+};
+use nullhawk_types::structure::{Comparable, Diff, Policy};
+use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
@@ -242,7 +244,7 @@ impl ActiveCheck for AuthEnforcement {
             reproduction: format!(
                 "Send {} {} three times: as captured, with the credential header \
                  removed, and with the credential's last character changed. Compare the \
-                 three responses. `hexora poc <project> <finding>` compiles the \
+                 three responses. `nullhawk poc <project> <finding>` compiles the \
                  requests, with credentials as placeholders.",
                 subject.exchange.method, subject.exchange.url,
             ),
@@ -269,7 +271,7 @@ impl ActiveCheck for AuthEnforcement {
 ///
 /// Deliberately narrow. It looks only at identifiers somebody declared, never at
 /// anything that merely *looks* like one — the same rule the constructed-attempt engine
-/// follows, and for the same reason: Hexora does not decide what belongs to whom.
+/// follows, and for the same reason: Nullhawk does not decide what belongs to whom.
 fn owned_id_in(subject: &Subject, answer: &Answer) -> Option<String> {
     let body = std::str::from_utf8(&answer.body).ok()?;
     subject
@@ -339,7 +341,7 @@ fn open(
                      what a missing session check looks like, and it is also exactly \
                      what a public endpoint looks like — nothing in the response \
                      belongs to a declared identity, so there is no way to tell them \
-                     apart from here. Declare what an identity owns with `hexora \
+                     apart from here. Declare what an identity owns with `nullhawk \
                      identity add --owns` and run again",
                     baseline.status, none.status,
                 ),
@@ -385,7 +387,7 @@ fn open(
                      the caller — which is what an enforced check looks like. Nothing in \
                      the unauthenticated response belongs to a declared identity. If you \
                      suspect it still leaks part of one, declare what an identity owns \
-                     with `hexora identity add --owns` and run again",
+                     with `nullhawk identity add --owns` and run again",
                     none.status,
                 ),
             },
@@ -514,7 +516,7 @@ enum Probe {
 
 /// One request and what came back.
 struct Answer {
-    request: hexora_types::ids::RequestId,
+    request: nullhawk_types::ids::RequestId,
     status: u16,
     body: bytes::Bytes,
     sent: String,
@@ -537,7 +539,7 @@ async fn send(subject: &Subject, lab: &dyn Lab, probe: Probe) -> Attempt {
         Probe::AsCaptured => "the request exactly as it was captured".to_string(),
         Probe::WithoutCredential => {
             let mut removed = Vec::new();
-            for name in hexora_types::credential::CREDENTIAL_HEADERS {
+            for name in nullhawk_types::credential::CREDENTIAL_HEADERS {
                 if draft.request.headers.remove(name) > 0 {
                     removed.push(*name);
                 }
@@ -596,9 +598,9 @@ async fn send(subject: &Subject, lab: &dyn Lab, probe: Probe) -> Attempt {
 /// would send, which is the same technique `Subject::whose` uses and for the same
 /// reason: an exact answer, and no credential written down anywhere.
 fn collides(
-    headers: &hexora_types::http::Headers,
-    tampered: &hexora_types::credential::Tampered,
-    identities: &[hexora_types::identity::Identity],
+    headers: &nullhawk_types::http::Headers,
+    tampered: &nullhawk_types::credential::Tampered,
+    identities: &[nullhawk_types::identity::Identity],
 ) -> bool {
     let mut probe = headers.clone();
     probe.set(tampered.header(), tampered.expose_value());
@@ -617,7 +619,7 @@ fn collides(
 
 fn skipped() -> Answer {
     Answer {
-        request: hexora_types::ids::RequestId::new(),
+        request: nullhawk_types::ids::RequestId::new(),
         status: 0,
         body: bytes::Bytes::new(),
         sent: String::new(),
@@ -686,7 +688,7 @@ fn path_of(url: &str) -> &str {
 /// * the method is one RFC 9110 calls safe. A scheduler working through an
 ///   engagement's traffic will meet `POST /transfers`, and sending it again three
 ///   times is not a test anybody consented to.
-pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
+pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
     if !exchange.authenticated {
         return Vec::new();
     }
@@ -724,10 +726,10 @@ pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
 mod tests {
     use super::*;
 
-    fn exchange(method: &str, status: u16, authenticated: bool) -> hexora_scan::Exchange {
-        hexora_scan::Exchange {
-            id: hexora_types::ids::RequestId::new(),
-            target: hexora_types::ids::TargetId::new(),
+    fn exchange(method: &str, status: u16, authenticated: bool) -> nullhawk_scan::Exchange {
+        nullhawk_scan::Exchange {
+            id: nullhawk_types::ids::RequestId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             host: "api.example.com".into(),
             port: 443,
             secure: true,
@@ -735,8 +737,8 @@ mod tests {
             url: "https://api.example.com/account".into(),
             path: "/account".into(),
             status,
-            request_headers: hexora_types::http::Headers::new(),
-            response_headers: hexora_types::http::Headers::new(),
+            request_headers: nullhawk_types::http::Headers::new(),
+            response_headers: nullhawk_types::http::Headers::new(),
             response_bytes: 0,
             authenticated,
             tls: None,
@@ -750,7 +752,7 @@ mod tests {
         let raised = |detector: &str| Hypothesis {
             detector: detector.into(),
             claim: String::new(),
-            source_request: hexora_types::ids::RequestId::new(),
+            source_request: nullhawk_types::ids::RequestId::new(),
             location: None,
             provisional_severity: Severity::Info,
         };
@@ -810,23 +812,23 @@ mod tests {
     }
 
     /// An identity that has declared what it owns.
-    fn owner(id: &str) -> hexora_types::identity::Identity {
-        hexora_types::identity::Identity {
+    fn owner(id: &str) -> nullhawk_types::identity::Identity {
+        nullhawk_types::identity::Identity {
             owned_object_ids: vec![id.to_string()],
-            ..hexora_types::identity::Identity::anonymous()
+            ..nullhawk_types::identity::Identity::anonymous()
         }
     }
 
-    fn subject_owning(ids: Vec<hexora_types::identity::Identity>) -> Subject {
+    fn subject_owning(ids: Vec<nullhawk_types::identity::Identity>) -> Subject {
         // Only `identities` is read by `owned_id_in`; the rest is scaffolding.
         Subject {
             hypothesis: suspect(&exchange("GET", 200, true)).remove(0),
             exchange: exchange("GET", 200, true),
-            draft: hexora_repeater::Draft::new(hexora_types::http::HttpRequest::get(
-                hexora_types::http::HttpService::new("api.example.com", 443, true),
+            draft: nullhawk_repeater::Draft::new(nullhawk_types::http::HttpRequest::get(
+                nullhawk_types::http::HttpService::new("api.example.com", 443, true),
                 "/me",
             )),
-            target: hexora_types::ids::TargetId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             identities: std::sync::Arc::new(ids),
         }
     }
@@ -1082,7 +1084,7 @@ mod tests {
 
     fn answer(status: u16, body: &str) -> Answer {
         Answer {
-            request: hexora_types::ids::RequestId::new(),
+            request: nullhawk_types::ids::RequestId::new(),
             status,
             body: bytes::Bytes::from(body.to_string()),
             sent: String::new(),

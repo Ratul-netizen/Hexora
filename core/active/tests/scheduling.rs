@@ -9,17 +9,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use hexora_active::{run, ActiveCheck, Budget, Cancel, Plan, Subject};
-use hexora_repeater::{Draft, Sent};
-use hexora_storage::{CapturedExchange, Project};
-use hexora_types::finding::{FindingSource, Hypothesis, Severity};
-use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-use hexora_types::identity::Identity;
-use hexora_types::ids::RequestId;
-use hexora_types::programme::{Exclusion, Programme};
-use hexora_types::verify::{DetectorId, DetectorInfo, DetectorMode, Verification, Writeup};
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_active::{run, ActiveCheck, Budget, Cancel, Plan, Subject};
+use nullhawk_repeater::{Draft, Sent};
+use nullhawk_storage::{CapturedExchange, Project};
+use nullhawk_types::finding::{FindingSource, Hypothesis, Severity};
+use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use nullhawk_types::identity::Identity;
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::programme::{Exclusion, Programme};
+use nullhawk_types::verify::{DetectorId, DetectorInfo, DetectorMode, Verification, Writeup};
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 // ---------------------------------------------------------------------------
 // A lab that records instead of sending
@@ -125,7 +125,7 @@ impl Lab for Recorder {
             id,
             parent: draft.parent,
             identity: None,
-            exchange: hexora_engine::transport::Exchange {
+            exchange: nullhawk_engine::transport::Exchange {
                 request: draft.request.clone(),
                 response: HttpResponse {
                     status: 200,
@@ -152,7 +152,7 @@ impl Lab for Recorder {
                 duration: Duration::from_millis(1),
                 tls: None,
             },
-            decision: hexora_engine::guard::ScopeDecision::Allowed,
+            decision: nullhawk_engine::guard::ScopeDecision::Allowed,
         })
     }
 
@@ -187,7 +187,7 @@ impl Lab for Recorder {
 ///
 /// `Project::in_memory` holds no project row — settings live on it — so the row is
 /// created here first. Storage refuses to write a setting into a project that does not
-/// exist, which is what stops `hexora header add` reporting a header it never stored.
+/// exist, which is what stops `nullhawk header add` reporting a header it never stored.
 fn with_programme(project: &Project, programme: &Programme) {
     project
         .metadata()
@@ -343,12 +343,12 @@ async fn preparing_a_plan_sends_nothing_at_all() {
 }
 
 /// An identity authenticating with a cookie jar, naming which cookie is the session.
-fn cookie_identity(label: &str, jar: &str, session: &[&str]) -> hexora_types::identity::Identity {
-    hexora_types::identity::Identity {
-        id: hexora_types::ids::IdentityId::new(),
+fn cookie_identity(label: &str, jar: &str, session: &[&str]) -> nullhawk_types::identity::Identity {
+    nullhawk_types::identity::Identity {
+        id: nullhawk_types::ids::IdentityId::new(),
         label: label.into(),
-        privilege: hexora_types::identity::PrivilegeLevel::User,
-        credential: hexora_types::identity::Credential::Cookie {
+        privilege: nullhawk_types::identity::PrivilegeLevel::User,
+        credential: nullhawk_types::identity::Credential::Cookie {
             value: jar.to_string().into(),
         },
         extra_headers: Vec::new(),
@@ -358,7 +358,7 @@ fn cookie_identity(label: &str, jar: &str, session: &[&str]) -> hexora_types::id
 }
 
 /// A subject whose captured request carried `jar`.
-fn subject_sent_with(jar: &str, identities: Vec<hexora_types::identity::Identity>) -> Subject {
+fn subject_sent_with(jar: &str, identities: Vec<nullhawk_types::identity::Identity>) -> Subject {
     let project = Arc::new(Project::in_memory().unwrap());
     let source = capture(&project, "api.example.com");
     let mut request = HttpRequest::get(HttpService::new("api.example.com", 443, true), "/me");
@@ -366,11 +366,11 @@ fn subject_sent_with(jar: &str, identities: Vec<hexora_types::identity::Identity
 
     Subject {
         hypothesis: suspicion(source, "api.example.com"),
-        exchange: hexora_scan::passive::exchange_at(&project, source)
+        exchange: nullhawk_scan::passive::exchange_at(&project, source)
             .unwrap()
             .unwrap(),
-        draft: hexora_repeater::Draft::new(request),
-        target: hexora_types::ids::TargetId::new(),
+        draft: nullhawk_repeater::Draft::new(request),
+        target: nullhawk_types::ids::TargetId::new(),
         identities: Arc::new(identities),
     }
 }
@@ -508,12 +508,12 @@ async fn a_rotating_token_is_still_attributed_to_the_person_it_names() {
 
     let subject = Subject {
         hypothesis: suspicion(source, "api.example.com"),
-        exchange: hexora_scan::passive::exchange_at(&project, source)
+        exchange: nullhawk_scan::passive::exchange_at(&project, source)
             .unwrap()
             .unwrap(),
-        draft: hexora_repeater::Draft::new(request),
-        target: hexora_types::ids::TargetId::new(),
-        identities: Arc::new(vec![hexora_types::identity::Identity::bearer(
+        draft: nullhawk_repeater::Draft::new(request),
+        target: nullhawk_types::ids::TargetId::new(),
+        identities: Arc::new(vec![nullhawk_types::identity::Identity::bearer(
             "Me", &held_now,
         )]),
     };
@@ -539,12 +539,12 @@ async fn a_token_naming_somebody_else_is_not_attributed() {
 
     let subject = Subject {
         hypothesis: suspicion(source, "api.example.com"),
-        exchange: hexora_scan::passive::exchange_at(&project, source)
+        exchange: nullhawk_scan::passive::exchange_at(&project, source)
             .unwrap()
             .unwrap(),
-        draft: hexora_repeater::Draft::new(request),
-        target: hexora_types::ids::TargetId::new(),
-        identities: Arc::new(vec![hexora_types::identity::Identity::bearer(
+        draft: nullhawk_repeater::Draft::new(request),
+        target: nullhawk_types::ids::TargetId::new(),
+        identities: Arc::new(vec![nullhawk_types::identity::Identity::bearer(
             "Me",
             jwt_for("user-1000", 4_000_000_000),
         )]),
@@ -571,7 +571,9 @@ async fn an_expired_credential_queues_nothing_at_all() {
     let expired = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.c2lnbmF0dXJl";
     project
         .identities()
-        .put(&hexora_types::identity::Identity::bearer("Stale", expired))
+        .put(&nullhawk_types::identity::Identity::bearer(
+            "Stale", expired,
+        ))
         .unwrap();
 
     let plan = Plan::prepare(
@@ -604,12 +606,14 @@ async fn a_live_credential_alongside_an_expired_one_still_runs() {
     let expired = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.c2lnbmF0dXJl";
     project
         .identities()
-        .put(&hexora_types::identity::Identity::bearer("Stale", expired))
+        .put(&nullhawk_types::identity::Identity::bearer(
+            "Stale", expired,
+        ))
         .unwrap();
     // An opaque token says nothing about itself, so it is not assumed dead.
     project
         .identities()
-        .put(&hexora_types::identity::Identity::bearer(
+        .put(&nullhawk_types::identity::Identity::bearer(
             "Live",
             "an-opaque-session-value",
         ))
@@ -628,7 +632,7 @@ async fn a_live_credential_alongside_an_expired_one_still_runs() {
 }
 
 #[tokio::test]
-async fn hexora_never_probes_a_header_it_attached_itself() {
+async fn nullhawk_never_probes_a_header_it_attached_itself() {
     // Found against a real bug bounty programme. The proxy attaches
     // `X-HackerOne-Research: <username>` to in-scope browser traffic; that traffic is
     // recorded with the header on it; and the reflection check read it back as
@@ -652,19 +656,19 @@ async fn hexora_never_probes_a_header_it_attached_itself() {
     project
         .settings()
         .set_scope(
-            &hexora_types::scope::Scope::new()
-                .include(hexora_types::scope::ScopeRule::host("api.example.com")),
+            &nullhawk_types::scope::Scope::new()
+                .include(nullhawk_types::scope::ScopeRule::host("api.example.com")),
         )
         .unwrap();
     project
         .settings()
-        .set_attached_headers(&[hexora_types::http::Header::new(
+        .set_attached_headers(&[nullhawk_types::http::Header::new(
             "X-HackerOne-Research",
             "wahid_ratul",
         )])
         .unwrap();
 
-    // A captured request carrying both a real input and Hexora's own header.
+    // A captured request carrying both a real input and Nullhawk's own header.
     let service = HttpService::new("api.example.com", 443, true);
     let mut request = HttpRequest::get(service, "/search?q=hello");
     request.headers.set("X-HackerOne-Research", "wahid_ratul");
@@ -677,7 +681,7 @@ async fn hexora_never_probes_a_header_it_attached_itself() {
             response: HttpResponse {
                 status: 200,
                 reason: Some("OK".into()),
-                version: hexora_types::http::HttpVersion::Http11,
+                version: nullhawk_types::http::HttpVersion::Http11,
                 headers: Headers::new(),
                 body: bytes::Bytes::from_static(b"hello"),
                 truncated: false,
@@ -694,7 +698,7 @@ async fn hexora_never_probes_a_header_it_attached_itself() {
         .unwrap();
 
     let standing =
-        hexora_active::standing(&project, &hexora_scan::passive::Selection::default()).unwrap();
+        nullhawk_active::standing(&project, &nullhawk_scan::passive::Selection::default()).unwrap();
     let names: Vec<String> = standing
         .hypotheses
         .iter()
@@ -703,7 +707,7 @@ async fn hexora_never_probes_a_header_it_attached_itself() {
 
     assert!(
         !names.contains(&"x-hackerone-research".to_string()),
-        "Hexora planned to probe its own header: {names:?}"
+        "Nullhawk planned to probe its own header: {names:?}"
     );
     // And it did not simply stop raising work: the application's own input is still there.
     assert!(
@@ -1066,7 +1070,7 @@ async fn a_run_that_hit_its_ceiling_says_so_rather_than_reading_as_finished() {
     assert!(!outcome.complete());
     assert_eq!(
         outcome.stopped,
-        Some(hexora_active::StoppedBecause::CeilingReached)
+        Some(nullhawk_active::StoppedBecause::CeilingReached)
     );
     assert!(outcome.stopped.unwrap().as_str().contains("not performed"));
 }
@@ -1099,7 +1103,7 @@ async fn stopping_a_run_stops_the_next_request() {
     assert!(lab.count() <= 3, "sent {} after stopping", lab.count());
     assert_eq!(
         outcome.stopped,
-        Some(hexora_active::StoppedBecause::Cancelled)
+        Some(nullhawk_active::StoppedBecause::Cancelled)
     );
     assert!(!outcome.complete());
 }
@@ -1146,7 +1150,7 @@ async fn a_reflecting_application_is_confirmed_by_two_different_origins() {
     let project = Arc::new(Project::in_memory().unwrap());
     let source = capture(&project, "api.example.com");
     let lab = Recorder::new(project.clone());
-    let checks = hexora_active::active_checks();
+    let checks = nullhawk_active::active_checks();
 
     let plan = Plan::prepare(
         &project,
@@ -1168,7 +1172,7 @@ async fn a_reflecting_application_is_confirmed_by_two_different_origins() {
     );
     let finding = judged.finding.as_ref().expect("a finding").clone();
     let finding = finding.into_finding();
-    assert_eq!(finding.confidence, hexora_types::Confidence::Confirmed);
+    assert_eq!(finding.confidence, nullhawk_types::Confidence::Confirmed);
     assert_eq!(finding.severity, Severity::High);
     assert_eq!(
         finding.evidence.len(),
@@ -1182,7 +1186,7 @@ async fn the_probes_carry_an_origin_that_can_never_be_a_real_site() {
     let project = Arc::new(Project::in_memory().unwrap());
     let source = capture(&project, "api.example.com");
     let lab = Recorder::new(project.clone());
-    let checks = hexora_active::active_checks();
+    let checks = nullhawk_active::active_checks();
 
     let plan = Plan::prepare(
         &project,

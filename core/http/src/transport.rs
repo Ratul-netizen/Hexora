@@ -12,7 +12,7 @@
 //! downloads, server-sent events and long-poll endpoints.
 //!
 //! [`HttpTransport::send`] is the buffered convenience built on top of it, for
-//! callers — the repeater, `hexora send` — that genuinely want the whole body. It is
+//! callers — the repeater, `nullhawk send` — that genuinely want the whole body. It is
 //! also the only path that speaks **HTTP/2**: with [`TcpTransport::http2`] enabled and a
 //! target that offers `h2` at ALPN, `send` hands the connection to [`crate::h2`] and
 //! returns the same [`Exchange`]; a server that declines gets the ordinary HTTP/1.x
@@ -34,11 +34,11 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use bytes::BytesMut;
-use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
-use hexora_types::error::{HexoraError, NetworkError, Result, TimeoutPhase};
-use hexora_types::http::{HttpRequest, HttpResponse};
-use hexora_types::limits::Limits;
-use hexora_types::raw::RawRequest;
+use nullhawk_engine::transport::{Exchange, HttpTransport, SendOptions};
+use nullhawk_types::error::{NetworkError, NullhawkError, Result, TimeoutPhase};
+use nullhawk_types::http::{HttpRequest, HttpResponse};
+use nullhawk_types::limits::Limits;
+use nullhawk_types::raw::RawRequest;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -62,7 +62,7 @@ pub struct TcpTransport {
     ///
     /// Off by default, and only ever consulted by `send` — never by the streaming path
     /// the proxy uses, which stays HTTP/1.x until M5.1c. So a client (the repeater, the
-    /// scanner, `hexora send`) turns this on to reach h2-only targets, while the proxy's
+    /// scanner, `nullhawk send`) turns this on to reach h2-only targets, while the proxy's
     /// own transport is unaffected even though it is the same type.
     http2: bool,
     /// Reusable HTTP/2 connections, one per host, shared across clones of this transport.
@@ -215,9 +215,9 @@ impl TcpTransport {
     /// negotiated before committing to a protocol.
     async fn establish(
         &self,
-        service: &hexora_types::http::HttpService,
+        service: &nullhawk_types::http::HttpService,
         limits: &Limits,
-    ) -> Result<(Box<dyn Connection>, Option<hexora_types::tls::TlsInfo>)> {
+    ) -> Result<(Box<dyn Connection>, Option<nullhawk_types::tls::TlsInfo>)> {
         let tcp = connect(&service.host, service.port, limits).await?;
 
         // Boxed so the body stream can own the connection, whichever kind it is.
@@ -237,7 +237,7 @@ impl TcpTransport {
     /// HTTP/1.x exchange runs over that same socket rather than opening a second one.
     async fn exchange_over(
         mut connection: Box<dyn Connection>,
-        tls: Option<hexora_types::tls::TlsInfo>,
+        tls: Option<nullhawk_types::tls::TlsInfo>,
         outgoing: Outgoing,
         limits: &Limits,
         started: Instant,
@@ -291,7 +291,7 @@ fn structured_view(raw: &RawRequest) -> HttpRequest {
     // `HttpRequest::get` adds a Host from the service. These bytes may not have
     // carried one — a missing Host is a routing test — and a view that invented it
     // would show the tester a header they did not send.
-    request.headers = hexora_types::http::Headers::new();
+    request.headers = nullhawk_types::http::Headers::new();
 
     let head = raw.head();
     let text = String::from_utf8_lossy(&head);
@@ -303,7 +303,7 @@ fn structured_view(raw: &RawRequest) -> HttpRequest {
         if let Some((name, value)) = field.split_once(':') {
             request
                 .headers
-                .append(hexora_types::http::Header::new(name.trim(), value.trim()));
+                .append(nullhawk_types::http::Header::new(name.trim(), value.trim()));
         }
     }
     request
@@ -328,7 +328,7 @@ pub struct StreamingExchange {
     /// The parsed response head, including any quirks found in it.
     pub head: ResponseHead,
     /// What the TLS handshake produced, for `https` exchanges.
-    pub tls: Option<hexora_types::tls::TlsInfo>,
+    pub tls: Option<nullhawk_types::tls::TlsInfo>,
     /// The body, still arriving.
     pub body: BodyStream<'static>,
     started: Instant,
@@ -512,14 +512,14 @@ impl HttpTransport for TcpTransport {
     /// as a frame-level h2 request over HTTP/1.1.
     async fn send_raw_h2(
         &self,
-        request: hexora_types::raw::RawH2Request,
+        request: nullhawk_types::raw::RawH2Request,
         options: SendOptions,
     ) -> Result<Exchange> {
         let started = Instant::now();
         let limits = &options.limits;
 
         if !request.service.secure {
-            return Err(HexoraError::NotImplemented(
+            return Err(NullhawkError::NotImplemented(
                 "frame-level HTTP/2 over cleartext (h2c)",
             ));
         }
@@ -531,8 +531,8 @@ impl HttpTransport for TcpTransport {
             crate::tls::handshake(tcp, &request.service.host, &tls_config, limits).await?;
 
         if info.alpn.as_deref() != Some("h2") {
-            return Err(HexoraError::Protocol(
-                hexora_types::error::ProtocolError::Malformed {
+            return Err(NullhawkError::Protocol(
+                nullhawk_types::error::ProtocolError::Malformed {
                     protocol: "HTTP/2",
                     reason: "the server did not negotiate h2, so a frame-level h2 request \
                              cannot be sent"
@@ -551,7 +551,7 @@ async fn connect(host: &str, port: u16, limits: &Limits) -> Result<TcpStream> {
     let stream = tokio::time::timeout(limits.connect_timeout, TcpStream::connect(&peer))
         .await
         .map_err(|_| {
-            HexoraError::Network(NetworkError::Timeout {
+            NullhawkError::Network(NetworkError::Timeout {
                 phase: TimeoutPhase::Connect,
                 elapsed: limits.connect_timeout,
             })
@@ -564,9 +564,9 @@ async fn connect(host: &str, port: u16, limits: &Limits) -> Result<TcpStream> {
     Ok(stream)
 }
 
-fn classify_connect_error(e: std::io::Error, peer: &str) -> HexoraError {
+fn classify_connect_error(e: std::io::Error, peer: &str) -> NullhawkError {
     use std::io::ErrorKind;
-    HexoraError::Network(match e.kind() {
+    NullhawkError::Network(match e.kind() {
         ErrorKind::ConnectionRefused => NetworkError::ConnectionRefused {
             peer: peer.to_string(),
         },
@@ -592,12 +592,12 @@ async fn write_all<S: AsyncWrite + Unpin>(
     tokio::time::timeout(limits.total_timeout, stream.write_all(bytes))
         .await
         .map_err(|_| {
-            HexoraError::Network(NetworkError::Timeout {
+            NullhawkError::Network(NetworkError::Timeout {
                 phase: TimeoutPhase::WriteRequest,
                 elapsed: limits.total_timeout,
             })
         })?
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     Ok(())
 }
 
@@ -625,15 +625,15 @@ async fn read_head<S: AsyncRead + Unpin>(
         let read = tokio::time::timeout_at(deadline, read_more(stream, &mut buf))
             .await
             .map_err(|_| {
-                HexoraError::Network(NetworkError::Timeout {
+                NullhawkError::Network(NetworkError::Timeout {
                     phase: TimeoutPhase::ReadResponseHead,
                     elapsed: limits.read_head_timeout,
                 })
             })??;
 
         if read == 0 {
-            return Err(HexoraError::Protocol(
-                hexora_types::error::ProtocolError::Malformed {
+            return Err(NullhawkError::Protocol(
+                nullhawk_types::error::ProtocolError::Malformed {
                     protocol: "HTTP/1.1",
                     reason: format!(
                         "connection closed after {} bytes without completing the response head",
@@ -653,7 +653,7 @@ async fn read_more<S: AsyncRead + Unpin>(stream: &mut S, buf: &mut BytesMut) -> 
     let before = buf.len();
     buf.resize(before + READ_CHUNK, 0);
     let read = stream.read(&mut buf[before..]).await.map_err(|e| {
-        HexoraError::Network(match e.kind() {
+        NullhawkError::Network(match e.kind() {
             std::io::ErrorKind::ConnectionReset => NetworkError::ConnectionReset {
                 peer: "peer".to_string(),
             },
@@ -668,8 +668,8 @@ async fn read_more<S: AsyncRead + Unpin>(stream: &mut S, buf: &mut BytesMut) -> 
 mod tests {
     use std::time::Duration;
 
-    use hexora_engine::transport::Origin;
-    use hexora_types::http::{HttpService, HttpVersion};
+    use nullhawk_engine::transport::Origin;
+    use nullhawk_types::http::{HttpService, HttpVersion};
     use tokio::net::TcpListener;
 
     use super::*;
@@ -1218,7 +1218,7 @@ mod tests {
     /// Sends bytes exactly as given and returns what the server actually received.
     ///
     /// The assertion that matters in every test below is against *that* — not against
-    /// what Hexora believed it sent. A byte-preservation claim checked anywhere but
+    /// what Nullhawk believed it sent. A byte-preservation claim checked anywhere but
     /// the socket is a claim about the wrong thing.
     async fn send_raw_bytes(bytes: &[u8]) -> (Exchange, Vec<u8>) {
         let (port, server) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await;
@@ -1796,7 +1796,7 @@ mod tests {
 
         let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
         let service = HttpService::new("localhost", port, true);
-        let request = hexora_types::raw::RawH2Request::get(service, "/");
+        let request = nullhawk_types::raw::RawH2Request::get(service, "/");
 
         let exchange = transport
             .send_raw_h2(request, SendOptions::interactive(Origin::Repeater))
@@ -1817,7 +1817,7 @@ mod tests {
 
         let transport = TcpTransport::with_tls(crate::tls::TlsConfig::accept_any());
         let service = HttpService::new("localhost", port, true);
-        let mut request = hexora_types::raw::RawH2Request::get(service, "/");
+        let mut request = nullhawk_types::raw::RawH2Request::get(service, "/");
         request.headers.push((
             bytes::Bytes::from_static(b"X-Uppercase-Name"),
             bytes::Bytes::from_static(b"1"),

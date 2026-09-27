@@ -1,6 +1,6 @@
 //! Schema migrations.
 //!
-//! A Hexora project is a file a tester keeps for the length of an engagement and
+//! A Nullhawk project is a file a tester keeps for the length of an engagement and
 //! often much longer — it is the evidence behind a report. Opening last year's
 //! project in this year's build must work, so the rule is absolute: **migrations only
 //! ever move forward, and a released migration is never edited.**
@@ -124,7 +124,7 @@ pub fn migrate(conn: &mut Connection) -> Result<u32> {
     let to = target_version();
 
     if from > to {
-        // The project was written by a newer Hexora. Refusing is the only safe
+        // The project was written by a newer Nullhawk. Refusing is the only safe
         // option: applying old code to a newer schema silently corrupts evidence.
         return Err(StorageError::SchemaTooNew {
             found: from,
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn a_v1_database_upgrades_in_place_without_losing_data() {
         // The property that makes migrations safe: an existing project keeps its
-        // contents. A tester's evidence must survive a Hexora upgrade.
+        // contents. A tester's evidence must survive a Nullhawk upgrade.
         let mut conn = memory_db();
         conn.execute_batch(MIGRATIONS[0].sql).unwrap();
         conn.execute_batch("PRAGMA user_version = 1").unwrap();

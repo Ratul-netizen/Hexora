@@ -1,6 +1,6 @@
 //! Storage error types.
 
-use hexora_types::HexoraError;
+use nullhawk_types::NullhawkError;
 use thiserror::Error;
 
 /// The result type used by the storage layer.
@@ -8,7 +8,7 @@ pub type Result<T> = std::result::Result<T, StorageError>;
 
 /// A persistence failure.
 ///
-/// As with [`hexora_types::HexoraError`], the `#[error(...)]` message on each variant
+/// As with [`nullhawk_types::NullhawkError`], the `#[error(...)]` message on each variant
 /// is the documentation that reaches a user; field-level docs would only restate it.
 #[allow(missing_docs)]
 #[derive(Debug, Error)]
@@ -31,13 +31,13 @@ pub enum StorageError {
         source: rusqlite::Error,
     },
 
-    /// The project was written by a newer Hexora than this build understands.
+    /// The project was written by a newer Nullhawk than this build understands.
     ///
     /// Opening it anyway would risk silently corrupting engagement evidence, so this
     /// is a hard stop rather than a warning.
     #[error(
         "project schema revision {found} is newer than this build supports ({supported}); \
-         upgrade Hexora to open it"
+         upgrade Nullhawk to open it"
     )]
     SchemaTooNew { found: u32, supported: u32 },
 
@@ -88,8 +88,8 @@ impl From<r2d2::Error> for StorageError {
     }
 }
 
-impl From<StorageError> for HexoraError {
+impl From<StorageError> for NullhawkError {
     fn from(e: StorageError) -> Self {
-        HexoraError::Storage(e.to_string())
+        NullhawkError::Storage(e.to_string())
     }
 }

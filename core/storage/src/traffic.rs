@@ -24,10 +24,10 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use hexora_types::http::{HttpRequest, HttpResponse};
-use hexora_types::ids::{RequestId, ResponseId, TargetId, WsMessageId};
-use hexora_types::tls::TlsInfo;
-use hexora_types::ws::WsDirection;
+use nullhawk_types::http::{HttpRequest, HttpResponse};
+use nullhawk_types::ids::{RequestId, ResponseId, TargetId, WsMessageId};
+use nullhawk_types::tls::TlsInfo;
+use nullhawk_types::ws::WsDirection;
 use rusqlite::{params, OptionalExtension};
 
 use crate::blob::{BlobRef, BlobStore};
@@ -67,7 +67,7 @@ pub struct CapturedExchange {
     /// "this response reached User B" is only a claim if the row says which principal
     /// sent the request. `None` for proxy traffic, where the credential is whatever
     /// the browser already had.
-    pub identity: Option<hexora_types::ids::IdentityId>,
+    pub identity: Option<nullhawk_types::ids::IdentityId>,
     /// The request this one was derived from, for repeater branching.
     ///
     /// A variant that keeps its parent is what makes "which edit caused the change?"
@@ -115,13 +115,13 @@ pub struct StoredTraffic {
     /// In the index rather than only in the detail: a row that was sent byte for byte
     /// may not mean what its method and path suggest, and that is worth knowing while
     /// scrolling.
-    pub mode: hexora_types::raw::RequestMode,
+    pub mode: nullhawk_types::raw::RequestMode,
 }
 
 /// A stored request, read back in full.
 ///
 /// The header block stays raw rather than being parsed here. Storage is a byte store:
-/// it is `hexora-http` that knows how to read a header block, and re-parsing on the
+/// it is `nullhawk-http` that knows how to read a header block, and re-parsing on the
 /// way out is also what proves the bytes survived the round trip unaltered.
 #[derive(Debug, Clone)]
 pub struct StoredRequest {
@@ -132,7 +132,7 @@ pub struct StoredRequest {
     /// Which subsystem sent it.
     pub origin: String,
     /// The identity it was sent as, when one was chosen.
-    pub identity: Option<hexora_types::ids::IdentityId>,
+    pub identity: Option<nullhawk_types::ids::IdentityId>,
     /// The method, verbatim.
     pub method: String,
     /// The request target as sent.
@@ -148,7 +148,7 @@ pub struct StoredRequest {
     /// sent. It is a *view*: what gets re-sent is [`Self::raw`].
     pub body: Vec<u8>,
     /// How the request reached the socket.
-    pub mode: hexora_types::raw::RequestMode,
+    pub mode: nullhawk_types::raw::RequestMode,
     /// The exact bytes that were written, for a raw request.
     ///
     /// `None` for a structured one, and for a raw row whose blob has been pruned —
@@ -156,7 +156,7 @@ pub struct StoredRequest {
     /// reconstruction of a raw request would send something else.
     pub raw: Option<Vec<u8>>,
     /// Host, port and scheme it was sent to.
-    pub service: hexora_types::http::HttpService,
+    pub service: nullhawk_types::http::HttpService,
     /// When it was sent, RFC 3339.
     pub sent_at: String,
 }
@@ -217,10 +217,10 @@ impl CapturedExchange {
     ///
     /// Derived from whether raw bytes are present rather than stored twice: two
     /// fields that could disagree about the same fact is one field too many.
-    pub fn mode(&self) -> hexora_types::raw::RequestMode {
+    pub fn mode(&self) -> nullhawk_types::raw::RequestMode {
         match self.raw_request {
-            Some(_) => hexora_types::raw::RequestMode::Raw,
-            None => hexora_types::raw::RequestMode::Structured,
+            Some(_) => nullhawk_types::raw::RequestMode::Raw,
+            None => nullhawk_types::raw::RequestMode::Structured,
         }
     }
 }
@@ -422,7 +422,7 @@ impl TrafficStore {
                 mode,
             ) = row?;
             let secure = secure != 0;
-            let service = hexora_types::http::HttpService::new(&host, port as u16, secure);
+            let service = nullhawk_types::http::HttpService::new(&host, port as u16, secure);
             items.push(StoredTraffic {
                 id: id.parse()?,
                 target: target.parse()?,
@@ -435,7 +435,7 @@ impl TrafficStore {
                 quirks: serde_json::from_str(&quirks).unwrap_or_default(),
                 secure,
                 identity,
-                mode: hexora_types::raw::RequestMode::parse(&mode),
+                mode: nullhawk_types::raw::RequestMode::parse(&mode),
             });
         }
 
@@ -450,7 +450,7 @@ impl TrafficStore {
         Ok(Page { items, next })
     }
 
-    /// Builds a query [`hexora_query::Record`] for a history row, reading back only the
+    /// Builds a query [`nullhawk_query::Record`] for a history row, reading back only the
     /// request/response detail the query actually uses.
     ///
     /// The cheap fields come straight from the row. The request, the response header block and
@@ -459,13 +459,13 @@ impl TrafficStore {
     pub fn query_record(
         &self,
         row: &StoredTraffic,
-        query: &hexora_query::Query,
-    ) -> Result<hexora_query::Record> {
-        let (host, port, path) = match hexora_types::http::HttpService::parse_url(&row.url) {
+        query: &nullhawk_query::Query,
+    ) -> Result<nullhawk_query::Record> {
+        let (host, port, path) = match nullhawk_types::http::HttpService::parse_url(&row.url) {
             Ok((service, path)) => (service.host, service.port, path),
             Err(_) => (String::new(), 0, row.url.clone()),
         };
-        let mut record = hexora_query::Record {
+        let mut record = nullhawk_query::Record {
             method: row.method.clone(),
             host,
             path,
@@ -565,7 +565,7 @@ impl TrafficStore {
                         identity,
                         raw_hash: row.get(14)?,
                         raw_size: row.get(15)?,
-                        // Parsed after the query: the id types return `HexoraError`,
+                        // Parsed after the query: the id types return `NullhawkError`,
                         // which is not a `rusqlite::Error` and cannot surface here.
                         parent: row.get(0)?,
                         body_hash: row.get(6)?,
@@ -580,13 +580,13 @@ impl TrafficStore {
                             http_version: row.get(4)?,
                             headers_raw: row.get(5)?,
                             body: Vec::new(),
-                            service: hexora_types::http::HttpService::new(
+                            service: nullhawk_types::http::HttpService::new(
                                 &host,
                                 port as u16,
                                 secure != 0,
                             ),
                             sent_at: row.get(8)?,
-                            mode: hexora_types::raw::RequestMode::parse(&mode),
+                            mode: nullhawk_types::raw::RequestMode::parse(&mode),
                             raw: None,
                         },
                     })
@@ -882,7 +882,7 @@ fn encoded_size(reference: &Option<BlobRef>) -> i64 {
 
 /// Parses a raw header block into `Name: value` lines, for the query evaluator.
 fn header_lines(block: &[u8]) -> Vec<String> {
-    hexora_types::http::Headers::from_block(block)
+    nullhawk_types::http::Headers::from_block(block)
         .iter()
         .map(|h| format!("{}: {}", h.name, h.value_lossy()))
         .collect()
@@ -892,7 +892,7 @@ fn header_lines(block: &[u8]) -> Vec<String> {
 ///
 /// Stored raw rather than as parsed JSON so the exact bytes survive — duplicate
 /// fields, unusual casing and non-UTF-8 values all included.
-fn header_block(headers: &hexora_types::http::Headers) -> Vec<u8> {
+fn header_block(headers: &nullhawk_types::http::Headers) -> Vec<u8> {
     let mut out = Vec::with_capacity(headers.wire_size());
     for header in headers.iter() {
         out.extend_from_slice(header.name.as_bytes());
@@ -907,8 +907,8 @@ pub(crate) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-impl From<hexora_types::HexoraError> for StorageError {
-    fn from(e: hexora_types::HexoraError) -> Self {
+impl From<nullhawk_types::NullhawkError> for StorageError {
+    fn from(e: nullhawk_types::NullhawkError) -> Self {
         StorageError::Decode {
             entity: "identifier",
             reason: e.to_string(),
@@ -919,7 +919,7 @@ impl From<hexora_types::HexoraError> for StorageError {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use hexora_types::http::{Header, Headers, HttpService, HttpVersion};
+    use nullhawk_types::http::{Header, Headers, HttpService, HttpVersion};
 
     use super::*;
     use crate::{MemoryBlobStore, Project};
@@ -1035,7 +1035,7 @@ mod tests {
     #[test]
     fn a_request_sent_as_an_identity_reads_back_naming_it() {
         let (store, project) = store();
-        let identity = hexora_types::identity::Identity::bearer("User B", "TEST_TOKEN");
+        let identity = nullhawk_types::identity::Identity::bearer("User B", "TEST_TOKEN");
         project.identities().put(&identity).unwrap();
 
         let mut captured = exchange("/accounts/1", 200, b"{}");
@@ -1247,7 +1247,7 @@ mod tests {
             protocol: "TLSv1.3".into(),
             cipher_suite: "TLS13_AES_128_GCM_SHA256".into(),
             alpn: Some("http/1.1".into()),
-            verification: hexora_types::tls::Verification::AcceptAny,
+            verification: nullhawk_types::tls::Verification::AcceptAny,
             peer_certificates: Vec::new(),
         });
 

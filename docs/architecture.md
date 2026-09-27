@@ -3,11 +3,11 @@
 ## Shape
 
 ```text
-        Desktop (Tauri + React)          CLI (hexora)
+        Desktop (Tauri + React)          CLI (nullhawk)
                     │                          │
                     └────────────┬─────────────┘
                                  │
-                         Hexora core (Rust)
+                         Nullhawk core (Rust)
                                  │
         ┌────────────────────────┼────────────────────────┐
         │                        │                        │
@@ -43,8 +43,8 @@ influenced part of the process.
 | `core/types::echo` | Where a value came back and which of its characters survived, under the response's declared content type | **Implemented** (M13.4) |
 | `core/types::redirect` | Where a `Location` header would send a browser, resolved rather than matched — and never followed | **Implemented** (M13.5) |
 | `core/types::credential` | Breaking a session on purpose without ever writing one down: no `Display`, a redacting `Debug`, one named accessor | **Implemented** (M13.6) |
-| `core/authz` primitives | `replay_once` and `judge` are public, so the scheduler runs the same matrix and the same confidence ladder as `hexora authz` rather than a second copy | **Implemented** (M13.7) |
-| `apps/cli` | `hexora` headless CLI | **Implemented** |
+| `core/authz` primitives | `replay_once` and `judge` are public, so the scheduler runs the same matrix and the same confidence ladder as `nullhawk authz` rather than a second copy | **Implemented** (M13.7) |
+| `apps/cli` | `nullhawk` headless CLI | **Implemented** |
 | `apps/desktop` | Tauri shell | **Implemented** |
 | `frontend` | React + TypeScript UI | **Implemented** |
 
@@ -69,7 +69,7 @@ types ← storage ← http ← proxy
 
 `core/report` depends on `core/storage` and `core/types` and on nothing else: a report
 is a read of a finished project, so it has no reason to reach the network and no way
-to. That is why `hexora report` can be trusted to change nothing.
+to. That is why `nullhawk report` can be trusted to change nothing.
 
 `core/verify` sits below `core/authz` rather than inside it, which is the whole point:
 the framework must not depend on the first thing built on it, or the second thing will
@@ -90,7 +90,7 @@ There is nothing in the function to send with.
 `core/authz` deliberately owns no send path of its own: it drives `core/repeater`,
 because loading a stored request, applying a credential, sending it and recording the
 result is exactly what the repeater already does, and a second implementation would be
-a second set of bugs. That holds for *constructed* requests too — a request Hexora
+a second set of bugs. That holds for *constructed* requests too — a request Nullhawk
 built rather than replayed goes out the same way, so security invariant 1 needs no
 second enforcement point.
 
@@ -109,7 +109,7 @@ none: they constrain the implementation before anything is known about it.
 
 ## Four names for a message, and why they are not interchangeable
 
-Hexora keeps more than one representation of the same HTTP message, and confusing them
+Nullhawk keeps more than one representation of the same HTTP message, and confusing them
 produces bugs that look like protocol findings. The vocabulary is fixed:
 
 ```text
@@ -141,7 +141,7 @@ the tester wrote it, so it can be malformed in ways a model cannot represent.
 
 **Transfer-decoded bytes** — the response body with HTTP *framing* removed and nothing
 else. Chunk headers are gone; a `Content-Encoding: gzip` body is still gzip. Stored as
-`responses.encoded_body_hash`, and reachable with `hexora history --body --wire`.
+`responses.encoded_body_hash`, and reachable with `nullhawk history --body --wire`.
 
 **Content-decoded bytes** — the application's bytes, after `Content-Encoding` has been
 reversed. Stored as `responses.body_hash`, and what every comparison, search and
@@ -220,7 +220,7 @@ findings come out the far end identical to what the hand-written path produced.
 `Fingerprint` answers "did the same kind of document come back?" and throws the
 document away doing it. That is the right reduction for a score and the wrong one for
 something a reader can check, so `Baseline` keeps the owner's bytes as well and
-`hexora_types::structure` compares against them:
+`nullhawk_types::structure` compares against them:
 
 ```text
 fingerprint  →  "97% alike"                      a number nobody can verify
@@ -267,8 +267,8 @@ sometimes about. The refusal carries the reason, and the raw form is always ther
 
 ## The queue, and what it promises
 
-`hexora-scan` cannot send — `passive::scan` has no transport in its signature.
-`hexora-active` is the crate where sending lives, and the split is the point:
+`nullhawk-scan` cannot send — `passive::scan` has no transport in its signature.
+`nullhawk-active` is the crate where sending lives, and the split is the point:
 
 ```text
 Plan::prepare(project, lab, checks, hypotheses, budget)  →  Plan     synchronous
@@ -291,7 +291,7 @@ and a scheduler holds a `Vec` of checks it knows nothing about. See invariant 15
 ## Passive and active are a type, not a convention
 
 `DetectorInfo::mode` says whether running a check puts traffic on the wire, and
-`hexora detectors` prints it. That matters more than it sounds: it is the difference
+`nullhawk detectors` prints it. That matters more than it sounds: it is the difference
 between a check that is safe against production at 3pm and one that is not, and until
 M13.2 it lived in people's heads.
 

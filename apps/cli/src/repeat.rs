@@ -1,4 +1,4 @@
-//! `hexora repeat` — take a request out of history, change it, send it again.
+//! `nullhawk repeat` — take a request out of history, change it, send it again.
 //!
 //! The editing loop is deliberately the shell's rather than a bespoke one: the request
 //! is written to a file, `$EDITOR` opens it, and whatever comes back is sent. A tester
@@ -9,15 +9,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hexora_engine::guard::{ScopeDecision, ScopeGuard};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_repeater::{Repeater, ResponseDiff, Sent};
-use hexora_types::ids::RequestId;
-use hexora_types::raw::RequestMode;
-use hexora_types::scope::Scope;
-use hexora_types::{HexoraError, Result};
+use nullhawk_engine::guard::{ScopeDecision, ScopeGuard};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_repeater::{Repeater, ResponseDiff, Sent};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::raw::RequestMode;
+use nullhawk_types::scope::Scope;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora repeat`.
+/// Options for `nullhawk repeat`.
 pub struct RepeatArgs<'a> {
     pub project: &'a Path,
     pub id: &'a str,
@@ -34,7 +34,7 @@ pub struct RepeatArgs<'a> {
     pub json: bool,
 }
 
-/// Options for `hexora repeat --diff`.
+/// Options for `nullhawk repeat --diff`.
 pub struct DiffArgs<'a> {
     pub project: &'a Path,
     pub before: &'a str,
@@ -42,7 +42,7 @@ pub struct DiffArgs<'a> {
     pub json: bool,
 }
 
-/// Options for `hexora repeat --tree`.
+/// Options for `nullhawk repeat --tree`.
 pub struct TreeArgs<'a> {
     pub project: &'a Path,
     pub id: &'a str,
@@ -124,7 +124,7 @@ pub fn run(args: RepeatArgs<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let sent = runtime.block_on(repeater.send(&draft))?;
     let diff = repeater.diff_against_parent(&sent)?;
@@ -159,7 +159,7 @@ fn print_mode(mode: RequestMode) {
 /// the direction that costs a researcher their bounty, because the header that proves
 /// who they are would be missing from what they checked.
 fn print_attached(
-    attached: &[hexora_types::http::Header],
+    attached: &[nullhawk_types::http::Header],
     mode: RequestMode,
     decision: ScopeDecision,
 ) {
@@ -238,7 +238,7 @@ pub fn tree(args: TreeArgs<'_>) -> Result<()> {
     if children.is_empty() {
         println!();
         println!("No variants yet. Create one with:");
-        println!("  hexora repeat {} {root} --edit", args.project.display());
+        println!("  nullhawk repeat {} {root} --edit", args.project.display());
         return Ok(());
     }
     for (i, child) in children.iter().enumerate() {
@@ -264,29 +264,29 @@ fn edit_in_editor(original: &[u8]) -> Result<Vec<u8>> {
         .unwrap_or_else(|_| default_editor().to_string());
 
     let dir = std::env::temp_dir();
-    let path: PathBuf = dir.join(format!("hexora-request-{}.http", std::process::id()));
+    let path: PathBuf = dir.join(format!("nullhawk-request-{}.http", std::process::id()));
     std::fs::write(&path, original)
-        .map_err(|e| HexoraError::Internal(format!("writing {}: {e}", path.display())))?;
+        .map_err(|e| NullhawkError::Internal(format!("writing {}: {e}", path.display())))?;
 
     let status = std::process::Command::new(&editor)
         .arg(&path)
         .status()
         .map_err(|e| {
-            HexoraError::Internal(format!(
+            NullhawkError::Internal(format!(
                 "could not run {editor:?}: {e}. Set $EDITOR to an editor you have."
             ))
         })?;
     if !status.success() {
         // The file is left in place: an editor that exited badly may still have
         // saved work, and deleting it would throw that away.
-        return Err(HexoraError::Internal(format!(
+        return Err(NullhawkError::Internal(format!(
             "{editor} exited with {status}; the request is still at {}",
             path.display()
         )));
     }
 
     let edited = std::fs::read(&path)
-        .map_err(|e| HexoraError::Internal(format!("reading {}: {e}", path.display())))?;
+        .map_err(|e| NullhawkError::Internal(format!("reading {}: {e}", path.display())))?;
     let _ = std::fs::remove_file(&path);
     Ok(edited)
 }
@@ -307,7 +307,7 @@ fn describe(decision: ScopeDecision) -> &'static str {
     }
 }
 
-fn print_warnings(warnings: &[hexora_repeater::Warning]) {
+fn print_warnings(warnings: &[nullhawk_repeater::Warning]) {
     if warnings.is_empty() {
         return;
     }
@@ -327,7 +327,7 @@ fn print_warnings(warnings: &[hexora_repeater::Warning]) {
 fn print_human(
     sent: &Sent,
     diff: Option<&ResponseDiff>,
-    warnings: &[hexora_repeater::Warning],
+    warnings: &[nullhawk_repeater::Warning],
     show_body: bool,
 ) {
     print_warnings(warnings);
@@ -379,7 +379,7 @@ fn print_human(
 
 /// Prints a comparison, headline first.
 ///
-/// The headline is always printed, including when it is "identical". `hexora repeat
+/// The headline is always printed, including when it is "identical". `nullhawk repeat
 /// --diff` used to print nothing at all for two identical responses, which reads as a
 /// command that failed rather than one with an answer — and "identical" is the whole
 /// answer for an authorization comparison, where two principals receiving byte-for-byte
@@ -451,7 +451,7 @@ fn diff_json(diff: &ResponseDiff) -> serde_json::Value {
 fn print_json(
     sent: &Sent,
     diff: Option<&ResponseDiff>,
-    warnings: &[hexora_repeater::Warning],
+    warnings: &[nullhawk_repeater::Warning],
     show_body: bool,
     mode: RequestMode,
 ) {
@@ -471,9 +471,9 @@ fn print_json(
     println!("{payload}");
 }
 
-fn open(path: &Path) -> Result<hexora_storage::Project> {
+fn open(path: &Path) -> Result<nullhawk_storage::Project> {
     if !path.join("project.db").exists() {
-        return Err(HexoraError::not_found(
+        return Err(NullhawkError::not_found(
             "project",
             path.display().to_string(),
         ));
@@ -485,12 +485,12 @@ fn open(path: &Path) -> Result<hexora_storage::Project> {
 mod tests {
     use super::*;
 
-    fn response(status: u16, body: &'static [u8]) -> hexora_types::http::HttpResponse {
-        hexora_types::http::HttpResponse {
+    fn response(status: u16, body: &'static [u8]) -> nullhawk_types::http::HttpResponse {
+        nullhawk_types::http::HttpResponse {
             status,
             reason: None,
-            version: hexora_types::http::HttpVersion::Http11,
-            headers: hexora_types::http::Headers::new(),
+            version: nullhawk_types::http::HttpVersion::Http11,
+            headers: nullhawk_types::http::Headers::new(),
             body: bytes::Bytes::from_static(body),
             truncated: false,
         }
@@ -532,16 +532,16 @@ mod tests {
         let project = crate::open_project(&path).unwrap();
         let id = project
             .traffic()
-            .record(&hexora_storage::CapturedExchange {
-                request: hexora_types::http::HttpRequest::get(
-                    hexora_types::http::HttpService::new("example.com", 443, true),
+            .record(&nullhawk_storage::CapturedExchange {
+                request: nullhawk_types::http::HttpRequest::get(
+                    nullhawk_types::http::HttpService::new("example.com", 443, true),
                     "/original",
                 ),
-                response: hexora_types::http::HttpResponse {
+                response: nullhawk_types::http::HttpResponse {
                     status: 200,
                     reason: Some("OK".into()),
-                    version: hexora_types::http::HttpVersion::Http11,
-                    headers: hexora_types::http::Headers::new(),
+                    version: nullhawk_types::http::HttpVersion::Http11,
+                    headers: nullhawk_types::http::Headers::new(),
                     body: bytes::Bytes::from_static(b"body"),
                     truncated: false,
                 },
@@ -646,16 +646,16 @@ mod tests {
 
         for suffix in ["/a", "/b"] {
             store
-                .record(&hexora_storage::CapturedExchange {
-                    request: hexora_types::http::HttpRequest::get(
-                        hexora_types::http::HttpService::new("example.com", 443, true),
+                .record(&nullhawk_storage::CapturedExchange {
+                    request: nullhawk_types::http::HttpRequest::get(
+                        nullhawk_types::http::HttpService::new("example.com", 443, true),
                         suffix,
                     ),
-                    response: hexora_types::http::HttpResponse {
+                    response: nullhawk_types::http::HttpResponse {
                         status: 403,
                         reason: Some("Forbidden".into()),
-                        version: hexora_types::http::HttpVersion::Http11,
-                        headers: hexora_types::http::Headers::new(),
+                        version: nullhawk_types::http::HttpVersion::Http11,
+                        headers: nullhawk_types::http::Headers::new(),
                         body: bytes::Bytes::new(),
                         truncated: false,
                     },
@@ -686,16 +686,16 @@ mod tests {
         let project = crate::open_project(&path).unwrap();
         let after = project
             .traffic()
-            .record(&hexora_storage::CapturedExchange {
-                request: hexora_types::http::HttpRequest::get(
-                    hexora_types::http::HttpService::new("example.com", 443, true),
+            .record(&nullhawk_storage::CapturedExchange {
+                request: nullhawk_types::http::HttpRequest::get(
+                    nullhawk_types::http::HttpService::new("example.com", 443, true),
                     "/original",
                 ),
-                response: hexora_types::http::HttpResponse {
+                response: nullhawk_types::http::HttpResponse {
                     status: 403,
                     reason: Some("Forbidden".into()),
-                    version: hexora_types::http::HttpVersion::Http11,
-                    headers: hexora_types::http::Headers::new(),
+                    version: nullhawk_types::http::HttpVersion::Http11,
+                    headers: nullhawk_types::http::Headers::new(),
                     body: bytes::Bytes::from_static(b"denied"),
                     truncated: false,
                 },

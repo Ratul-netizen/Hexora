@@ -28,13 +28,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::error::HexoraError;
+use crate::error::NullhawkError;
 use crate::ids::{IdentityId, ObjectId, RequestId};
 
 /// The longest identifier that may be declared.
 ///
 /// Not a guess about identifier formats: it is a bound on what will be spliced into
-/// a request line. Without one, a declaration is a way to make Hexora emit a request
+/// a request line. Without one, a declaration is a way to make Nullhawk emit a request
 /// head of arbitrary size, and the limit for those belongs at the point the value
 /// enters the system rather than at the point it reaches the socket.
 pub const MAX_IDENTIFIER_LEN: usize = 512;
@@ -161,7 +161,7 @@ impl ObjectDeclaration {
         let value = value.into();
         validate_identifier(&value)?;
         if name.trim().is_empty() {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "name",
                 "an object declaration needs a name, e.g. \"invoice\"",
             ));
@@ -204,13 +204,13 @@ impl ObjectDeclaration {
 /// class of surprise entirely.
 pub fn validate_identifier(value: &str) -> crate::Result<()> {
     if value.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "value",
             "an object identifier cannot be empty",
         ));
     }
     if value.len() > MAX_IDENTIFIER_LEN {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "value",
             format!(
                 "an object identifier may be at most {MAX_IDENTIFIER_LEN} bytes; this \
@@ -220,7 +220,7 @@ pub fn validate_identifier(value: &str) -> crate::Result<()> {
         ));
     }
     if let Some(bad) = value.chars().find(|c| c.is_control()) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "value",
             format!(
                 "an object identifier cannot contain control characters (found {:?}). \

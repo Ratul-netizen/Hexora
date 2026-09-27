@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hexora",
+  "productName": "Nullhawk",
   "version": "0.1.0",
-  "identifier": "dev.hexora.desktop",
+  "identifier": "dev.nullhawk.desktop",
   "build": {
     "frontendDist": "../../../frontend/dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Hexora",
+        "title": "Nullhawk",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
@@ -27,12 +27,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "Hexora",
-    "homepage": "https://github.com/Ratul-netizen/Hexora",
+    "publisher": "Nullhawk",
+    "homepage": "https://github.com/Ratul-netizen/Nullhawk",
     "category": "DeveloperTool",
     "shortDescription": "The modern offensive security workbench.",
-    "longDescription": "Hexora is a web and API security testing platform for authorized penetration testing and security research: an intercepting proxy, repeater, intruder, evidence-driven scanner, authorization testing, crawler, out-of-band collaborator, LLM and DOM-XSS testing, and a headless CI runner.",
-    "copyright": "Copyright © 2026 Hexora. Licensed under AGPL-3.0-or-later.",
+    "longDescription": "Nullhawk is a web and API security testing platform for authorized penetration testing and security research: an intercepting proxy, repeater, intruder, evidence-driven scanner, authorization testing, crawler, out-of-band collaborator, LLM and DOM-XSS testing, and a headless CI runner.",
+    "copyright": "Copyright © 2026 Nullhawk. Licensed under AGPL-3.0-or-later.",
     "licenseFile": "../../../LICENSE",
     "icon": [
       "icons/32x32.png",

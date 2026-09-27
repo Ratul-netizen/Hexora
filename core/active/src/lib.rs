@@ -1,8 +1,8 @@
-//! # hexora-active
+//! # nullhawk-active
 //!
-//! The part of Hexora that sends traffic a tester did not type by hand.
+//! The part of Nullhawk that sends traffic a tester did not type by hand.
 //!
-//! [`hexora_scan`] reads captured traffic and, when one exchange cannot settle a
+//! [`nullhawk_scan`] reads captured traffic and, when one exchange cannot settle a
 //! question, raises a [`Hypothesis`] and stops. This is what picks those up:
 //!
 //! ```text
@@ -64,14 +64,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hexora_repeater::Draft;
-use hexora_scan::Exchange;
-use hexora_types::finding::Hypothesis;
-use hexora_types::identity::Identity;
-use hexora_types::ids::TargetId;
-use hexora_types::verify::{DetectorInfo, Verification, Writeup};
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_repeater::Draft;
+use nullhawk_scan::Exchange;
+use nullhawk_types::finding::Hypothesis;
+use nullhawk_types::identity::Identity;
+use nullhawk_types::ids::TargetId;
+use nullhawk_types::verify::{DetectorInfo, Verification, Writeup};
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 pub mod budget;
 pub mod checks;
@@ -87,7 +87,7 @@ pub use standing::{standing, Standing};
 /// Something that settles a hypothesis by running an experiment.
 ///
 /// Object-safe on purpose, and that is the whole difference from
-/// [`Verifier`](hexora_verify::Verifier). A verifier is written by a subsystem that
+/// [`Verifier`](nullhawk_verify::Verifier). A verifier is written by a subsystem that
 /// knows its own case type — the authorization matrix re-runs a `CellCase` — and an
 /// associated type expresses that exactly. A scheduler holds a `Vec` of checks it
 /// knows nothing about, so its trait takes one concrete [`Subject`]: the hypothesis,
@@ -132,7 +132,7 @@ pub trait ActiveCheck: Send + Sync {
 /// Everything a check is given about one hypothesis.
 ///
 /// Assembled by the scheduler, so a check never touches the project. The exchange
-/// arrives through [`hexora_scan::passive::exchange_at`], which means its credential
+/// arrives through [`nullhawk_scan::passive::exchange_at`], which means its credential
 /// headers are already redacted — an active check sees exactly what the passive check
 /// that raised the hypothesis saw.
 ///
@@ -206,7 +206,7 @@ impl Subject {
             if let Some(who) = subject_of(&identity.credential) {
                 if let Some(sent_subject) = sent
                     .get("authorization")
-                    .and_then(|header| hexora_types::expiry::subject_of(&header.value_lossy()))
+                    .and_then(|header| nullhawk_types::expiry::subject_of(&header.value_lossy()))
                 {
                     return sent_subject == who;
                 }
@@ -236,19 +236,19 @@ impl Subject {
 /// Only for a bearer JWT. A cookie jar is handled by the named-session-cookie rule
 /// above, and an opaque token asserts nothing — inventing a subject for one would put
 /// a guess exactly where this subsystem refuses to have one.
-fn subject_of(credential: &hexora_types::identity::Credential) -> Option<String> {
+fn subject_of(credential: &nullhawk_types::identity::Credential) -> Option<String> {
     match credential {
-        hexora_types::identity::Credential::Bearer { token } => {
-            hexora_types::expiry::subject_of(token.expose())
+        nullhawk_types::identity::Credential::Bearer { token } => {
+            nullhawk_types::expiry::subject_of(token.expose())
         }
         _ => None,
     }
 }
 
 /// The declared cookie header of an identity, if it authenticates with one.
-fn cookie_value(credential: &hexora_types::identity::Credential) -> Option<String> {
+fn cookie_value(credential: &nullhawk_types::identity::Credential) -> Option<String> {
     match credential {
-        hexora_types::identity::Credential::Cookie { value } => Some(value.expose().clone()),
+        nullhawk_types::identity::Credential::Cookie { value } => Some(value.expose().clone()),
         _ => None,
     }
 }
@@ -312,7 +312,7 @@ impl Cancel {
 /// The checks this crate provides.
 ///
 /// Listed rather than discovered, for the reason
-/// [`Registry`](hexora_verify::Registry) gives: adding a check means adding a line,
+/// [`Registry`](nullhawk_verify::Registry) gives: adding a check means adding a line,
 /// and that is the honest cost of not having a plugin mechanism.
 pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
     vec![
@@ -324,7 +324,7 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
     ]
 }
 
-/// What every active check in this build is, for `hexora detectors`.
+/// What every active check in this build is, for `nullhawk detectors`.
 pub fn checks_info() -> Vec<DetectorInfo> {
     active_checks().iter().map(|check| check.about()).collect()
 }
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn every_active_check_says_it_sends() {
-        // `hexora detectors --sending` is the list a tester reads before pointing this
+        // `nullhawk detectors --sending` is the list a tester reads before pointing this
         // at a production system. A check in this crate that reported itself as
         // passive would keep itself off that list.
         for info in checks_info() {

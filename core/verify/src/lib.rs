@@ -1,6 +1,6 @@
-//! # hexora-verify
+//! # nullhawk-verify
 //!
-//! The shape every check in Hexora has, defined before there are many checks.
+//! The shape every check in Nullhawk has, defined before there are many checks.
 //!
 //! ```text
 //! Detector  →  Hypothesis   "this looks suspicious"        cheap, often wrong
@@ -13,8 +13,8 @@
 //!              Verified     the only thing the findings store accepts
 //! ```
 //!
-//! The data types live in [`hexora_types::verify`], because `core/storage` has to see
-//! [`Verified`](hexora_types::verify::Verified) to refuse everything else. What lives
+//! The data types live in [`nullhawk_types::verify`], because `core/storage` has to see
+//! [`Verified`](nullhawk_types::verify::Verified) to refuse everything else. What lives
 //! here is the behaviour: the two traits, the one way to perform an experiment, and
 //! the registry of what this build can check.
 //!
@@ -29,7 +29,7 @@
 //! ## Why a verifier cannot reach the network except through a Lab
 //!
 //! [`Verifier::verify`] receives `&dyn Lab` and nothing else that can send. A `Lab` is
-//! backed by [`Repeater`](hexora_repeater::Repeater), so every request a verifier
+//! backed by [`Repeater`](nullhawk_repeater::Repeater), so every request a verifier
 //! makes goes through the same `ScopeGuard`, is attributed to the right origin, and is
 //! stored as evidence — which is security invariant 1, kept by construction rather
 //! than by each check remembering to.
@@ -41,7 +41,7 @@
 //! for a subsystem that knows its own case type, and unusable for a scheduler that
 //! must hold a heterogeneous list of checks in a `Vec`.
 //!
-//! So `hexora-active` defines its own object-safe trait over one concrete case, and
+//! So `nullhawk-active` defines its own object-safe trait over one concrete case, and
 //! owns the queue, the pacing and the request ceiling. The requirements for those are
 //! about what a run may do to somebody's system, which is a different question from
 //! what a check may claim, and putting them here would have been inventing them blind.
@@ -50,13 +50,13 @@
 #![warn(missing_docs, clippy::all)]
 
 use async_trait::async_trait;
-use hexora_repeater::{Draft, Repeater, SendAs, Sent};
-use hexora_types::finding::Hypothesis;
-use hexora_types::identity::Identity;
-use hexora_types::verify::{DetectorInfo, Verification, Verified, Writeup};
-use hexora_types::Result;
+use nullhawk_repeater::{Draft, Repeater, SendAs, Sent};
+use nullhawk_types::finding::Hypothesis;
+use nullhawk_types::identity::Identity;
+use nullhawk_types::verify::{DetectorInfo, Verification, Verified, Writeup};
+use nullhawk_types::Result;
 
-pub use hexora_types::verify::{DetectorId, Support};
+pub use nullhawk_types::verify::{DetectorId, Support};
 
 /// Something that reads evidence already gathered and says what looks suspicious.
 ///
@@ -129,7 +129,7 @@ pub trait Lab: Send + Sync {
     /// of a request, and the only thing that puts one on a wire is
     /// [`Self::experiment`] — and it saves every check from being handed a store it
     /// would then be free to read anything out of.
-    fn draft_of(&self, request: hexora_types::ids::RequestId) -> Result<Draft>;
+    fn draft_of(&self, request: nullhawk_types::ids::RequestId) -> Result<Draft>;
 }
 
 /// A [`Lab`] backed by the repeater.
@@ -137,7 +137,7 @@ pub trait Lab: Send + Sync {
 /// The repeater is already the thing that loads a stored request, applies a
 /// credential, sends it through the scope guard and stores the result. A second
 /// implementation of any of that would be a second set of bugs.
-pub struct RepeaterLab<'a, T: hexora_engine::transport::HttpTransport> {
+pub struct RepeaterLab<'a, T: nullhawk_engine::transport::HttpTransport> {
     repeater: &'a Repeater<T>,
     /// What an experiment sent without an identity is attributed to.
     ///
@@ -146,10 +146,10 @@ pub struct RepeaterLab<'a, T: hexora_engine::transport::HttpTransport> {
     /// it from the repeater, because a human typed a repeater request — so a scanner
     /// recorded as the repeater would be handed a person's permissions and could
     /// reach a host nobody declared. See [`SendAs::scanner`].
-    unattributed: hexora_engine::transport::Origin,
+    unattributed: nullhawk_engine::transport::Origin,
 }
 
-impl<'a, T: hexora_engine::transport::HttpTransport> RepeaterLab<'a, T> {
+impl<'a, T: nullhawk_engine::transport::HttpTransport> RepeaterLab<'a, T> {
     /// Wraps a repeater as a lab for a subsystem that always sends as an identity.
     ///
     /// The authorization matrix: every experiment names the principal it went out as,
@@ -157,7 +157,7 @@ impl<'a, T: hexora_engine::transport::HttpTransport> RepeaterLab<'a, T> {
     pub fn new(repeater: &'a Repeater<T>) -> Self {
         Self {
             repeater,
-            unattributed: hexora_engine::transport::Origin::Repeater,
+            unattributed: nullhawk_engine::transport::Origin::Repeater,
         }
     }
 
@@ -167,11 +167,11 @@ impl<'a, T: hexora_engine::transport::HttpTransport> RepeaterLab<'a, T> {
     /// what makes the scope guard refuse an out-of-scope target instead of flagging
     /// it.
     ///
-    /// [`Origin::Scanner`]: hexora_engine::transport::Origin::Scanner
+    /// [`Origin::Scanner`]: nullhawk_engine::transport::Origin::Scanner
     pub fn scanner(repeater: &'a Repeater<T>) -> Self {
         Self {
             repeater,
-            unattributed: hexora_engine::transport::Origin::Scanner,
+            unattributed: nullhawk_engine::transport::Origin::Scanner,
         }
     }
 
@@ -187,7 +187,7 @@ impl<'a, T: hexora_engine::transport::HttpTransport> RepeaterLab<'a, T> {
 }
 
 #[async_trait]
-impl<T: hexora_engine::transport::HttpTransport> Lab for RepeaterLab<'_, T> {
+impl<T: nullhawk_engine::transport::HttpTransport> Lab for RepeaterLab<'_, T> {
     async fn experiment(&self, draft: &Draft, as_identity: Option<&Identity>) -> Result<Sent> {
         self.repeater.send_as(draft, self.sender(as_identity)).await
     }
@@ -199,7 +199,7 @@ impl<T: hexora_engine::transport::HttpTransport> Lab for RepeaterLab<'_, T> {
             .permits_sending()
     }
 
-    fn draft_of(&self, request: hexora_types::ids::RequestId) -> Result<Draft> {
+    fn draft_of(&self, request: nullhawk_types::ids::RequestId) -> Result<Draft> {
         self.repeater.draft_from(request)
     }
 }
@@ -305,7 +305,7 @@ impl Judged {
 mod attribution {
     //! Which subsystem a lab's traffic is recorded as, and why it matters.
 
-    use hexora_engine::transport::Origin;
+    use nullhawk_engine::transport::Origin;
 
     #[test]
     fn a_scanners_experiment_is_automated_and_a_repeaters_is_not() {
@@ -322,7 +322,7 @@ mod attribution {
             "a request a person typed is their decision to make"
         );
         assert_eq!(
-            hexora_repeater::SendAs::scanner().origin,
+            nullhawk_repeater::SendAs::scanner().origin,
             Origin::Scanner,
             "a scanner send must not be attributed to the repeater"
         );
@@ -331,9 +331,9 @@ mod attribution {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::finding::{Evidence, FindingSource, Severity};
-    use hexora_types::ids::{RequestId, TargetId};
-    use hexora_types::verify::{DetectorMode, Support};
+    use nullhawk_types::finding::{Evidence, FindingSource, Severity};
+    use nullhawk_types::ids::{RequestId, TargetId};
+    use nullhawk_types::verify::{DetectorMode, Support};
 
     use super::*;
 
@@ -349,7 +349,7 @@ mod tests {
         fn would_leave_scope(&self, _: &Draft, _: Option<&Identity>) -> bool {
             false
         }
-        fn draft_of(&self, _: hexora_types::ids::RequestId) -> Result<Draft> {
+        fn draft_of(&self, _: nullhawk_types::ids::RequestId) -> Result<Draft> {
             panic!("this verifier must not load a request either");
         }
     }
@@ -428,7 +428,7 @@ mod tests {
 
         assert_eq!(judged.len(), 1);
         let finding = judged[0].finding.as_ref().unwrap().finding();
-        assert_eq!(finding.confidence, hexora_types::Confidence::Firm);
+        assert_eq!(finding.confidence, nullhawk_types::Confidence::Firm);
     }
 
     #[tokio::test]

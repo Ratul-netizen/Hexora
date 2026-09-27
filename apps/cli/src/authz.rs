@@ -1,4 +1,4 @@
-//! `hexora authz` — replay one captured request as everybody, and say what it proves.
+//! `nullhawk authz` — replay one captured request as everybody, and say what it proves.
 //!
 //! The output is a table, because the question is a table: identities down the side,
 //! what each of them got across it. Everything else the command prints exists to keep
@@ -9,22 +9,22 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use hexora_authz::construct::{Construction, ConstructionPlan};
-use hexora_authz::{analysis, AuthzTester, Cell, Matrix, Plan, Verdict};
-use hexora_engine::guard::ScopeGuard;
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_repeater::Repeater;
-use hexora_storage::{FindingStore, Recorded};
-use hexora_types::identity::Identity;
-use hexora_types::ids::RequestId;
-use hexora_types::structure::Comparable;
-use hexora_types::verify::Verified;
-use hexora_types::{HexoraError, Result};
+use nullhawk_authz::construct::{Construction, ConstructionPlan};
+use nullhawk_authz::{analysis, AuthzTester, Cell, Matrix, Plan, Verdict};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_repeater::Repeater;
+use nullhawk_storage::{FindingStore, Recorded};
+use nullhawk_types::identity::Identity;
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::structure::Comparable;
+use nullhawk_types::verify::Verified;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora authz`.
+/// Options for `nullhawk authz`.
 pub struct AuthzArgs<'a> {
     pub project: &'a Path,
-    /// The captured request to replay, from `hexora history`.
+    /// The captured request to replay, from `nullhawk history`.
     pub id: &'a str,
     /// The identity the request belongs to.
     pub owner: &'a str,
@@ -57,10 +57,10 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     let owner = crate::identity::resolve(&identities_store, args.owner)?;
     let others = choose(&identities_store, args.identities, &owner)?;
     if others.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "identities",
             "there is nobody to compare against: add a second identity with \
-             `hexora identity add`",
+             `nullhawk identity add`",
         ));
     }
 
@@ -81,7 +81,7 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
 
     let method = tester.method_of(base)?;
     if Plan::is_state_changing(&method) && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "method",
             format!(
                 "{method} may change data on the target, and this run would send it \
@@ -98,7 +98,7 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
     // The target the base request was actually sent to. A finding that named a
     // freshly minted id would cite a target the project has never heard of, and the
     // foreign key would refuse it — correctly.
@@ -116,10 +116,10 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
     let construction = if args.construct {
         let declarations = project.objects().list()?;
         if declarations.is_empty() {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "--construct",
                 "no objects are declared in this project, so there is nothing to \
-                 construct a request for. Declare one with `hexora object add`",
+                 construct a request for. Declare one with `nullhawk object add`",
             ));
         }
         let senders = std::iter::once(plan.owner.clone())
@@ -130,7 +130,7 @@ pub fn run(args: AuthzArgs<'_>) -> Result<()> {
                 &ConstructionPlan::new(base, senders, declarations)
                     .with_limit(args.max_attempts)
                     .verifying(args.verify)
-                    // The one place Hexora chooses an identifier rather than replaying
+                    // The one place Nullhawk chooses an identifier rather than replaying
                     // one somebody sent. If the programme named the entities it permits,
                     // that is the list.
                     .under(project.settings().programme()?),
@@ -181,7 +181,7 @@ fn print_construction(construction: &Construction) {
             // The similarity is only meaningful next to a response that carried
             // something: "401 denied, 100% alike its own object" reads as nonsense
             // when the identity's own request was refused as well.
-            Some(status) if attempt.outcome == hexora_authz::Outcome::Denied => {
+            Some(status) if attempt.outcome == nullhawk_authz::Outcome::Denied => {
                 println!("    → {status} {}", attempt.outcome.as_str())
             }
             Some(status) => println!(
@@ -232,7 +232,7 @@ fn save(store: &FindingStore, findings: &[Verified]) -> Result<Vec<Recorded>> {
 
 /// The identities to replay as: those named, or everybody except the owner.
 fn choose(
-    store: &hexora_storage::IdentityStore,
+    store: &nullhawk_storage::IdentityStore,
     named: &[String],
     owner: &Identity,
 ) -> Result<Vec<Identity>> {
@@ -296,7 +296,7 @@ fn print_structure(matrix: &Matrix) {
                 structure.total_paths
             );
             if structure.every_value_differs() {
-                // An observation, not a claim: Hexora does not know whose record is
+                // An observation, not a claim: Nullhawk does not know whose record is
                 // whose without a declaration. It is the shape a correctly-scoped
                 // endpoint has, and a reader can check it against the list below.
                 println!(
@@ -435,7 +435,7 @@ fn print_human(
         (0, u) => println!("Refreshed {u} finding(s) already recorded; triage decisions kept."),
         (n, u) => println!("Recorded {n} new finding(s) and refreshed {u} already recorded."),
     }
-    println!("Read them back with `hexora findings <project>`.");
+    println!("Read them back with `nullhawk findings <project>`.");
 }
 
 fn print_json(
@@ -548,9 +548,9 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use hexora_authz::Outcome;
-    use hexora_types::identity::PrivilegeLevel;
-    use hexora_types::ids::IdentityId;
+    use nullhawk_authz::Outcome;
+    use nullhawk_types::identity::PrivilegeLevel;
+    use nullhawk_types::ids::IdentityId;
 
     use super::*;
 

@@ -1,6 +1,6 @@
 [package]
-name = "hexora-cli"
-description = "Headless command-line interface for the Hexora security platform"
+name = "nullhawk-cli"
+description = "Headless command-line interface for the Nullhawk security platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,31 +8,31 @@ license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "hexora"
+name = "nullhawk"
 path = "src/main.rs"
 
 [dependencies]
-hexora-types.workspace = true
-hexora-storage.workspace = true
-hexora-engine.workspace = true
-hexora-http.workspace = true
-hexora-proxy.workspace = true
-hexora-repeater.workspace = true
-hexora-authz.workspace = true
-hexora-verify.workspace = true
-hexora-scan.workspace = true
-hexora-active.workspace = true
-hexora-crawl.workspace = true
-hexora-llm.workspace = true
-hexora-oob.workspace = true
-hexora-fuzz.workspace = true
-hexora-query.workspace = true
-hexora-import.workspace = true
-hexora-sequencer.workspace = true
-hexora-browser.workspace = true
-hexora-ext.workspace = true
-hexora-wasm.workspace = true
-hexora-report.workspace = true
+nullhawk-types.workspace = true
+nullhawk-storage.workspace = true
+nullhawk-engine.workspace = true
+nullhawk-http.workspace = true
+nullhawk-proxy.workspace = true
+nullhawk-repeater.workspace = true
+nullhawk-authz.workspace = true
+nullhawk-verify.workspace = true
+nullhawk-scan.workspace = true
+nullhawk-active.workspace = true
+nullhawk-crawl.workspace = true
+nullhawk-llm.workspace = true
+nullhawk-oob.workspace = true
+nullhawk-fuzz.workspace = true
+nullhawk-query.workspace = true
+nullhawk-import.workspace = true
+nullhawk-sequencer.workspace = true
+nullhawk-browser.workspace = true
+nullhawk-ext.workspace = true
+nullhawk-wasm.workspace = true
+nullhawk-report.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 chrono.workspace = true

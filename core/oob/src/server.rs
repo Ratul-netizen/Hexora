@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use hexora_types::error::{HexoraError, Result};
+use nullhawk_types::error::{NullhawkError, Result};
 
 use crate::{token_of, Interaction};
 
@@ -41,7 +41,7 @@ impl Store {
 pub(crate) async fn run_http(addr: &str, store: Store) -> Result<()> {
     let listener = TcpListener::bind(addr)
         .await
-        .map_err(|e| HexoraError::invalid_input("listen", format!("{addr}: {e}")))?;
+        .map_err(|e| NullhawkError::invalid_input("listen", format!("{addr}: {e}")))?;
     if let Ok(local) = listener.local_addr() {
         tracing::info!(%local, "collaborator HTTP listening");
     }
@@ -70,7 +70,7 @@ async fn handle(mut stream: TcpStream, peer: SocketAddr, store: Store) -> std::i
     let host = header(&head, "host").unwrap_or_default();
 
     // The poll endpoint the client reads its interactions from.
-    if path.starts_with("/_hexora/poll") {
+    if path.starts_with("/_nullhawk/poll") {
         let token = query_param(&path, "token").unwrap_or_default();
         let interactions = store.drain(&token);
         let body = serde_json::to_string(&interactions).unwrap_or_else(|_| "[]".into());
@@ -89,7 +89,7 @@ async fn handle(mut stream: TcpStream, peer: SocketAddr, store: Store) -> std::i
             at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         });
     }
-    respond(&mut stream, "text/plain", "hexora-oob\n").await
+    respond(&mut stream, "text/plain", "nullhawk-oob\n").await
 }
 
 /// Reads the request head (up to the blank line), bounded so a slow or hostile peer cannot
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn a_poll_query_token_is_parsed() {
         assert_eq!(
-            query_param("/_hexora/poll?token=abc", "token").as_deref(),
+            query_param("/_nullhawk/poll?token=abc", "token").as_deref(),
             Some("abc")
         );
         assert_eq!(query_param("/", "token"), None);

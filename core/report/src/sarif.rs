@@ -2,13 +2,13 @@
 //!
 //! The other three renderers address a human: a ticket, a client, a reader. This one
 //! addresses a CI system. [SARIF](https://sarifweb.azurewebsites.net/) is the format
-//! GitHub code scanning and GitLab ingest natively, so a `hexora report --format sarif`
+//! GitHub code scanning and GitLab ingest natively, so a `nullhawk report --format sarif`
 //! uploaded from a pipeline puts every established finding into the platform's own
 //! security tab, next to the code, with no bespoke integration.
 //!
 //! ## Why this is more than a fourth encoding
 //!
-//! Two properties of the finding store make Hexora's SARIF worth more than a scanner
+//! Two properties of the finding store make Nullhawk's SARIF worth more than a scanner
 //! that emits the same schema:
 //!
 //! **The results carry a stable identity.** A finding keeps its id across runs — a
@@ -31,7 +31,7 @@
 
 use serde_json::{json, Map, Value};
 
-use hexora_types::finding::{Finding, FindingSource, Severity};
+use nullhawk_types::finding::{Finding, FindingSource, Severity};
 
 use crate::{Citation, CitedEvidence, Report, ReportedFinding};
 
@@ -73,8 +73,8 @@ pub fn render(report: &Report) -> String {
     }
 
     let driver = json!({
-        "name": "Hexora",
-        "informationUri": "https://github.com/Ratul-netizen/Hexora",
+        "name": "Nullhawk",
+        "informationUri": "https://github.com/Ratul-netizen/Nullhawk",
         "version": env!("CARGO_PKG_VERSION"),
         "rules": rules,
     });
@@ -162,7 +162,7 @@ fn result_for(
     // a "new findings only" gate works without guessing.
     result.insert(
         "partialFingerprints".into(),
-        json!({ "hexoraFindingId/v1": finding.id.to_string() }),
+        json!({ "nullhawkFindingId/v1": finding.id.to_string() }),
     );
     result.insert("properties".into(), Value::Object(properties));
 
@@ -232,7 +232,7 @@ fn rule_for(rule_id: &str, finding: &Finding) -> Value {
 /// The stable machine identifier for the rule a finding belongs to.
 ///
 /// A detector's own id is used where there is one, so the SARIF rule id matches the
-/// string `hexora detectors` prints and a retest can tell a fixed application from a
+/// string `nullhawk detectors` prints and a retest can tell a fixed application from a
 /// changed check. The subsystems that are not a named detector get a fixed id each.
 fn rule_id(source: &FindingSource) -> String {
     match source {
@@ -270,7 +270,7 @@ fn rule_name(rule_id: &str) -> String {
     }
 }
 
-/// Maps a Hexora severity to the SARIF result level a pipeline acts on.
+/// Maps a Nullhawk severity to the SARIF result level a pipeline acts on.
 fn sarif_level(severity: Severity) -> &'static str {
     match severity {
         Severity::Critical | Severity::High => "error",

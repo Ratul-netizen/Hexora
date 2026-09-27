@@ -1,6 +1,6 @@
-//! `hexora programme` — the terms this engagement is conducted under.
+//! `nullhawk programme` — the terms this engagement is conducted under.
 //!
-//! [`hexora_types::scope`] answers *which systems*. This answers the other question a
+//! [`nullhawk_types::scope`] answers *which systems*. This answers the other question a
 //! bug bounty programme decides for you: **which kinds of finding it will accept**.
 //!
 //! Wolt's, for example, puts missing security headers, missing cookie flags, CORS
@@ -16,8 +16,8 @@
 
 use std::path::Path;
 
-use hexora_types::programme::{Exclusion, TestEntity};
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::programme::{Exclusion, TestEntity};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Prints the engagement's terms.
 pub fn show(path: &Path, json: bool) -> Result<()> {
@@ -32,13 +32,13 @@ pub fn show(path: &Path, json: bool) -> Result<()> {
     if programme.is_empty() {
         println!("No programme is recorded for this project.");
         println!();
-        println!("Everything Hexora finds will be reported. If you are testing under a");
+        println!("Everything Nullhawk finds will be reported. If you are testing under a");
         println!("bug bounty programme, record what it will not accept so a run does not");
         println!("bury a real finding under forty it would reject:");
         println!();
-        println!("  hexora programme set <project> --name \"Wolt\" \\");
+        println!("  nullhawk programme set <project> --name \"Wolt\" \\");
         println!("      --policy-url https://hackerone.com/wolt");
-        println!("  hexora programme exclude <project> headers.security \\");
+        println!("  nullhawk programme exclude <project> headers.security \\");
         println!("      --reason \"out of scope: missing security headers\"");
         return Ok(());
     }
@@ -115,7 +115,7 @@ pub fn exclude(path: &Path, detector: &str, reason: &str, json: bool) -> Result<
 
     let reason = reason.trim();
     if reason.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--reason",
             "say why this programme will not accept it. Six weeks later an exclusion \
              with no reason is indistinguishable from a mistake, and it is the sentence \
@@ -178,13 +178,13 @@ pub fn permit(path: &Path, id: &str, what: &str, json: bool) -> Result<()> {
     let id = id.trim();
     let what = what.trim();
     if id.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "id",
             "an entity needs an identifier",
         ));
     }
     if what.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--what",
             "say what this entity is, in the programme's words — \"consumer test \
              account\". A bare identifier in a list six weeks old is indistinguishable \
@@ -261,7 +261,7 @@ fn known(detector: &str) -> Result<()> {
     if ids.iter().any(|id| id == detector) {
         return Ok(());
     }
-    Err(HexoraError::invalid_input(
+    Err(NullhawkError::invalid_input(
         "detector",
         format!(
             "this build has no detector called `{detector}`. It has: {}",

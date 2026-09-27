@@ -4,7 +4,7 @@
 //! Y instead", and it is one of the most-reached-for features in a manual session — strip a
 //! `Content-Security-Policy` to make an injected script run, force a header a client omits,
 //! turn `debug=false` into `debug=true` on every request without touching each one by hand.
-//! Hexora had only the narrow special case of *attaching* named headers ([`crate::attach`]);
+//! Nullhawk had only the narrow special case of *attaching* named headers ([`crate::attach`]);
 //! this is the general form.
 //!
 //! # The same three bounds the header attacher has
@@ -20,16 +20,16 @@
 //!
 //! # What a rule reaches
 //!
-//! The five [`RuleTarget`](hexora_types::matchreplace::RuleTarget)s — request/response headers
+//! The five [`RuleTarget`](nullhawk_types::matchreplace::RuleTarget)s — request/response headers
 //! and bodies, and the request's first line. A body rewrite that changes the length updates a
 //! present `Content-Length` so the peer is not told a lie about how many bytes follow.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hexora_types::http::{Header, HttpRequest, HttpResponse};
-use hexora_types::matchreplace::{MatchReplaceRule, RuleTarget};
-use hexora_types::scope::Scope;
+use nullhawk_types::http::{Header, HttpRequest, HttpResponse};
+use nullhawk_types::matchreplace::{MatchReplaceRule, RuleTarget};
+use nullhawk_types::scope::Scope;
 use regex::Regex;
 
 use crate::hook::{Interceptor, RequestVerdict, ResponseVerdict};
@@ -183,7 +183,7 @@ impl Rewriter {
 }
 
 /// Rewrites a header section by rule, mutating `headers` in place. Returns whether it changed.
-fn rewrite_headers(headers: &mut hexora_types::http::Headers, rule: &Compiled) -> bool {
+fn rewrite_headers(headers: &mut nullhawk_types::http::Headers, rule: &Compiled) -> bool {
     // An empty pattern is "add this header": there is nothing to match, so the replacement is
     // parsed as `Name: value` and set (replacing any same-named header rather than duplicating).
     if rule.pattern.is_empty() {
@@ -194,7 +194,7 @@ fn rewrite_headers(headers: &mut hexora_types::http::Headers, rule: &Compiled) -
         return false;
     }
 
-    let mut rebuilt = hexora_types::http::Headers::new();
+    let mut rebuilt = nullhawk_types::http::Headers::new();
     let mut changed = false;
     for header in headers.iter() {
         let line = format!("{}: {}", header.name, header.value_lossy());
@@ -222,7 +222,7 @@ fn rewrite_headers(headers: &mut hexora_types::http::Headers, rule: &Compiled) -
 /// Rewrites a body by rule and keeps a present `Content-Length` honest. Returns whether it
 /// changed.
 fn rewrite_body(
-    headers: &mut hexora_types::http::Headers,
+    headers: &mut nullhawk_types::http::Headers,
     body: &mut bytes::Bytes,
     rule: &Compiled,
 ) -> bool {
@@ -316,8 +316,8 @@ impl Interceptor for Rewriting {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::HttpService;
-    use hexora_types::scope::ScopeRule;
+    use nullhawk_types::http::HttpService;
+    use nullhawk_types::scope::ScopeRule;
 
     use super::*;
     use crate::hook::PassThrough;
@@ -387,8 +387,8 @@ mod tests {
         let mut resp = HttpResponse {
             status: 200,
             reason: None,
-            version: hexora_types::http::HttpVersion::Http11,
-            headers: hexora_types::http::Headers::new(),
+            version: nullhawk_types::http::HttpVersion::Http11,
+            headers: nullhawk_types::http::Headers::new(),
             body: bytes::Bytes::new(),
             truncated: false,
         };

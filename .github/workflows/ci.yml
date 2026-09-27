@@ -43,13 +43,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude hexora-desktop --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude nullhawk-desktop --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --exclude hexora-desktop
+        run: cargo test --workspace --exclude nullhawk-desktop
 
       - name: Build CLI
-        run: cargo build -p hexora-cli --release
+        run: cargo build -p nullhawk-cli --release
 
   frontend:
     name: Frontend
@@ -134,7 +134,7 @@ jobs:
         working-directory: frontend
 
       - name: Check desktop shell
-        run: cargo check -p hexora-desktop --all-targets
+        run: cargo check -p nullhawk-desktop --all-targets
 
   audit:
     name: Dependency audit

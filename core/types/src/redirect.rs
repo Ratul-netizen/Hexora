@@ -1,16 +1,16 @@
 //! Where a `Location` header would actually send somebody.
 //!
 //! The naive check is `location.contains(my_value)`, and it is wrong in both
-//! directions. These all contain `hexora-probe.invalid`, and only three of them send a
+//! directions. These all contain `nullhawk-probe.invalid`, and only three of them send a
 //! browser there:
 //!
 //! ```text
-//! https://hexora-probe.invalid/               → hexora-probe.invalid     taken
-//! //hexora-probe.invalid/                     → hexora-probe.invalid     taken
-//! https://app.example.com@hexora-probe.invalid → hexora-probe.invalid    taken
-//! /redirect?to=https://hexora-probe.invalid   → app.example.com          carried
-//! https://app.example.com/?next=hexora-probe.invalid → app.example.com   carried
-//! https://hexora-probe.invalid.app.example.com → a fourth host entirely
+//! https://nullhawk-probe.invalid/               → nullhawk-probe.invalid     taken
+//! //nullhawk-probe.invalid/                     → nullhawk-probe.invalid     taken
+//! https://app.example.com@nullhawk-probe.invalid → nullhawk-probe.invalid    taken
+//! /redirect?to=https://nullhawk-probe.invalid   → app.example.com          carried
+//! https://app.example.com/?next=nullhawk-probe.invalid → app.example.com   carried
+//! https://nullhawk-probe.invalid.app.example.com → a fourth host entirely
 //! ```
 //!
 //! So the value is resolved the way a browser resolves it, and the answer is a **host**
@@ -29,7 +29,7 @@
 //!
 //! The check uses `.invalid` (RFC 2606), so even a mistake — a browser opened by hand,
 //! a library that follows automatically — reaches nothing. It also cannot be
-//! registered by anybody, so a redirect Hexora reported last year cannot be turned into
+//! registered by anybody, so a redirect Nullhawk reported last year cannot be turned into
 //! a live one by somebody buying the domain.
 
 use serde::{Deserialize, Serialize};
@@ -325,9 +325,9 @@ mod tests {
     fn a_value_merely_carried_in_a_query_string_is_not_a_destination() {
         // The single most common false positive a substring check produces.
         for location in [
-            "/redirect?to=https://hexora-probe.invalid",
-            "https://app.example.com/login?next=https://hexora-probe.invalid",
-            "/?u=//hexora-probe.invalid",
+            "/redirect?to=https://nullhawk-probe.invalid",
+            "https://app.example.com/login?next=https://nullhawk-probe.invalid",
+            "/?u=//nullhawk-probe.invalid",
         ] {
             let destination = to(location);
             assert!(
@@ -344,9 +344,9 @@ mod tests {
 
     #[test]
     fn an_absolute_url_to_another_host_leaves() {
-        let destination = to("https://hexora-probe.invalid/next");
+        let destination = to("https://nullhawk-probe.invalid/next");
         assert_eq!(destination.reach, Reach::Absolute);
-        assert_eq!(destination.host.as_deref(), Some("hexora-probe.invalid"));
+        assert_eq!(destination.host.as_deref(), Some("nullhawk-probe.invalid"));
         assert!(!destination.stays_on(BASE));
         assert!(destination.reach.leaves_the_host());
     }
@@ -354,9 +354,9 @@ mod tests {
     #[test]
     fn a_protocol_relative_url_leaves_and_carries_no_scheme_to_filter_on() {
         // The form a filter rejecting anything containing `http` lets straight through.
-        let destination = to("//hexora-probe.invalid/next");
+        let destination = to("//nullhawk-probe.invalid/next");
         assert_eq!(destination.reach, Reach::ProtocolRelative);
-        assert_eq!(destination.host.as_deref(), Some("hexora-probe.invalid"));
+        assert_eq!(destination.host.as_deref(), Some("nullhawk-probe.invalid"));
         assert!(!destination.stays_on(BASE));
     }
 
@@ -366,9 +366,9 @@ mod tests {
         // protocol-relative. A check that read them as paths would miss a bypass that
         // is in every cheat sheet.
         for location in [
-            "/\\hexora-probe.invalid",
-            "\\\\hexora-probe.invalid",
-            "/\\/hexora-probe.invalid",
+            "/\\nullhawk-probe.invalid",
+            "\\\\nullhawk-probe.invalid",
+            "/\\/nullhawk-probe.invalid",
         ] {
             let destination = to(location);
             assert!(
@@ -377,7 +377,7 @@ mod tests {
             );
             assert_eq!(
                 destination.host.as_deref(),
-                Some("hexora-probe.invalid"),
+                Some("nullhawk-probe.invalid"),
                 "{location}"
             );
         }
@@ -387,29 +387,29 @@ mod tests {
     fn the_host_is_what_follows_the_last_at_sign() {
         // Everything before `@` is userinfo. This is what defeats a check looking for
         // its own domain at the start of the value.
-        let destination = to("https://app.example.com@hexora-probe.invalid/");
+        let destination = to("https://app.example.com@nullhawk-probe.invalid/");
         assert_eq!(destination.reach, Reach::Userinfo);
-        assert_eq!(destination.host.as_deref(), Some("hexora-probe.invalid"));
+        assert_eq!(destination.host.as_deref(), Some("nullhawk-probe.invalid"));
         assert!(!destination.stays_on(BASE));
 
-        let destination = to("https://a@b@hexora-probe.invalid/");
-        assert_eq!(destination.host.as_deref(), Some("hexora-probe.invalid"));
+        let destination = to("https://a@b@nullhawk-probe.invalid/");
+        assert_eq!(destination.host.as_deref(), Some("nullhawk-probe.invalid"));
     }
 
     #[test]
     fn a_host_that_merely_ends_with_the_expected_one_is_a_different_machine() {
         // The attack the whole comparison exists to survive.
-        let destination = to("https://app.example.com.hexora-probe.invalid/");
+        let destination = to("https://app.example.com.nullhawk-probe.invalid/");
         assert_eq!(
             destination.host.as_deref(),
-            Some("app.example.com.hexora-probe.invalid")
+            Some("app.example.com.nullhawk-probe.invalid")
         );
         assert!(!destination.stays_on(BASE));
     }
 
     #[test]
     fn a_host_that_starts_with_the_expected_one_is_also_a_different_machine() {
-        let destination = to("https://hexora-probe.invalid.app.example.com.evil/");
+        let destination = to("https://nullhawk-probe.invalid.app.example.com.evil/");
         assert!(!destination.stays_on(BASE));
     }
 
@@ -417,8 +417,8 @@ mod tests {
     fn a_fragment_does_not_end_up_being_the_host() {
         // `https://elsewhere#@app.example.com` goes to `elsewhere`: the fragment ends
         // the authority before the `@` is reached.
-        let destination = to("https://hexora-probe.invalid#@app.example.com");
-        assert_eq!(destination.host.as_deref(), Some("hexora-probe.invalid"));
+        let destination = to("https://nullhawk-probe.invalid#@app.example.com");
+        assert_eq!(destination.host.as_deref(), Some("nullhawk-probe.invalid"));
         assert!(!destination.stays_on(BASE));
     }
 
@@ -467,8 +467,8 @@ mod tests {
     #[test]
     fn a_port_is_not_part_of_the_host() {
         assert_eq!(
-            to("https://hexora-probe.invalid:8443/").host.as_deref(),
-            Some("hexora-probe.invalid")
+            to("https://nullhawk-probe.invalid:8443/").host.as_deref(),
+            Some("nullhawk-probe.invalid")
         );
         assert_eq!(
             resolve("app.example.com", "https://app.example.com:8443/").reach,
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn the_header_is_quoted_back_but_not_at_any_length() {
-        let long = format!("https://hexora-probe.invalid/{}", "a".repeat(5000));
+        let long = format!("https://nullhawk-probe.invalid/{}", "a".repeat(5000));
         let destination = to(&long);
         assert!(destination.location.chars().count() <= LOCATION_LIMIT + 1);
         assert!(destination.location.ends_with('…'));

@@ -1,4 +1,4 @@
-//! `hexora report` — the document at the end of the engagement.
+//! `nullhawk report` — the document at the end of the engagement.
 //!
 //! Everything the report needs is already in the project, so this command is a render
 //! and nothing more: it sends no traffic, changes no triage state and writes nothing
@@ -10,11 +10,11 @@
 
 use std::path::Path;
 
-use hexora_report::{Format, Report, ReportOptions};
-use hexora_types::redact::RedactionPolicy;
-use hexora_types::{HexoraError, Result};
+use nullhawk_report::{Format, Report, ReportOptions};
+use nullhawk_types::redact::RedactionPolicy;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora report`.
+/// Options for `nullhawk report`.
 pub struct ReportArgs<'a> {
     pub project: &'a Path,
     /// `markdown`, `html` or `json`.
@@ -49,7 +49,7 @@ pub fn run(args: ReportArgs<'_>) -> Result<()> {
     // SARIF is the CI-export tier; the human-facing formats are free. Checked here rather
     // than at dispatch because the format is decided here.
     if format == Format::Sarif {
-        crate::license::gate().require(hexora_engine::license::Feature::SarifExport)?;
+        crate::license::gate().require(nullhawk_engine::license::Feature::SarifExport)?;
     }
 
     let project = crate::open_project(args.project)?;
@@ -82,9 +82,9 @@ pub fn run(args: ReportArgs<'_>) -> Result<()> {
         }
         Some(path) => {
             std::fs::write(path, &rendered).map_err(|e| {
-                HexoraError::invalid_input("--output", format!("{}: {e}", path.display()))
+                NullhawkError::invalid_input("--output", format!("{}: {e}", path.display()))
             })?;
-            // To stderr, so `hexora report … --output x.md` stays quiet on stdout and
+            // To stderr, so `nullhawk report … --output x.md` stays quiet on stdout and
             // the summary still shows up when the render is piped somewhere.
             eprintln!(
                 "Wrote {} ({} bytes): {}",
@@ -124,7 +124,7 @@ fn parse_format(value: &str) -> Result<Format> {
         "html" => Ok(Format::Html),
         "json" => Ok(Format::Json),
         "sarif" => Ok(Format::Sarif),
-        other => Err(HexoraError::invalid_input(
+        other => Err(NullhawkError::invalid_input(
             "--format",
             format!("{other:?} is not one of markdown, html, json, sarif"),
         )),

@@ -1,4 +1,4 @@
-//! `hexora import openapi` — turn an API description into traffic the scanner can work over.
+//! `nullhawk import openapi` — turn an API description into traffic the scanner can work over.
 //!
 //! An API has no HTML links, so the crawler cannot find its endpoints. Its OpenAPI/Swagger spec
 //! is the map instead: this reads it, builds a request per operation (path parameters filled,
@@ -16,15 +16,15 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_import::{ApiSpec, Operation};
-use hexora_storage::CapturedExchange;
-use hexora_types::http::{HttpRequest, HttpService};
-use hexora_types::{HexoraError, Result};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_import::{ApiSpec, Operation};
+use nullhawk_storage::CapturedExchange;
+use nullhawk_types::http::{HttpRequest, HttpService};
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora import openapi`.
+/// Options for `nullhawk import openapi`.
 pub struct Args<'a> {
     pub project: &'a Path,
     /// The spec file (OpenAPI 3.x or Swagger 2.0, JSON or YAML).
@@ -49,7 +49,7 @@ fn is_safe(method: &str) -> bool {
     matches!(method, "GET" | "HEAD" | "OPTIONS")
 }
 
-/// Options for `hexora import graphql`.
+/// Options for `nullhawk import graphql`.
 pub struct GraphqlArgs<'a> {
     pub project: &'a Path,
     /// The introspection result (JSON).
@@ -69,10 +69,11 @@ pub struct GraphqlArgs<'a> {
 
 /// Reads a GraphQL introspection result and either lists or POSTs the operations it implies.
 pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
-    let bytes = std::fs::read(args.spec)
-        .map_err(|e| HexoraError::invalid_input("spec", format!("{}: {e}", args.spec.display())))?;
-    let api = hexora_import::parse_introspection(&bytes)
-        .map_err(|e| HexoraError::invalid_input("spec", e.message))?;
+    let bytes = std::fs::read(args.spec).map_err(|e| {
+        NullhawkError::invalid_input("spec", format!("{}: {e}", args.spec.display()))
+    })?;
+    let api = nullhawk_import::parse_introspection(&bytes)
+        .map_err(|e| NullhawkError::invalid_input("spec", e.message))?;
 
     if !args.send {
         if args.json {
@@ -110,7 +111,7 @@ pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
     }
 
     if args.json && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "an import sends traffic, and --json cannot ask; pass --yes to confirm",
         ));
@@ -121,7 +122,7 @@ pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
     let scope = Arc::new(project.settings().scope()?);
     let attached = project.settings().attached_headers()?;
 
-    let planned: Vec<&hexora_import::GraphqlOp> = api
+    let planned: Vec<&nullhawk_import::GraphqlOp> = api
         .operations
         .iter()
         .filter(|op| !op.is_mutation() || args.include_mutations)
@@ -165,7 +166,7 @@ pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let mut recorded = 0usize;
     let mut failed = 0usize;
@@ -223,7 +224,7 @@ pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
             println!("{failed} did not complete (out of scope, or the host did not answer).");
         }
         println!(
-            "Scan the new traffic with `hexora scan passive {}`.",
+            "Scan the new traffic with `nullhawk scan passive {}`.",
             args.project.display()
         );
     }
@@ -232,10 +233,11 @@ pub fn graphql(args: GraphqlArgs<'_>) -> Result<()> {
 
 /// Reads and parses the spec, resolves the base URL, and either lists or sends.
 pub fn openapi(args: Args<'_>) -> Result<()> {
-    let bytes = std::fs::read(args.spec)
-        .map_err(|e| HexoraError::invalid_input("spec", format!("{}: {e}", args.spec.display())))?;
-    let spec =
-        hexora_import::parse(&bytes).map_err(|e| HexoraError::invalid_input("spec", e.message))?;
+    let bytes = std::fs::read(args.spec).map_err(|e| {
+        NullhawkError::invalid_input("spec", format!("{}: {e}", args.spec.display()))
+    })?;
+    let spec = nullhawk_import::parse(&bytes)
+        .map_err(|e| NullhawkError::invalid_input("spec", e.message))?;
 
     let base = resolve_base(&spec, args.base)?;
 
@@ -253,7 +255,7 @@ fn resolve_base(spec: &ApiSpec, override_base: Option<&str>) -> Result<String> {
     }
     match spec.servers.first() {
         Some(server) => Ok(server.trim_end_matches('/').to_string()),
-        None => Err(HexoraError::invalid_input(
+        None => Err(NullhawkError::invalid_input(
             "--base",
             "the spec declares no server URL, so give one with --base https://host",
         )),
@@ -347,7 +349,7 @@ fn send(args: &Args<'_>, spec: &ApiSpec, base: &str) -> Result<()> {
         }
     }
     if args.json && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "an import sends traffic, and --json cannot ask; pass --yes to confirm",
         ));
@@ -365,7 +367,7 @@ fn send(args: &Args<'_>, spec: &ApiSpec, base: &str) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let mut recorded = 0usize;
     let mut failed = 0usize;
@@ -427,7 +429,7 @@ fn send(args: &Args<'_>, spec: &ApiSpec, base: &str) -> Result<()> {
             println!("{failed} did not complete (out of scope, or the host did not answer).");
         }
         println!(
-            "Scan the new traffic with `hexora scan passive {}`.",
+            "Scan the new traffic with `nullhawk scan passive {}`.",
             args.project.display()
         );
     }

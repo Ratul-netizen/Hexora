@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hexora_types::http::{HttpRequest, HttpResponse};
+use nullhawk_types::http::{HttpRequest, HttpResponse};
 use tokio::sync::{mpsc, oneshot};
 
 /// How long to wait for a verdict before falling back.
@@ -134,7 +134,7 @@ pub trait Interceptor: Send + Sync + 'static {
     /// (and [`Self::intercepts_websocket`]) rather than every interceptor having to.
     async fn on_websocket_message(
         &self,
-        direction: hexora_types::ws::WsDirection,
+        direction: nullhawk_types::ws::WsDirection,
         opcode: u8,
         payload: &[u8],
     ) -> WsVerdict {
@@ -437,7 +437,7 @@ impl InterceptHandle {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::HttpService;
+    use nullhawk_types::http::HttpService;
 
     use super::*;
 
@@ -449,8 +449,8 @@ mod tests {
         HttpResponse {
             status,
             reason: None,
-            version: hexora_types::http::HttpVersion::Http11,
-            headers: hexora_types::http::Headers::new(),
+            version: nullhawk_types::http::HttpVersion::Http11,
+            headers: nullhawk_types::http::Headers::new(),
             body: bytes::Bytes::new(),
             truncated: false,
         }

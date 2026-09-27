@@ -1,4 +1,4 @@
-//! `hexora fuzz` — one request, many values, and what came back.
+//! `nullhawk fuzz` — one request, many values, and what came back.
 //!
 //! The tool a tester reaches for between the repeater and the scanner: take a request
 //! that already works, vary one thing in it, and read the column that does not match.
@@ -21,23 +21,23 @@
 //! The scheduler refuses anything that might change data, because a *queue* deciding
 //! that on its own is not a test anybody consented to. A tester who types this command
 //! has decided. So the method and the request count are printed and confirmed before
-//! anything goes out, which is the same bargain `hexora authz` makes.
+//! anything goes out, which is the same bargain `nullhawk authz` makes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hexora_active::{Budget, Cancel};
-use hexora_engine::guard::ScopeGuard;
-use hexora_fuzz::{describe, Attack, AttackMode, Run};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_repeater::Repeater;
-use hexora_types::ids::RequestId;
-use hexora_types::inject::{inputs, locate};
-use hexora_types::object::ObjectLocation;
-use hexora_types::{HexoraError, Result};
-use hexora_verify::RepeaterLab;
+use nullhawk_active::{Budget, Cancel};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_fuzz::{describe, Attack, AttackMode, Run};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_repeater::Repeater;
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::inject::{inputs, locate};
+use nullhawk_types::object::ObjectLocation;
+use nullhawk_types::{NullhawkError, Result};
+use nullhawk_verify::RepeaterLab;
 
-/// Options for `hexora fuzz`.
+/// Options for `nullhawk fuzz`.
 pub struct Args<'a> {
     pub project: &'a Path,
     /// The request to vary.
@@ -70,11 +70,11 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     let project = crate::open_project(args.project)?;
     let store = Arc::new(project.traffic());
     let id: RequestId = args.id.parse().map_err(|e| {
-        HexoraError::invalid_input("id", format!("{} is not a request id: {e}", args.id))
+        NullhawkError::invalid_input("id", format!("{} is not a request id: {e}", args.id))
     })?;
 
     let mode = AttackMode::parse(args.mode).ok_or_else(|| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "--mode",
             format!(
                 "{:?} is not an attack mode. Use sniper, battering-ram, pitchfork or cluster-bomb",
@@ -132,7 +132,7 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     };
     budget
         .check()
-        .map_err(|why| HexoraError::invalid_input("budget", why))?;
+        .map_err(|why| NullhawkError::invalid_input("budget", why))?;
 
     let method = draft.request.method.clone();
     let url = draft.request.url();
@@ -149,14 +149,14 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
 
     if !args.yes {
         if args.json {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "--yes",
                 "this sends traffic and --json cannot ask. Pass --yes, or use --dry-run",
             ));
         }
         // Named explicitly for a method that may change something. The scheduler
         // refuses these outright; a person may decide otherwise, having been told.
-        if hexora_active::is_state_changing(&method) {
+        if nullhawk_active::is_state_changing(&method) {
             println!();
             println!(
                 "{method} may change data on the target, and this will send it up to {} times.",
@@ -173,7 +173,7 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let lab = RepeaterLab::scanner(&repeater);
     let cancel = Cancel::new();
@@ -190,10 +190,10 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
 /// Runs the attack, with Ctrl-C wired to the run's own stop signal.
 async fn stoppable(
     attack: &Attack<'_>,
-    lab: &dyn hexora_verify::Lab,
+    lab: &dyn nullhawk_verify::Lab,
     cancel: &Cancel,
 ) -> Result<Run> {
-    let run = hexora_fuzz::run_attack(attack, lab, cancel);
+    let run = nullhawk_fuzz::run_attack(attack, lab, cancel);
     tokio::pin!(run);
 
     tokio::select! {
@@ -216,12 +216,12 @@ async fn stoppable(
 /// header name and may be repeated. A tester who mistypes a name is told what the request
 /// actually has rather than left to guess.
 fn positions(
-    request: &hexora_types::http::HttpRequest,
+    request: &nullhawk_types::http::HttpRequest,
     args: &Args<'_>,
 ) -> Result<Vec<ObjectLocation>> {
     if let Some(value) = args.replacing {
         let at = locate(request, value).into_iter().next().ok_or_else(|| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "--replacing",
                 format!("`{value}` does not appear in this request"),
             )
@@ -230,7 +230,7 @@ fn positions(
     }
 
     if args.at.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--at",
             format!(
                 "say where the payloads go: --at <name> (repeatable) or --replacing <value>. \
@@ -253,7 +253,7 @@ fn positions(
             })
             .cloned()
             .ok_or_else(|| {
-                HexoraError::invalid_input(
+                NullhawkError::invalid_input(
                     "--at",
                     format!(
                         "this request has no `{name}` to vary. It offers {}",
@@ -280,7 +280,7 @@ fn list(available: &[ObjectLocation]) -> String {
 /// The payload lists, one per `--payloads` file.
 fn payload_lists(args: &Args<'_>) -> Result<Vec<Vec<String>>> {
     if args.payloads.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--payloads",
             "give a file of payloads, one per line (one file per position for pitchfork and \
              cluster-bomb)",
@@ -292,7 +292,7 @@ fn payload_lists(args: &Args<'_>) -> Result<Vec<Vec<String>>> {
 /// Reads one payload file into a list, dropping blank lines and Windows carriage returns.
 fn read_list(path: &Path) -> Result<Vec<String>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "--payloads",
             format!("{} could not be read: {e}", path.display()),
         )
@@ -304,7 +304,7 @@ fn read_list(path: &Path) -> Result<Vec<String>> {
         .map(str::to_string)
         .collect();
     if list.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--payloads",
             format!("{} has no payloads in it", path.display()),
         ));
@@ -392,8 +392,8 @@ fn print_human(run: &Run) {
             println!("  … and {} more", outliers.len() - 20);
         }
         println!();
-        println!("Open one with `hexora history <project> --id <request>`, or compare two");
-        println!("with `hexora repeat <project> <a> --diff <b>`. Nothing here is a finding:");
+        println!("Open one with `nullhawk history <project> --id <request>`, or compare two");
+        println!("with `nullhawk repeat <project> <a> --diff <b>`. Nothing here is a finding:");
         println!("what a difference means is a judgement about this application.");
     }
 

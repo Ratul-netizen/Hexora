@@ -1,4 +1,4 @@
-//! `hexora history` — read back what the proxy captured.
+//! `nullhawk history` — read back what the proxy captured.
 //!
 //! The proxy prints exchanges as they happen, which is useful while browsing and
 //! useless afterwards. This reads the project instead, so a session from yesterday is
@@ -6,22 +6,22 @@
 
 use std::path::Path;
 
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_types::ids::RequestId;
-use hexora_types::{HexoraError, Result};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora history`.
+/// Options for `nullhawk history`.
 pub struct HistoryArgs<'a> {
     pub project: &'a Path,
     pub limit: u32,
     pub after: Option<&'a str>,
-    /// A filter query (see `hexora-query`). When set, the whole project is scanned and only
+    /// A filter query (see `nullhawk-query`). When set, the whole project is scanned and only
     /// matching rows are shown, up to `limit`.
     pub query: Option<&'a str>,
     pub json: bool,
 }
 
-/// Options for `hexora history --body`.
+/// Options for `nullhawk history --body`.
 pub struct BodyArgs<'a> {
     pub project: &'a Path,
     pub id: &'a str,
@@ -41,8 +41,8 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
     // Without one, page normally from the cursor.
     let (items, next, scanned): (Vec<_>, Option<Cursor>, Option<u64>) = match args.query {
         Some(q) => {
-            let query = hexora_query::Query::parse(q)
-                .map_err(|e| HexoraError::invalid_input("--query", e.message))?;
+            let query = nullhawk_query::Query::parse(q)
+                .map_err(|e| NullhawkError::invalid_input("--query", e.message))?;
             let mut matched = Vec::new();
             let mut scanned = 0u64;
             let mut cursor: Option<Cursor> = None;
@@ -111,7 +111,7 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
             println!("No captured traffic in {}.", args.project.display());
             println!();
             println!("Run the proxy against this project to record some:");
-            println!("  hexora proxy --project {}", args.project.display());
+            println!("  nullhawk proxy --project {}", args.project.display());
         }
         return Ok(());
     }
@@ -146,8 +146,8 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
         // for byte, so the method and path beside it are a reading of those bytes
         // rather than a description of them.
         let mode = match item.mode {
-            hexora_types::raw::RequestMode::Raw => "  [raw]",
-            hexora_types::raw::RequestMode::Structured => "",
+            nullhawk_types::raw::RequestMode::Raw => "  [raw]",
+            nullhawk_types::raw::RequestMode::Structured => "",
         };
         println!(
             "{:<38} {status:>3} {:<6} {:>8} {duration:>7}  {}{identity}{mode}{quirks}",
@@ -168,7 +168,7 @@ pub fn list(args: HistoryArgs<'_>) -> Result<()> {
     }
     if let Some(next) = &next {
         println!(
-            "Next page: hexora history {} --after {}",
+            "Next page: nullhawk history {} --after {}",
             args.project.display(),
             next.0
         );
@@ -189,12 +189,12 @@ pub fn body(args: BodyArgs<'_>) -> Result<()> {
 
     std::io::stdout()
         .write_all(&bytes)
-        .map_err(|e| HexoraError::Internal(format!("writing the body to stdout: {e}")))
+        .map_err(|e| NullhawkError::Internal(format!("writing the body to stdout: {e}")))
 }
 
-fn open(path: &Path) -> Result<hexora_storage::Project> {
+fn open(path: &Path) -> Result<nullhawk_storage::Project> {
     if !path.join("project.db").exists() {
-        return Err(HexoraError::not_found(
+        return Err(NullhawkError::not_found(
             "project",
             path.display().to_string(),
         ));
@@ -220,16 +220,16 @@ mod tests {
         let store = project.traffic();
         for i in 0..exchanges {
             store
-                .record(&hexora_storage::CapturedExchange {
-                    request: hexora_types::http::HttpRequest::get(
-                        hexora_types::http::HttpService::new("example.com", 443, true),
+                .record(&nullhawk_storage::CapturedExchange {
+                    request: nullhawk_types::http::HttpRequest::get(
+                        nullhawk_types::http::HttpService::new("example.com", 443, true),
                         format!("/{i}"),
                     ),
-                    response: hexora_types::http::HttpResponse {
+                    response: nullhawk_types::http::HttpResponse {
                         status: 200,
                         reason: Some("OK".into()),
-                        version: hexora_types::http::HttpVersion::Http11,
-                        headers: hexora_types::http::Headers::new(),
+                        version: nullhawk_types::http::HttpVersion::Http11,
+                        headers: nullhawk_types::http::Headers::new(),
                         body: bytes::Bytes::from(format!("body {i}")),
                         truncated: false,
                     },

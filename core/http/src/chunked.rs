@@ -19,15 +19,15 @@
 //! [`Decoder`] is a state machine fed whatever bytes have arrived so far. That is what
 //! lets the proxy forward a chunk the moment it is complete instead of waiting for the
 //! terminating chunk — a server can legitimately stream for minutes, and buffering the
-//! whole response first would make Hexora useless for anything long-lived.
+//! whole response first would make Nullhawk useless for anything long-lived.
 //!
 //! [`decode`] is the one-shot convenience wrapper, built on the same state machine so
 //! there is only ever one parser to get right.
 
 use bytes::{Buf, Bytes, BytesMut};
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::http::{Header, Headers};
-use hexora_types::limits::Limits;
+use nullhawk_types::error::{NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::{Header, Headers};
+use nullhawk_types::limits::Limits;
 
 use crate::parse::Quirk;
 
@@ -98,8 +98,8 @@ impl Decoder {
                         State::Trailers
                     } else {
                         let size = usize::try_from(size).map_err(|_| {
-                            HexoraError::LimitExceeded(
-                                hexora_types::error::LimitError::BodyTooLarge {
+                            NullhawkError::LimitExceeded(
+                                nullhawk_types::error::LimitError::BodyTooLarge {
                                     limit: limits.max_body_bytes,
                                 },
                             )
@@ -175,8 +175,8 @@ impl Decoder {
                     }
 
                     if self.trailers.len() >= limits.max_header_count {
-                        return Err(HexoraError::LimitExceeded(
-                            hexora_types::error::LimitError::HeadersTooLarge {
+                        return Err(NullhawkError::LimitExceeded(
+                            nullhawk_types::error::LimitError::HeadersTooLarge {
                                 limit: limits.max_header_count,
                             },
                         ));
@@ -348,8 +348,8 @@ fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
     bytes
 }
 
-fn malformed(reason: &str) -> HexoraError {
-    HexoraError::Protocol(ProtocolError::InvalidChunkedEncoding(reason.to_string()))
+fn malformed(reason: &str) -> NullhawkError {
+    NullhawkError::Protocol(ProtocolError::InvalidChunkedEncoding(reason.to_string()))
 }
 
 #[cfg(test)]

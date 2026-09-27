@@ -1,6 +1,6 @@
-//! # hexora-query
+//! # nullhawk-query
 //!
-//! A small query language over captured traffic — Hexora's answer to Burp's Bambda filters
+//! A small query language over captured traffic — Nullhawk's answer to Burp's Bambda filters
 //! and Caido's HTTPQL. A tester types a filter and the history shows only the rows that match:
 //!
 //! ```text

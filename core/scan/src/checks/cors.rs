@@ -15,12 +15,12 @@
 //! difference is a second request carrying a different `Origin`, and sending one is
 //! exactly what this crate does not do.
 //!
-//! So it becomes a [`Hypothesis`](hexora_types::finding::Hypothesis), which is
+//! So it becomes a [`Hypothesis`](nullhawk_types::finding::Hypothesis), which is
 //! recorded, counted, shown to the tester — and turns into nothing at all until an
 //! active verifier runs the experiment. Filing it as a finding here would be claiming
 //! the result of a test nobody ran.
 
-use hexora_types::finding::Hypothesis;
+use nullhawk_types::finding::Hypothesis;
 
 use super::prelude::*;
 

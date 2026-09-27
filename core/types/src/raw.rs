@@ -29,12 +29,12 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::error::HexoraError;
+use crate::error::NullhawkError;
 use crate::http::{HttpRequest, HttpService};
 
-/// The largest raw request Hexora will send.
+/// The largest raw request Nullhawk will send.
 ///
-/// Raw mode exists to let a tester write unusual HTTP, not to make Hexora a generator
+/// Raw mode exists to let a tester write unusual HTTP, not to make Nullhawk a generator
 /// of arbitrarily large writes. The bound is generous enough for any hand-written
 /// request and any captured one worth editing.
 pub const MAX_RAW_REQUEST_BYTES: usize = 8 * 1024 * 1024;
@@ -90,19 +90,19 @@ impl RawRequest {
     /// established.
     ///
     /// The checks are deliberately few, and none of them is about well-formedness:
-    /// raw mode is for malformed requests. What must hold is that Hexora can answer
+    /// raw mode is for malformed requests. What must hold is that Nullhawk can answer
     /// "where is this going?" — because the scope guard asks, and a request that
     /// cannot answer must not be sent.
     pub fn new(service: HttpService, bytes: impl Into<Bytes>) -> crate::Result<Self> {
         let bytes = bytes.into();
         if bytes.is_empty() {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "raw",
                 "a raw request cannot be empty",
             ));
         }
         if bytes.len() > MAX_RAW_REQUEST_BYTES {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "raw",
                 format!(
                     "a raw request may be at most {MAX_RAW_REQUEST_BYTES} bytes; this \
@@ -115,7 +115,7 @@ impl RawRequest {
         let raw = Self { service, bytes };
         // Asked once, here, so every later caller can rely on the answer existing.
         raw.request_line().ok_or_else(|| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "raw",
                 "the first line is not a readable request line, so there is no way to \
                  tell what this request asks for. Scope is checked against the target, \
@@ -342,7 +342,7 @@ impl RawH2Request {
     /// Parses the editor's text form for a request addressed to `service`: `name: value`
     /// per line, a blank line, then the body. Order, casing and duplicates are preserved,
     /// and a line without a `: ` separator is refused rather than guessed at.
-    pub fn parse(service: HttpService, text: &str) -> Result<Self, HexoraError> {
+    pub fn parse(service: HttpService, text: &str) -> Result<Self, NullhawkError> {
         let (head, body) = match text.split_once("\n\n") {
             Some((head, body)) => (head, body),
             None => (text, ""),
@@ -355,7 +355,7 @@ impl RawH2Request {
                 continue;
             }
             let (name, value) = line.split_once(": ").ok_or_else(|| {
-                HexoraError::invalid_input(
+                NullhawkError::invalid_input(
                     "h2-request",
                     format!("line {line:?} is not in `name: value` form"),
                 )
@@ -367,7 +367,7 @@ impl RawH2Request {
         }
 
         if headers.is_empty() {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "h2-request",
                 "a request needs at least the pseudo-headers (:method, :path, :scheme, :authority)",
             ));

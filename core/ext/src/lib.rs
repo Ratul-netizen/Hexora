@@ -1,4 +1,4 @@
-//! # hexora-ext
+//! # nullhawk-ext
 //!
 //! The extension SDK contract: what an extension **is** to the host, and the permission-gated
 //! registry that installs one. An extension is a signed-off manifest plus a WASM module; this
@@ -10,7 +10,7 @@
 //!
 //! Installing an extension means running someone else's code inside a tool that holds session
 //! cookies and a client's traffic. The permission model
-//! ([`hexora_engine::permission`]) enforces invariant 4 — nothing is granted implicitly — and
+//! ([`nullhawk_engine::permission`]) enforces invariant 4 — nothing is granted implicitly — and
 //! this crate carries it through: an [`InstalledExtension`] cannot be created enabled unless the
 //! capabilities its manifest marks **required** were actually granted. An extension whose
 //! requirements were declined installs disabled, not half-working.
@@ -26,7 +26,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use hexora_engine::permission::{Capability, GrantSet, PermissionRequest};
+pub use nullhawk_engine::permission::{Capability, GrantSet, PermissionRequest};
 
 /// The extension API version this build speaks. An extension declaring a newer version is
 /// refused rather than loaded against a contract it does not match.
@@ -70,7 +70,7 @@ pub struct Manifest {
     pub name: String,
     /// The extension's own version string.
     pub version: String,
-    /// The Hexora extension API version it targets. Must be `<= CURRENT_API_VERSION`.
+    /// The Nullhawk extension API version it targets. Must be `<= CURRENT_API_VERSION`.
     pub api_version: u32,
     /// What it plugs into.
     pub kind: ExtensionKind,

@@ -1,4 +1,4 @@
-//! `hexora scope` — what this engagement is authorized to touch.
+//! `nullhawk scope` — what this engagement is authorized to touch.
 //!
 //! Scope is not a filter for tidiness. It is the control that decides whether an
 //! automated subsystem may send anything at all: the guard refuses automated traffic
@@ -10,8 +10,8 @@
 
 use std::path::Path;
 
-use hexora_types::scope::{PathMatch, SchemeMatch, ScopeRule};
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::scope::{PathMatch, SchemeMatch, ScopeRule};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Prints the project's scope.
 pub fn list(project: &Path, json: bool) -> Result<()> {
@@ -24,7 +24,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
 
     if scope.include.is_empty() {
         println!("Scope is empty. No automated component will send any traffic.");
-        println!("Add an authorized host with `hexora scope add <host>`.");
+        println!("Add an authorized host with `nullhawk scope add <host>`.");
         return Ok(());
     }
 
@@ -50,7 +50,7 @@ pub fn add(
     json: bool,
 ) -> Result<()> {
     if host.trim().is_empty() {
-        return Err(HexoraError::invalid_input("host", "host cannot be empty"));
+        return Err(NullhawkError::invalid_input("host", "host cannot be empty"));
     }
 
     let settings = crate::open_project(project)?.settings();
@@ -73,7 +73,7 @@ pub fn add(
         &mut scope.include
     };
     if target.contains(&rule) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "host",
             format!("{host} is already in the project scope"),
         ));
@@ -112,7 +112,7 @@ pub fn remove(project: &Path, host: &str, json: bool) -> Result<()> {
     let removed = before - (scope.include.len() + scope.exclude.len());
 
     if removed == 0 {
-        return Err(HexoraError::not_found("scope rule", host.to_string()));
+        return Err(NullhawkError::not_found("scope rule", host.to_string()));
     }
     settings.set_scope(&scope)?;
 

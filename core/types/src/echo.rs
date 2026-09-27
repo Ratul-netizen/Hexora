@@ -22,7 +22,7 @@
 //! Nothing here concludes that anything is exploitable. `<` arriving unencoded inside
 //! an HTML text node is a fact about bytes; whether it is a vulnerability depends on a
 //! Content-Security-Policy this module cannot see, a framework that may re-encode on
-//! render, and a page a person has to look at. Hexora says what came back and where,
+//! render, and a page a person has to look at. Nullhawk says what came back and where,
 //! and the tester decides — which is the difference between a finding somebody acts on
 //! and one they argue with.
 //!

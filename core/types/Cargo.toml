@@ -1,6 +1,6 @@
 [package]
-name = "hexora-types"
-description = "Shared domain model for the Hexora security platform"
+name = "nullhawk-types"
+description = "Shared domain model for the Nullhawk security platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

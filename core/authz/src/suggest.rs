@@ -40,13 +40,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use hexora_storage::repository::Limit;
-use hexora_storage::{CandidateStore, ObjectStore, Suggested, TrafficStore};
-use hexora_types::candidate::{IdentifierCandidate, Signal, SignalKind};
-use hexora_types::ids::RequestId;
-use hexora_types::object::ObjectLocation;
-use hexora_types::redact::is_sensitive_header;
-use hexora_types::Result;
+use nullhawk_storage::repository::Limit;
+use nullhawk_storage::{CandidateStore, ObjectStore, Suggested, TrafficStore};
+use nullhawk_types::candidate::{IdentifierCandidate, Signal, SignalKind};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::object::ObjectLocation;
+use nullhawk_types::redact::is_sensitive_header;
+use nullhawk_types::Result;
 
 /// Parameter names that usually mean paging rather than identity.
 ///
@@ -312,7 +312,7 @@ fn varying_places(observations: &[Observation]) -> BTreeSet<String> {
 /// `/accounts/1000/invoices` and `/accounts/2000/invoices` both become
 /// `/accounts/{}/invoices`, which is what makes a query parameter under them one place
 /// rather than two.
-fn template_for(request: &hexora_storage::StoredRequest, varying: &BTreeSet<String>) -> String {
+fn template_for(request: &nullhawk_storage::StoredRequest, varying: &BTreeSet<String>) -> String {
     let path = path_of(request);
     let segments: Vec<&str> = path.strip_prefix('/').unwrap_or(path).split('/').collect();
     let rendered: Vec<&str> = segments
@@ -340,23 +340,27 @@ fn shape_of(segments: &[&str], index: usize) -> String {
 }
 
 /// The key that groups "this position, in this shape of request".
-fn path_place(request: &hexora_storage::StoredRequest, segments: &[&str], index: usize) -> String {
+fn path_place(
+    request: &nullhawk_storage::StoredRequest,
+    segments: &[&str],
+    index: usize,
+) -> String {
     format!("path|{}|{}", request.method, shape_of(segments, index))
 }
 
-fn path_of(request: &hexora_storage::StoredRequest) -> &str {
+fn path_of(request: &nullhawk_storage::StoredRequest) -> &str {
     match request.path.split_once('?') {
         Some((path, _)) => path,
         None => request.path.as_str(),
     }
 }
 
-fn query_of(request: &hexora_storage::StoredRequest) -> Option<&str> {
+fn query_of(request: &nullhawk_storage::StoredRequest) -> Option<&str> {
     request.path.split_once('?').map(|(_, query)| query)
 }
 
 /// Every path segment of one request, with the place that groups it.
-fn observe_path(request: &hexora_storage::StoredRequest) -> Vec<Observation> {
+fn observe_path(request: &nullhawk_storage::StoredRequest) -> Vec<Observation> {
     let path = path_of(request);
     let segments: Vec<&str> = path.strip_prefix('/').unwrap_or(path).split('/').collect();
 
@@ -384,7 +388,7 @@ fn observe_path(request: &hexora_storage::StoredRequest) -> Vec<Observation> {
 }
 
 /// Query parameter values, keyed on the path *template* rather than the literal path.
-fn observe_query(request: &hexora_storage::StoredRequest, template: &str) -> Vec<Observation> {
+fn observe_query(request: &nullhawk_storage::StoredRequest, template: &str) -> Vec<Observation> {
     let mut found = Vec::new();
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -414,7 +418,7 @@ fn observe_query(request: &hexora_storage::StoredRequest, template: &str) -> Vec
 /// Most headers carry no identifiers, and a credential is never one — it varies
 /// between requests more reliably than anything else in them, which is exactly why the
 /// filter is on the field name rather than on the behaviour.
-fn observe_headers(request: &hexora_storage::StoredRequest) -> Vec<Observation> {
+fn observe_headers(request: &nullhawk_storage::StoredRequest) -> Vec<Observation> {
     let mut found = Vec::new();
     let mut header_names: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -453,7 +457,7 @@ const LF: char = '\n';
 /// The body is *read*, never rewritten. Values are taken as they appear in the bytes,
 /// so a form field that is percent-encoded stays percent-encoded — a suggestion that
 /// silently decoded it would propose a value the application never saw.
-fn observe_body(request: &hexora_storage::StoredRequest, template: &str) -> Vec<Observation> {
+fn observe_body(request: &nullhawk_storage::StoredRequest, template: &str) -> Vec<Observation> {
     let mut found = Vec::new();
     if request.body.is_empty() {
         return found;
@@ -789,15 +793,15 @@ fn collect_json(value: &serde_json::Value, pointer: String, out: &mut Vec<(Strin
 mod tests {
     use std::sync::Arc;
 
-    use hexora_storage::{
+    use nullhawk_storage::{
         CandidateFilter, CapturedExchange, MemoryBlobStore, Project, StoredRequest,
     };
-    use hexora_types::candidate::{CandidateStatus, Strength};
-    use hexora_types::http::{
+    use nullhawk_types::candidate::{CandidateStatus, Strength};
+    use nullhawk_types::http::{
         Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion,
     };
-    use hexora_types::identity::Identity;
-    use hexora_types::object::ObjectDeclaration;
+    use nullhawk_types::identity::Identity;
+    use nullhawk_types::object::ObjectDeclaration;
 
     use super::*;
 
@@ -1439,7 +1443,7 @@ mod tests {
             .unwrap()
             .execute(
                 "DELETE FROM requests WHERE id = ?1",
-                hexora_storage::rusqlite::params![first.to_string()],
+                nullhawk_storage::rusqlite::params![first.to_string()],
             )
             .unwrap();
 

@@ -1,4 +1,4 @@
-//! # hexora-fuzz
+//! # nullhawk-fuzz
 //!
 //! One request, many values, and a readable account of what came back.
 //!
@@ -20,7 +20,7 @@
 //! Nothing here concludes anything. A response that differs is a response that differs;
 //! whether `operator` being a valid username matters is a judgement about the
 //! application, and the person who chose the payload list is the one making it. So this
-//! crate has no [`Verified`](hexora_types::verify::Verified), raises no hypothesis and
+//! crate has no [`Verified`](nullhawk_types::verify::Verified), raises no hypothesis and
 //! writes nothing into the findings store. It is a **workbench tool** that happens to
 //! reuse the scanner's safety machinery, and keeping it that way is what stops it
 //! becoming a second scanner with worse evidence.
@@ -49,13 +49,13 @@
 
 use std::time::{Duration, Instant};
 
-use hexora_active::{Budget, Cancel, StoppedBecause};
-use hexora_types::ids::RequestId;
-use hexora_types::inject::substitute;
-use hexora_types::object::ObjectLocation;
-use hexora_types::structure::{Diff, Policy};
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_active::{Budget, Cancel, StoppedBecause};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::inject::substitute;
+use nullhawk_types::object::ObjectLocation;
+use nullhawk_types::structure::{Diff, Policy};
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 /// The longest payload echoed back into a table.
 const PAYLOAD_LIMIT: usize = 48;
@@ -223,7 +223,7 @@ impl Run {
 /// What to iterate, and where.
 pub struct Plan<'a> {
     /// The request to vary.
-    pub draft: &'a hexora_repeater::Draft,
+    pub draft: &'a nullhawk_repeater::Draft,
     /// Where in it the payload goes.
     pub at: ObjectLocation,
     /// The values, in order.
@@ -357,7 +357,7 @@ struct Placement {
 /// A multi-position attack: the request, where the markers are, the lists, and the shape.
 pub struct Attack<'a> {
     /// The request to vary.
-    pub draft: &'a hexora_repeater::Draft,
+    pub draft: &'a nullhawk_repeater::Draft,
     /// The marked positions, in order.
     pub positions: Vec<ObjectLocation>,
     /// Sniper and Battering ram take exactly one list; Pitchfork and Cluster bomb take one
@@ -372,7 +372,7 @@ pub struct Attack<'a> {
 impl Attack<'_> {
     /// Checks the positions and lists are consistent with the mode, before anything is sent.
     pub fn validate(&self) -> Result<()> {
-        let bad = |why: String| Err(hexora_types::HexoraError::invalid_input("attack", why));
+        let bad = |why: String| Err(nullhawk_types::NullhawkError::invalid_input("attack", why));
         if self.positions.is_empty() {
             return bad("an attack needs at least one marked position".into());
         }
@@ -569,10 +569,10 @@ impl Attack<'_> {
 /// one cannot shift the byte offset of a later one. Query and header positions address by name
 /// and occurrence, so their order does not matter.
 fn apply(
-    draft: &hexora_repeater::Draft,
+    draft: &nullhawk_repeater::Draft,
     positions: &[ObjectLocation],
     placement: &Placement,
-) -> std::result::Result<hexora_repeater::Draft, String> {
+) -> std::result::Result<nullhawk_repeater::Draft, String> {
     let mut ordered: Vec<&(usize, String)> = placement.subs.iter().collect();
     ordered.sort_by_key(|(index, _)| match &positions[*index] {
         ObjectLocation::Body { offset } => usize::MAX - offset,
@@ -596,7 +596,7 @@ pub async fn run_attack(attack: &Attack<'_>, lab: &dyn Lab, cancel: &Cancel) -> 
     attack
         .budget
         .check()
-        .map_err(|why| hexora_types::HexoraError::invalid_input("budget", why))?;
+        .map_err(|why| nullhawk_types::NullhawkError::invalid_input("budget", why))?;
 
     let mut sent = 0usize;
     let baseline = match send(attack.draft, lab, "(unchanged)").await {
@@ -669,7 +669,7 @@ pub async fn run_attack(attack: &Attack<'_>, lab: &dyn Lab, cancel: &Cancel) -> 
 pub async fn run(plan: &Plan<'_>, lab: &dyn Lab, cancel: &Cancel) -> Result<Run> {
     plan.budget
         .check()
-        .map_err(|why| hexora_types::HexoraError::invalid_input("budget", why))?;
+        .map_err(|why| nullhawk_types::NullhawkError::invalid_input("budget", why))?;
 
     let mut sent = 0usize;
     let baseline = match send(plan.draft, lab, "(unchanged)").await {
@@ -735,7 +735,7 @@ pub fn compare(baseline: &[u8], variant: &[u8]) -> Diff {
 }
 
 async fn send(
-    draft: &hexora_repeater::Draft,
+    draft: &nullhawk_repeater::Draft,
     lab: &dyn Lab,
     payload: &str,
 ) -> std::result::Result<Attempt, String> {
@@ -919,8 +919,8 @@ mod tests {
 
     #[test]
     fn a_plan_says_how_many_requests_it_is() {
-        let draft = hexora_repeater::Draft::new(hexora_types::http::HttpRequest::get(
-            hexora_types::http::HttpService::new("api.example.com", 443, true),
+        let draft = nullhawk_repeater::Draft::new(nullhawk_types::http::HttpRequest::get(
+            nullhawk_types::http::HttpService::new("api.example.com", 443, true),
             "/login?user=admin",
         ));
         let payloads: Vec<String> = (0..50).map(|i| format!("u{i}")).collect();
@@ -947,9 +947,9 @@ mod tests {
 
     // ----- multi-position attack modes -----
 
-    fn draft() -> hexora_repeater::Draft {
-        hexora_repeater::Draft::new(hexora_types::http::HttpRequest::get(
-            hexora_types::http::HttpService::new("api.example.com", 443, true),
+    fn draft() -> nullhawk_repeater::Draft {
+        nullhawk_repeater::Draft::new(nullhawk_types::http::HttpRequest::get(
+            nullhawk_types::http::HttpService::new("api.example.com", 443, true),
             "/login?user=admin&pass=x",
         ))
     }
@@ -962,7 +962,7 @@ mod tests {
     }
 
     fn attack<'a>(
-        d: &'a hexora_repeater::Draft,
+        d: &'a nullhawk_repeater::Draft,
         mode: AttackMode,
         positions: Vec<ObjectLocation>,
         lists: Vec<&'a [String]>,

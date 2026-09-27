@@ -18,7 +18,7 @@
 //!
 //! # The probe origin
 //!
-//! `https://hexora-probe.invalid`. `.invalid` is reserved by RFC 2606 and is
+//! `https://nullhawk-probe.invalid`. `.invalid` is reserved by RFC 2606 and is
 //! guaranteed never to resolve, so the value cannot name a real site, cannot be
 //! mistaken for one in a log, and cannot cause a browser anywhere to treat some real
 //! domain as trusted. Nothing is sent *to* it — an `Origin` is a header on a request
@@ -43,12 +43,14 @@
 //! the request level.
 
 use async_trait::async_trait;
-use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
-use hexora_types::verify::{
+use nullhawk_types::finding::{
+    Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
+};
+use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
@@ -75,8 +77,8 @@ const INFO: DetectorInfo = DetectorInfo {
 /// `.invalid` is reserved by RFC 2606: it never resolves, so neither value can name a
 /// real site or be mistaken for one by somebody reading a server log afterwards.
 const PROBES: [&str; 2] = [
-    "https://hexora-probe.invalid",
-    "https://hexora-second-probe.invalid",
+    "https://nullhawk-probe.invalid",
+    "https://nullhawk-second-probe.invalid",
 ];
 
 #[async_trait]
@@ -250,7 +252,7 @@ impl ActiveCheck for OriginReflection {
             reproduction: format!(
                 "Send {} {} with the header `Origin: {}` and read \
                  Access-Control-Allow-Origin and Access-Control-Allow-Credentials on \
-                 the response. `hexora poc <project> <finding>` compiles the exact \
+                 the response. `nullhawk poc <project> <finding>` compiles the exact \
                  requests that were made.",
                 subject.exchange.method, subject.exchange.url, PROBES[0],
             ),
@@ -278,7 +280,7 @@ fn path_of(url: &str) -> &str {
 
 /// What one probe established.
 struct Answer {
-    request: hexora_types::ids::RequestId,
+    request: nullhawk_types::ids::RequestId,
     status: u16,
     allow_origin: Option<String>,
     credentialed: bool,
@@ -369,7 +371,7 @@ mod tests {
         let raised = |detector: &str| Hypothesis {
             detector: detector.into(),
             claim: "something".into(),
-            source_request: hexora_types::ids::RequestId::new(),
+            source_request: nullhawk_types::ids::RequestId::new(),
             location: None,
             provisional_severity: Severity::High,
         };
@@ -397,7 +399,7 @@ mod tests {
         assert_eq!(info.mode, DetectorMode::Active);
         assert!(
             info.sends(),
-            "it must appear in `hexora detectors --sending`"
+            "it must appear in `nullhawk detectors --sending`"
         );
         assert!(
             !info.hypothesizes,

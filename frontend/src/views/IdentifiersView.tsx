@@ -15,7 +15,7 @@ import {
  * constructed authorization testing narrower than it should be. It does not exist to
  * do the declaring. Three things are kept apart here, and the wording is deliberate:
  *
- * - a **suggestion** — Hexora noticed this value varying where an identifier would;
+ * - a **suggestion** — Nullhawk noticed this value varying where an identifier would;
  * - an **object** — a tester says this value is an account, an invoice, a document;
  * - **ownership** — a tester says whose it is.
  *

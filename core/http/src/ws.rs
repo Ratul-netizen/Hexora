@@ -28,9 +28,9 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result};
-use hexora_types::http::HttpService;
-use hexora_types::limits::Limits;
+use nullhawk_types::error::{NetworkError, NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::HttpService;
+use nullhawk_types::limits::Limits;
 
 use crate::tls::TlsConfig;
 
@@ -225,8 +225,8 @@ impl FrameParser {
     }
 }
 
-fn oversized(len: u64) -> HexoraError {
-    HexoraError::Protocol(ProtocolError::Malformed {
+fn oversized(len: u64) -> NullhawkError {
+    NullhawkError::Protocol(ProtocolError::Malformed {
         protocol: "WebSocket",
         reason: format!("a frame declared a {len}-byte payload, past the limit"),
     })
@@ -277,7 +277,7 @@ pub fn encode(frame: &Frame, mask_key: Option<[u8; 4]>) -> Vec<u8> {
 trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
 
-/// A live WebSocket connection Hexora opened as a client — the engine behind the WebSocket
+/// A live WebSocket connection Nullhawk opened as a client — the engine behind the WebSocket
 /// repeater (WS.d).
 ///
 /// It performs the `101` handshake, then holds the connection open so a tester can send a
@@ -317,7 +317,7 @@ pub async fn connect(
 
     let tcp = TcpStream::connect((service.host.as_str(), service.port))
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     let mut stream: Box<dyn Duplex> = if service.secure {
         let (tls_stream, _info) = crate::tls::handshake(tcp, &service.host, tls, limits).await?;
         Box::new(tls_stream)
@@ -328,12 +328,12 @@ pub async fn connect(
     stream
         .write_all(handshake.as_bytes())
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     stream.flush().await.ok();
 
     let (head, rest) = read_response_head(&mut stream, limits).await?;
     if parse_status(&head) != Some(101) {
-        return Err(HexoraError::Protocol(ProtocolError::Malformed {
+        return Err(NullhawkError::Protocol(ProtocolError::Malformed {
             protocol: "WebSocket",
             reason: "the server did not accept the WebSocket upgrade (no 101)".to_string(),
         }));
@@ -360,7 +360,7 @@ impl WsConnection {
         self.stream
             .write_all(&bytes)
             .await
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+            .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
         self.stream.flush().await.ok();
         Ok(())
     }
@@ -387,7 +387,7 @@ impl WsConnection {
         self.stream
             .write_all(bytes)
             .await
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+            .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
         self.stream.flush().await.ok();
         Ok(())
     }
@@ -404,7 +404,7 @@ impl WsConnection {
             let n = match read {
                 Ok(Ok(0)) => return Ok(None), // closed
                 Ok(Ok(n)) => n,
-                Ok(Err(e)) => return Err(HexoraError::Network(NetworkError::Io(e.to_string()))),
+                Ok(Err(e)) => return Err(NullhawkError::Network(NetworkError::Io(e.to_string()))),
                 Err(_) => return Ok(None), // timed out: nothing more for now
             };
             self.parser.push(&buf[..n]);
@@ -450,7 +450,7 @@ pub fn inflate(compressed: &[u8], limits: &Limits) -> Result<Vec<u8>> {
         let status = decoder
             .decompress(&input[consumed_before..], &mut buf, FlushDecompress::Sync)
             .map_err(|e| {
-                HexoraError::Protocol(ProtocolError::DecodeFailed {
+                NullhawkError::Protocol(ProtocolError::DecodeFailed {
                     encoding: "permessage-deflate".to_string(),
                     reason: e.to_string(),
                 })
@@ -506,15 +506,15 @@ async fn read_response_head<S: AsyncRead + Unpin>(
         let n = tokio::time::timeout_at(deadline, stream.read(&mut buf[before..]))
             .await
             .map_err(|_| {
-                HexoraError::Network(NetworkError::Timeout {
-                    phase: hexora_types::error::TimeoutPhase::ReadResponseHead,
+                NullhawkError::Network(NetworkError::Timeout {
+                    phase: nullhawk_types::error::TimeoutPhase::ReadResponseHead,
                     elapsed: limits.read_head_timeout,
                 })
             })?
-            .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+            .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
         buf.truncate(before + n);
         if n == 0 {
-            return Err(HexoraError::Protocol(ProtocolError::Malformed {
+            return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "WebSocket",
                 reason: "the server closed the connection during the handshake".to_string(),
             }));

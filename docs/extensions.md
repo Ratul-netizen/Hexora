@@ -1,13 +1,13 @@
-# Writing a Hexora extension
+# Writing a Nullhawk extension
 
 An extension is a **manifest** plus a **WASM module**. The manifest declares what the extension
-is and what it needs; the module is the code. Hexora installs an extension with exactly the
+is and what it needs; the module is the code. Nullhawk installs an extension with exactly the
 capabilities the user approves — nothing is granted implicitly, and a capability that was never
 granted is never available (security invariant 4).
 
-> Status: this build installs, validates and permission-gates extensions (`hexora ext`), runs a
-> passive-check module in the WASM sandbox (`hexora ext run`), **and runs installed passive-check
-> extensions as part of `hexora scan passive`** — their observations are folded into the scan as
+> Status: this build installs, validates and permission-gates extensions (`nullhawk ext`), runs a
+> passive-check module in the WASM sandbox (`nullhawk ext run`), **and runs installed passive-check
+> extensions as part of `nullhawk scan passive`** — their observations are folded into the scan as
 > leads. The extension store (distribution) is the remaining step. The manifest, permission and
 > ABI contracts below are stable; author against them now.
 
@@ -27,7 +27,7 @@ cap, so a hostile or buggy module fails the run rather than the tool. Test a mod
 ship it:
 
 ```
-hexora ext run path/to/manifest.yaml --exchange exchange.json
+nullhawk ext run path/to/manifest.yaml --exchange exchange.json
 ```
 
 ### The passive-check input (exchange JSON)
@@ -80,7 +80,7 @@ JSON or YAML. Example (`jwt-tools.manifest.yaml`):
 id: com.example.jwt-tools      # stable, reverse-DNS, lowercase
 name: JWT Tools
 version: 1.2.0                 # your extension's version
-api_version: 1                 # the Hexora extension API you target
+api_version: 1                 # the Nullhawk extension API you target
 kind: passive_check            # what you plug into (see below)
 entry: jwt_tools.wasm          # the module to load, relative to the manifest
 description: Flags weak or unverified JWTs in captured traffic
@@ -127,12 +127,12 @@ requested by name and is flagged prominently at install.
 ## Managing extensions
 
 ```
-hexora ext install <project> jwt-tools.manifest.yaml   # grants required only
-hexora ext install <project> jwt-tools.manifest.yaml --grant-all   # also grants optional
-hexora ext list <project>
-hexora ext permissions <project> com.example.jwt-tools
-hexora ext disable <project> com.example.jwt-tools
-hexora ext remove <project> com.example.jwt-tools
+nullhawk ext install <project> jwt-tools.manifest.yaml   # grants required only
+nullhawk ext install <project> jwt-tools.manifest.yaml --grant-all   # also grants optional
+nullhawk ext list <project>
+nullhawk ext permissions <project> com.example.jwt-tools
+nullhawk ext disable <project> com.example.jwt-tools
+nullhawk ext remove <project> com.example.jwt-tools
 ```
 
 Install never grants a capability the manifest did not request. If a *required* capability is

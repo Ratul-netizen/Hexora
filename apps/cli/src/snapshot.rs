@@ -1,4 +1,4 @@
-//! `hexora snapshot` — what the engagement looked like then, and what changed since.
+//! `nullhawk snapshot` — what the engagement looked like then, and what changed since.
 //!
 //! A consultant tests in March, the client fixes through April, the consultant comes
 //! back in May. The only question anybody asks in May is *what changed* — and every
@@ -16,12 +16,12 @@
 
 use std::path::Path;
 
-use hexora_storage::SnapshotSummary;
-use hexora_types::ids::SnapshotId;
-use hexora_types::snapshot::{
+use nullhawk_storage::SnapshotSummary;
+use nullhawk_types::ids::SnapshotId;
+use nullhawk_types::snapshot::{
     compare, Change, ClaimChange, Comparison, FindingState, Snapshot, WhyGone,
 };
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Records the project as it stands.
 pub fn take(project: &Path, label: Option<&str>, note: Option<&str>, json: bool) -> Result<()> {
@@ -35,9 +35,9 @@ pub fn take(project: &Path, label: Option<&str>, note: Option<&str>, json: bool)
             .unwrap_or_else(|| default_label(&store.count().unwrap_or(0))),
         note: note.map(str::to_string),
         taken_at: chrono::Utc::now(),
-        tool_version: hexora_types::VERSION.to_string(),
+        tool_version: nullhawk_types::VERSION.to_string(),
         schema_version: handle.metadata().schema_version()?,
-        contents: hexora_storage::capture(&handle)?,
+        contents: nullhawk_storage::capture(&handle)?,
     };
     store.put(&snapshot)?;
 
@@ -68,14 +68,14 @@ pub fn take(project: &Path, label: Option<&str>, note: Option<&str>, json: bool)
         snapshot.contents.identities.len(),
         snapshot.contents.objects.len()
     );
-    println!("  taken by hexora {}", snapshot.tool_version);
+    println!("  taken by nullhawk {}", snapshot.tool_version);
     println!();
     // Said once, at the point where somebody might assume otherwise: a snapshot is
     // small because it is a record to compare, not a copy to restore from.
     println!("The traffic itself is not copied — a snapshot is a record to compare against,");
     println!("not a backup. Compare it with the project as it stands later:");
     println!(
-        "  hexora snapshot diff {} {}",
+        "  nullhawk snapshot diff {} {}",
         project.display(),
         snapshot.id
     );
@@ -103,7 +103,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
         println!("A snapshot is what makes a retest answerable. Take one before the client");
         println!("starts fixing things, and the next visit can say what moved:");
         println!(
-            "  hexora snapshot take {} --label \"before the fix\"",
+            "  nullhawk snapshot take {} --label \"before the fix\"",
             project.display()
         );
         return Ok(());
@@ -127,7 +127,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
 
     println!();
     println!("{} snapshot(s).", snapshots.len());
-    println!("  hexora snapshot diff {} <id>", project.display());
+    println!("  nullhawk snapshot diff {} <id>", project.display());
     Ok(())
 }
 
@@ -148,7 +148,7 @@ pub fn show(project: &Path, id: &str, json: bool) -> Result<()> {
     }
     println!("Taken:    {}", snapshot.taken_at.to_rfc3339());
     println!(
-        "By:       hexora {} (project schema {})",
+        "By:       nullhawk {} (project schema {})",
         snapshot.tool_version, snapshot.schema_version
     );
 
@@ -220,7 +220,7 @@ pub fn remove(project: &Path, id: &str, json: bool) -> Result<()> {
     let handle = crate::open_project(project)?;
     let id = parse_id(id)?;
     if !handle.snapshots().delete(id)? {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "id",
             format!("no snapshot {id} in this project"),
         ));
@@ -244,8 +244,8 @@ pub fn diff(project: &Path, from: &str, to: Option<&str>, json: bool) -> Result<
         // The comparison a retest actually asks for: "what has changed since?" — and
         // it must not require saving a second snapshot first.
         None => Snapshot::of_current(
-            hexora_storage::capture(&handle)?,
-            hexora_types::VERSION,
+            nullhawk_storage::capture(&handle)?,
+            nullhawk_types::VERSION,
             handle.metadata().schema_version()?,
         ),
     };
@@ -280,7 +280,7 @@ fn print_comparison(comparison: &Comparison) {
             "! Different builds took these ({} → {}). A claim that stopped appearing",
             comparison.from.tool_version, comparison.to.tool_version
         );
-        println!("  could be the application or could be Hexora, and nothing here can tell");
+        println!("  could be the application or could be Nullhawk, and nothing here can tell");
         println!("  them apart.");
     }
 
@@ -407,7 +407,7 @@ fn section(title: &str, comparison: &Comparison, want: fn(&Change) -> bool) {
                 // The reason, every time, on its own line. A "gone" list without it is
                 // a fix report, and this cannot produce one.
                 println!("      {}", explain(because));
-                if before.status == hexora_types::finding::FindingStatus::FalsePositive {
+                if before.status == nullhawk_types::finding::FindingStatus::FalsePositive {
                     println!("      (had been dismissed as a false positive)");
                 }
             }
@@ -439,7 +439,7 @@ fn explain(why: &WhyGone) -> String {
         }
         WhyGone::SourceSilent => {
             "inconclusive — nothing from that check appears in the later snapshot, and \
-             Hexora cannot tell \"ran and found nothing\" from \"never ran\"."
+             Nullhawk cannot tell \"ran and found nothing\" from \"never ran\"."
                 .into()
         }
         WhyGone::DetectorChanged { from, to } => format!(
@@ -468,7 +468,7 @@ fn describe(state: &FindingState) -> String {
     )
 }
 
-fn count_line(label: &str, count: hexora_types::snapshot::Count) {
+fn count_line(label: &str, count: nullhawk_types::snapshot::Count) {
     if !count.moved() {
         return;
     }
@@ -509,16 +509,16 @@ fn default_label(existing: &u64) -> String {
     format!("snapshot {}", existing + 1)
 }
 
-fn severity(severity: hexora_types::Severity) -> &'static str {
-    hexora_storage::findings::severity_str(severity)
+fn severity(severity: nullhawk_types::Severity) -> &'static str {
+    nullhawk_storage::findings::severity_str(severity)
 }
 
-fn confidence(confidence: hexora_types::Confidence) -> &'static str {
-    hexora_storage::findings::confidence_str(confidence)
+fn confidence(confidence: nullhawk_types::Confidence) -> &'static str {
+    nullhawk_storage::findings::confidence_str(confidence)
 }
 
-fn status(status: hexora_types::finding::FindingStatus) -> &'static str {
-    hexora_storage::findings::status_str(status)
+fn status(status: nullhawk_types::finding::FindingStatus) -> &'static str {
+    nullhawk_storage::findings::status_str(status)
 }
 
 fn truncate(value: &str, width: usize) -> String {
@@ -532,7 +532,7 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::snapshot::{Count, WhyGone};
+    use nullhawk_types::snapshot::{Count, WhyGone};
 
     use super::*;
 
@@ -582,9 +582,9 @@ mod tests {
         // Found by running a retest for real: the application was fixed, the matrix
         // reported nothing, and the diff said "+3 exchanges" and stopped. The claim
         // was still standing and the reader was told nothing about it.
-        use hexora_types::finding::{Confidence, FindingStatus, Severity};
-        use hexora_types::ids::{SnapshotId, TargetId};
-        use hexora_types::snapshot::{Claim, Contents, FindingRecord, Snapshot};
+        use nullhawk_types::finding::{Confidence, FindingStatus, Severity};
+        use nullhawk_types::ids::{SnapshotId, TargetId};
+        use nullhawk_types::snapshot::{Claim, Contents, FindingRecord, Snapshot};
 
         let when = chrono::Utc::now();
         let record = FindingRecord {
@@ -599,7 +599,7 @@ mod tests {
                 status: FindingStatus::New,
                 evidence: 1,
             },
-            source: hexora_types::finding::FindingSource::AuthorizationTest,
+            source: nullhawk_types::finding::FindingSource::AuthorizationTest,
             first_recorded: when,
             last_updated: Some(when),
         };

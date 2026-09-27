@@ -1,6 +1,6 @@
 //! Offline licence verification and the entitlement gate (LIC.a).
 //!
-//! Hexora is a paid tool with a free tier, and this is the mechanism that tells them apart.
+//! Nullhawk is a paid tool with a free tier, and this is the mechanism that tells them apart.
 //! It follows two rules that are not negotiable for software a penetration tester runs.
 //!
 //! **Offline-first.** Testers work in air-gapped and isolated networks; a launch that phones
@@ -19,7 +19,7 @@
 //! [`crate::permission`] orders capabilities by implication and gates an extension at one
 //! boundary; the scope guard gates automated traffic at one boundary. An entitlement is the
 //! same shape: a [`Feature`] names a minimum [`Tier`], a caller asks [`EntitlementGate::require`]
-//! once, and a denial is **explicit** — [`HexoraError::NotLicensed`] names the feature and the
+//! once, and a denial is **explicit** — [`NullhawkError::NotLicensed`] names the feature and the
 //! tier it needs, so the UI says "the active scanner needs the Pro tier" rather than failing
 //! mysteriously.
 //!
@@ -36,15 +36,15 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use hexora_types::error::{HexoraError, Result};
+use nullhawk_types::error::{NullhawkError, Result};
 
 /// The Ed25519 public key licences are verified against, embedded in the binary.
 ///
-/// Set at build time from `HEXORA_LICENSE_PUBKEY` (64 hex characters, the 32-byte key a
+/// Set at build time from `NULLHAWK_LICENSE_PUBKEY` (64 hex characters, the 32-byte key a
 /// [`generate_keypair`] run printed). A release is built with it set:
 ///
 /// ```console
-/// $ HEXORA_LICENSE_PUBKEY=<64 hex> cargo build --release -p hexora-cli
+/// $ NULLHAWK_LICENSE_PUBKEY=<64 hex> cargo build --release -p nullhawk-cli
 /// ```
 ///
 /// Unset — every ordinary `cargo build`, and every test — it is all zeros, which verifies
@@ -57,7 +57,7 @@ pub const EMBEDDED_LICENSE_KEY: [u8; 32] = embedded_key();
 
 /// Resolves the embedded key from the build environment, or all zeros when unset.
 const fn embedded_key() -> [u8; 32] {
-    match option_env!("HEXORA_LICENSE_PUBKEY") {
+    match option_env!("NULLHAWK_LICENSE_PUBKEY") {
         Some(hex) => decode_key_hex(hex),
         None => [0u8; 32],
     }
@@ -69,7 +69,7 @@ const fn decode_key_hex(hex: &str) -> [u8; 32] {
     let bytes = hex.as_bytes();
     assert!(
         bytes.len() == 64,
-        "HEXORA_LICENSE_PUBKEY must be 64 hex characters (a 32-byte Ed25519 public key)"
+        "NULLHAWK_LICENSE_PUBKEY must be 64 hex characters (a 32-byte Ed25519 public key)"
     );
     let mut out = [0u8; 32];
     let mut i = 0;
@@ -86,7 +86,7 @@ const fn hex_nibble(c: u8) -> u8 {
         b'0'..=b'9' => c - b'0',
         b'a'..=b'f' => c - b'a' + 10,
         b'A'..=b'F' => c - b'A' + 10,
-        _ => panic!("HEXORA_LICENSE_PUBKEY contains a non-hex character"),
+        _ => panic!("NULLHAWK_LICENSE_PUBKEY contains a non-hex character"),
     }
 }
 
@@ -139,7 +139,7 @@ impl Tier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Feature {
-    /// The active scanner — traffic Hexora sends on its own.
+    /// The active scanner — traffic Nullhawk sends on its own.
     ActiveScanner,
     /// The intruder run without a throttle.
     Intruder,
@@ -332,7 +332,7 @@ impl EntitlementGate {
         if self.allows(feature) {
             Ok(())
         } else {
-            Err(HexoraError::NotLicensed {
+            Err(NullhawkError::NotLicensed {
                 feature: feature.label(),
                 tier: feature.min_tier().label(),
             })
@@ -342,15 +342,15 @@ impl EntitlementGate {
 
 /// The default place a licence file lives, or `None` when it cannot be determined.
 ///
-/// `HEXORA_LICENSE` overrides everything, so a tester can point at a licence explicitly and a
-/// test can avoid touching the real one. Otherwise it is a `hexora/license.json` under the
+/// `NULLHAWK_LICENSE` overrides everything, so a tester can point at a licence explicitly and a
+/// test can avoid touching the real one. Otherwise it is a `nullhawk/license.json` under the
 /// platform's per-user config directory — `%APPDATA%` on Windows, `$XDG_CONFIG_HOME` or
 /// `~/.config` elsewhere. A licence is per-user, not per-project, so it never lives in a
 /// project directory a tester might share as evidence.
 pub fn default_license_path() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
 
-    if let Some(explicit) = std::env::var_os("HEXORA_LICENSE") {
+    if let Some(explicit) = std::env::var_os("NULLHAWK_LICENSE") {
         return Some(PathBuf::from(explicit));
     }
 
@@ -362,7 +362,7 @@ pub fn default_license_path() -> Option<std::path::PathBuf> {
         std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
     };
 
-    base.map(|dir| dir.join("hexora").join("license.json"))
+    base.map(|dir| dir.join("nullhawk").join("license.json"))
 }
 
 /// How long a trial lasts.
@@ -412,7 +412,7 @@ fn active_trial_at(path: &Path, now: DateTime<Utc>) -> Option<Entitlements> {
 /// Starts a [`TRIAL_DAYS`]-day Pro trial at the default location.
 pub fn start_trial(now: DateTime<Utc>) -> Result<Entitlements> {
     let path = default_trial_path().ok_or_else(|| {
-        HexoraError::Internal("could not determine where to store the trial".into())
+        NullhawkError::Internal("could not determine where to store the trial".into())
     })?;
     start_trial_at(&path, now)
 }
@@ -423,7 +423,7 @@ pub fn start_trial(now: DateTime<Utc>) -> Result<Entitlements> {
 /// deleting the file — the deterrent a trial is entitled to, and no more.
 fn start_trial_at(path: &Path, now: DateTime<Utc>) -> Result<Entitlements> {
     if path.exists() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "trial",
             "a trial has already been started on this machine",
         ));
@@ -436,13 +436,13 @@ fn start_trial_at(path: &Path, now: DateTime<Utc>) -> Result<Entitlements> {
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            HexoraError::invalid_input("trial", format!("{}: {e}", parent.display()))
+            NullhawkError::invalid_input("trial", format!("{}: {e}", parent.display()))
         })?;
     }
     let json = serde_json::to_vec_pretty(&marker)
-        .map_err(|e| HexoraError::Internal(format!("serialising the trial marker: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("serialising the trial marker: {e}")))?;
     std::fs::write(path, json)
-        .map_err(|e| HexoraError::invalid_input("trial", format!("{}: {e}", path.display())))?;
+        .map_err(|e| NullhawkError::invalid_input("trial", format!("{}: {e}", path.display())))?;
 
     Ok(trial_entitlements(expires))
 }
@@ -467,7 +467,7 @@ fn verify(
     // The signature is over the exact payload bytes, against the embedded key.
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, verifying_key)
         .verify(&payload, &signature)
-        .map_err(|_| "the licence signature does not verify against Hexora's key")?;
+        .map_err(|_| "the licence signature does not verify against Nullhawk's key")?;
 
     let claims: Claims =
         serde_json::from_slice(&payload).map_err(|_| "the licence claims are not valid JSON")?;
@@ -518,14 +518,14 @@ pub struct LicenseClaims {
 /// Generates a fresh Ed25519 issuing keypair.
 ///
 /// Returns `(pkcs8_private_key, public_key)`: the PKCS#8 DER private key to keep offline and
-/// feed to [`sign_license`], and the 32-byte public key to embed via `HEXORA_LICENSE_PUBKEY`.
+/// feed to [`sign_license`], and the 32-byte public key to embed via `NULLHAWK_LICENSE_PUBKEY`.
 /// The private key never leaves the issuer; losing it means re-keying every licence.
 pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
     let rng = ring::rand::SystemRandom::new();
     let pkcs8 = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
-        .map_err(|_| HexoraError::Internal("could not generate an Ed25519 key".into()))?;
+        .map_err(|_| NullhawkError::Internal("could not generate an Ed25519 key".into()))?;
     let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
-        .map_err(|_| HexoraError::Internal("generated an unusable Ed25519 key".into()))?;
+        .map_err(|_| NullhawkError::Internal("generated an unusable Ed25519 key".into()))?;
     use ring::signature::KeyPair as _;
     Ok((
         pkcs8.as_ref().to_vec(),
@@ -539,8 +539,10 @@ pub fn generate_keypair() -> Result<(Vec<u8>, Vec<u8>)> {
 /// signature}` JSON where the signature is over the claims bytes, so verification checks the
 /// same bytes that were signed.
 pub fn sign_license(pkcs8_private_key: &[u8], claims: &LicenseClaims) -> Result<Vec<u8>> {
-    let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_private_key)
-        .map_err(|_| HexoraError::invalid_input("key", "not a valid Ed25519 PKCS#8 private key"))?;
+    let key_pair =
+        ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_private_key).map_err(|_| {
+            NullhawkError::invalid_input("key", "not a valid Ed25519 PKCS#8 private key")
+        })?;
 
     // Build the claims JSON, omitting fields that carry nothing, so the payload is minimal and
     // matches what the verifier's `Claims` reads back.
@@ -562,14 +564,14 @@ pub fn sign_license(pkcs8_private_key: &[u8], claims: &LicenseClaims) -> Result<
         );
     }
     let claims_json = serde_json::to_vec(&serde_json::Value::Object(object))
-        .map_err(|e| HexoraError::Internal(format!("serialising licence claims: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("serialising licence claims: {e}")))?;
 
     let b64 = base64::engine::general_purpose::STANDARD;
     let payload = b64.encode(&claims_json);
     let signature = b64.encode(key_pair.sign(&claims_json).as_ref());
     let file = serde_json::json!({ "payload": payload, "signature": signature });
     serde_json::to_vec_pretty(&file)
-        .map_err(|e| HexoraError::Internal(format!("serialising licence file: {e}")))
+        .map_err(|e| NullhawkError::Internal(format!("serialising licence file: {e}")))
 }
 
 #[cfg(test)]
@@ -577,7 +579,7 @@ mod tests {
     use super::*;
     use ring::signature::KeyPair;
 
-    /// A throwaway Ed25519 signer, standing in for Hexora's real issuing key.
+    /// A throwaway Ed25519 signer, standing in for Nullhawk's real issuing key.
     struct TestIssuer {
         key_pair: ring::signature::Ed25519KeyPair,
     }

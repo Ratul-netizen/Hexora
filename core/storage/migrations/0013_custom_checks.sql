@@ -1,4 +1,4 @@
--- M15.5: user-defined scan checks (Hexora's answer to Burp's BChecks).
+-- M15.5: user-defined scan checks (Nullhawk's answer to Burp's BChecks).
 --
 -- A custom check is a saved query plus a finding template. When the query matches a
 -- captured exchange, the passive scanner records an observation — a lead, never an

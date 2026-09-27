@@ -31,7 +31,7 @@ pub fn render(report: &Report) -> String {
         let _ = writeln!(out, "| Started | {started} |");
     }
     let _ = writeln!(out, "| Report generated | {} |", e.generated_at);
-    let _ = writeln!(out, "| Tool | hexora {} |", e.tool_version);
+    let _ = writeln!(out, "| Tool | nullhawk {} |", e.tool_version);
     let _ = writeln!(out);
 
     summary(&mut out, report);
@@ -247,7 +247,7 @@ fn render_reproduction(out: &mut String, poc: &crate::poc::Reproduction) {
     if !poc.placeholders.is_empty() {
         let _ = writeln!(
             out,
-            "Supply these first — Hexora never puts a real credential in a report:\n"
+            "Supply these first — Nullhawk never puts a real credential in a report:\n"
         );
         for placeholder in &poc.placeholders {
             let who = placeholder

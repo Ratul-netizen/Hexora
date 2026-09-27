@@ -1,6 +1,6 @@
 [package]
-name = "hexora-scan"
-description = "Hexora's passive scanner: observations over traffic that has already been captured, and nothing sent"
+name = "nullhawk-scan"
+description = "Nullhawk's passive scanner: observations over traffic that has already been captured, and nothing sent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,12 +8,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-hexora-types.workspace = true
-hexora-storage.workspace = true
-hexora-verify.workspace = true
-hexora-query.workspace = true
-hexora-ext.workspace = true
-hexora-wasm.workspace = true
+nullhawk-types.workspace = true
+nullhawk-storage.workspace = true
+nullhawk-verify.workspace = true
+nullhawk-query.workspace = true
+nullhawk-ext.workspace = true
+nullhawk-wasm.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 tracing.workspace = true
@@ -21,7 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-hexora-types = { workspace = true, features = ["test-support"] }
+nullhawk-types = { workspace = true, features = ["test-support"] }
 bytes.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

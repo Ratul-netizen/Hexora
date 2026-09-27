@@ -1,4 +1,4 @@
-//! `hexora race` — send one request many times at once, to find a race condition.
+//! `nullhawk race` — send one request many times at once, to find a race condition.
 //!
 //! Burp's single-packet / turbo intruder and Caido's Pipeline exist for one question: does an
 //! action that should happen *once* happen twice when two requests arrive together? Redeem a
@@ -15,21 +15,21 @@
 //! # It will replay a state-changing request, and say so
 //!
 //! Racing is only interesting on the requests that change something, so unlike the scheduler
-//! this sends them — after saying how many, the same bargain `hexora fuzz` makes.
+//! this sends them — after saying how many, the same bargain `nullhawk fuzz` makes.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_repeater::{Repeater, SendAs};
-use hexora_types::ids::RequestId;
-use hexora_types::{HexoraError, Result};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_repeater::{Repeater, SendAs};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora race`.
+/// Options for `nullhawk race`.
 pub struct Args<'a> {
     pub project: &'a Path,
-    /// The request to replay, from `hexora history`.
+    /// The request to replay, from `nullhawk history`.
     pub id: &'a str,
     /// How many copies to send at once.
     pub count: usize,
@@ -48,14 +48,14 @@ struct Attempt {
 /// Replays the request `count` times concurrently and reports the spread.
 pub fn run(args: Args<'_>) -> Result<()> {
     if args.count < 2 {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--count",
             "racing needs at least 2 concurrent requests",
         ));
     }
     let project = crate::open_project(args.project)?;
     let id: RequestId = args.id.parse().map_err(|e| {
-        HexoraError::invalid_input("id", format!("{} is not a request id: {e}", args.id))
+        NullhawkError::invalid_input("id", format!("{} is not a request id: {e}", args.id))
     })?;
 
     let transport = if args.insecure {
@@ -74,7 +74,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
     if !args.json {
         println!("{method} {url}");
         println!("Sending {} copies at once.", args.count);
-        if hexora_active::is_state_changing(&method) {
+        if nullhawk_active::is_state_changing(&method) {
             println!();
             println!(
                 "{method} may change data on the target, and this sends it {} times together.",
@@ -89,7 +89,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
         }
     }
     if args.json && !args.yes {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--yes",
             "a race sends traffic and --json cannot ask; pass --yes to confirm",
         ));
@@ -98,7 +98,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let attempts = runtime.block_on(async {
         // All in flight together: build every future first, then drive them concurrently, so

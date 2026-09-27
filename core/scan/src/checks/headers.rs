@@ -82,7 +82,7 @@ impl PassiveCheck for SecurityHeaders {
                 "an HTML document carries a Content-Security-Policy",
                 "the header is absent",
                 "A policy is the difference between an injected script running and \
-                 being refused. Its absence is not itself an injection — Hexora has \
+                 being refused. Its absence is not itself an injection — Nullhawk has \
                  not looked for one — but it removes the layer that would contain it.",
                 Severity::Low,
                 Significance::Reportable,

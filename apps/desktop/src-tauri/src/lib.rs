@@ -1,4 +1,4 @@
-//! The Hexora desktop shell.
+//! The Nullhawk desktop shell.
 //!
 //! The shell is deliberately thin. All application state — projects, traffic, scan
 //! jobs — lives in the Rust core, and the React frontend is a view over it. Putting
@@ -9,7 +9,7 @@
 //! So the only thing crossing the IPC boundary is a versioned command surface:
 //!
 //! ```text
-//! React ──invoke()──→ Tauri IPC ──→ commands ──→ hexora-engine / hexora-storage
+//! React ──invoke()──→ Tauri IPC ──→ commands ──→ nullhawk-engine / nullhawk-storage
 //! ```
 //!
 //! Commands are added only as the milestone that implements them lands, so the
@@ -38,7 +38,7 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hexora=info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("nullhawk=info")),
         )
         .init();
 
@@ -125,5 +125,5 @@ pub fn run() {
             commands::report_render,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to start the Hexora desktop shell");
+        .expect("failed to start the Nullhawk desktop shell");
 }

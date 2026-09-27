@@ -5,11 +5,11 @@
 //! there is nowhere to put one, which is the point of the first test.
 
 use bytes::Bytes;
-use hexora_scan::passive::{scan, Selection};
-use hexora_storage::{CapturedExchange, MemoryBlobStore, Project, TrafficStore};
-use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-use hexora_types::programme::{Exclusion, Programme};
-use hexora_types::scope::{Scope, ScopeRule};
+use nullhawk_scan::passive::{scan, Selection};
+use nullhawk_storage::{CapturedExchange, MemoryBlobStore, Project, TrafficStore};
+use nullhawk_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use nullhawk_types::programme::{Exclusion, Programme};
+use nullhawk_types::scope::{Scope, ScopeRule};
 use std::sync::Arc;
 
 /// A project with traffic, and no way to send anything.
@@ -90,7 +90,7 @@ impl Fixture {
             .unwrap();
     }
 
-    fn scan(&self, selection: Selection) -> hexora_scan::passive::Summary {
+    fn scan(&self, selection: Selection) -> nullhawk_scan::passive::Summary {
         scan(&self.project, &selection).unwrap()
     }
 }
@@ -200,7 +200,7 @@ fn five_hundred_endpoints_missing_one_header_are_one_finding() {
     // And the evidence is still exact: three real exchanges a reader can open.
     assert_eq!(
         hsts[0].exchanges.len(),
-        hexora_scan::passive::EVIDENCE_PER_GROUP
+        nullhawk_scan::passive::EVIDENCE_PER_GROUP
     );
     assert_eq!(summary.findings().len(), 1);
 }
@@ -521,7 +521,7 @@ fn every_finding_is_a_lead_and_never_more() {
     for finding in summary.findings() {
         assert_eq!(
             finding.finding().confidence,
-            hexora_types::Confidence::Reported,
+            nullhawk_types::Confidence::Reported,
             "{}",
             finding.finding().title
         );
@@ -546,7 +546,7 @@ fn every_finding_cites_an_exchange_the_project_can_resolve() {
             "a result with no evidence is not evidence of anything"
         );
         for evidence in &finding.finding().evidence {
-            if let hexora_types::finding::Evidence::Exchange { request, .. } = evidence {
+            if let nullhawk_types::finding::Evidence::Exchange { request, .. } = evidence {
                 fixture
                     .traffic
                     .request(*request)
@@ -628,7 +628,7 @@ fn a_run_records_every_detector_including_the_silent_ones() {
     let summary = fixture.scan(Selection::default());
     let run = summary.run.as_ref().unwrap();
 
-    assert_eq!(run.detectors.len(), hexora_scan::checks::all().len());
+    assert_eq!(run.detectors.len(), nullhawk_scan::checks::all().len());
     let tls = run
         .detectors
         .iter()
@@ -643,7 +643,7 @@ fn a_run_records_every_detector_including_the_silent_ones() {
     // And it is readable back out of the project afterwards.
     let stored = fixture.project.scans().get(run.id).unwrap();
     assert_eq!(stored.exchanges_read, 1);
-    assert_eq!(stored.status, hexora_storage::RunStatus::Completed);
+    assert_eq!(stored.status, nullhawk_storage::RunStatus::Completed);
 }
 
 #[test]
@@ -756,7 +756,7 @@ fn an_empty_project_is_a_run_that_read_nothing_rather_than_an_error() {
     assert!(summary.observations.is_empty());
     // The detectors are still recorded as having run over nothing, which is exactly
     // the distinction the run record exists for.
-    assert_eq!(summary.detectors.len(), hexora_scan::checks::all().len());
+    assert_eq!(summary.detectors.len(), nullhawk_scan::checks::all().len());
 }
 
 // ---------------------------------------------------------------------------
@@ -766,7 +766,7 @@ fn an_empty_project_is_a_run_that_read_nothing_rather_than_an_error() {
 #[test]
 fn malformed_and_hostile_traffic_does_not_stop_the_pass() {
     // Scanner input comes from applications that are, at best, indifferent to
-    // whether Hexora can read them.
+    // whether Nullhawk can read them.
     let fixture = fixture();
 
     fixture.capture("api.example.com", true, "/empty", &[], 204, &[]);

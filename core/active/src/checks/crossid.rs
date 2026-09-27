@@ -18,7 +18,7 @@
 //! request's own headers and compared byte for byte. An exact answer or none at all.
 //!
 //! An endpoint whose captured credential matches nothing the project declares is
-//! reported as untested with that reason, never guessed at. Hexora will not decide that
+//! reported as untested with that reason, never guessed at. Nullhawk will not decide that
 //! a session belongs to somebody.
 //!
 //! # What it does not invent
@@ -37,13 +37,13 @@
 //! the whole.
 
 use async_trait::async_trait;
-use hexora_authz::compare::Baseline;
-use hexora_authz::{analysis, Cell, Matrix, Outcome, Verdict};
-use hexora_types::finding::{Hypothesis, Location, MessagePart, Severity};
-use hexora_types::identity::{Identity, PrivilegeLevel};
-use hexora_types::verify::{DetectorId, DetectorInfo, DetectorMode, Verification, Writeup};
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_authz::compare::Baseline;
+use nullhawk_authz::{analysis, Cell, Matrix, Outcome, Verdict};
+use nullhawk_types::finding::{Hypothesis, Location, MessagePart, Severity};
+use nullhawk_types::identity::{Identity, PrivilegeLevel};
+use nullhawk_types::verify::{DetectorId, DetectorInfo, DetectorMode, Verification, Writeup};
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
@@ -177,12 +177,12 @@ impl ActiveCheck for CrossIdentity {
 
         // One send per identity, through the same `replay_once` the on-demand matrix
         // uses. Not a second implementation: a scheduled run that classified responses
-        // differently from `hexora authz` would be a second set of verdicts for one
+        // differently from `nullhawk authz` would be a second set of verdicts for one
         // question.
         let mut cells = Vec::with_capacity(others.len());
         for identity in &others {
             cells.push(
-                hexora_authz::replay_once(lab, &subject.draft, identity, owner, &baseline).await,
+                nullhawk_authz::replay_once(lab, &subject.draft, identity, owner, &baseline).await,
             );
         }
 
@@ -252,15 +252,15 @@ impl ActiveCheck for CrossIdentity {
                           somebody else is never loaded to be checked afterwards."
                 .into(),
             reproduction: format!(
-                "Send {} {} as each identity and compare the responses. `hexora authz \
+                "Send {} {} as each identity and compare the responses. `nullhawk authz \
                  <project> <request> --as-identity <owner>` runs exactly this one \
-                 matrix on demand, and `hexora poc <project> <finding>` compiles the \
+                 matrix on demand, and `nullhawk poc <project> <finding>` compiles the \
                  requests.",
                 subject.exchange.method, subject.exchange.url,
             ),
             cwe: Some("CWE-639".into()),
             owasp: Some("API1:2023 Broken Object Level Authorization".into()),
-            source: hexora_types::finding::FindingSource::ActiveScan {
+            source: nullhawk_types::finding::FindingSource::ActiveScan {
                 detector: INFO.id.to_string(),
                 version: INFO.version.to_string(),
             },
@@ -376,7 +376,7 @@ fn how_to_fix(subject: &Subject) -> String {
         .map(|header| header.value_lossy().into_owned());
 
     let Some(header) = header else {
-        return " Add it with `hexora identity add` and run again".to_string();
+        return " Add it with `nullhawk identity add` and run again".to_string();
     };
     let names: Vec<&str> = header
         .split(';')
@@ -386,13 +386,13 @@ fn how_to_fix(subject: &Subject) -> String {
         .collect();
 
     if names.is_empty() {
-        return " Add it with `hexora identity add` and run again".to_string();
+        return " Add it with `nullhawk identity add` and run again".to_string();
     }
     format!(
         " It was sent with cookies, and a jar is compared whole unless you say which of \
          them identifies you — several change on every request, so comparing them all \
          matches nothing. These were sent: {}. Declare the one that is your session with \
-         `hexora identity add --session-cookie <name>`",
+         `nullhawk identity add --session-cookie <name>`",
         names.join(", ")
     )
 }
@@ -408,7 +408,7 @@ fn path_of(url: &str) -> &str {
 /// The same two filters the authentication check uses, for the same reasons: an
 /// endpoint nobody authenticated to has no owner to compare against, and the scheduler
 /// refuses anything that might change data (invariant 18).
-pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
+pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
     if !exchange.authenticated {
         return Vec::new();
     }
@@ -439,12 +439,12 @@ pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hexora_types::http::{Header, Headers, HttpRequest, HttpService};
+    use nullhawk_types::http::{Header, Headers, HttpRequest, HttpService};
 
-    fn exchange(method: &str, status: u16, authenticated: bool) -> hexora_scan::Exchange {
-        hexora_scan::Exchange {
-            id: hexora_types::ids::RequestId::new(),
-            target: hexora_types::ids::TargetId::new(),
+    fn exchange(method: &str, status: u16, authenticated: bool) -> nullhawk_scan::Exchange {
+        nullhawk_scan::Exchange {
+            id: nullhawk_types::ids::RequestId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             host: "api.example.com".into(),
             port: 443,
             secure: true,
@@ -479,7 +479,7 @@ mod tests {
                 location: None,
                 provisional_severity: Severity::Info,
             },
-            draft: hexora_repeater::Draft::new(request),
+            draft: nullhawk_repeater::Draft::new(request),
             target: exchange.target,
             exchange,
             identities: std::sync::Arc::new(identities),
@@ -491,7 +491,7 @@ mod tests {
         let raised = |detector: &str| Hypothesis {
             detector: detector.into(),
             claim: String::new(),
-            source_request: hexora_types::ids::RequestId::new(),
+            source_request: nullhawk_types::ids::RequestId::new(),
             location: None,
             provisional_severity: Severity::Info,
         };
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn a_credential_nobody_declared_is_never_attributed_to_anybody() {
-        // Hexora will not decide whose session this was. The check reports it as
+        // Nullhawk will not decide whose session this was. The check reports it as
         // untested with that reason.
         let alice = Identity::bearer("User A", "TOKEN_A");
         let subject = subject_carrying("Bearer SOMEBODY_ELSES_TOKEN", vec![alice]);
@@ -579,15 +579,22 @@ mod tests {
         impl Lab for NoLab {
             async fn experiment(
                 &self,
-                _: &hexora_repeater::Draft,
+                _: &nullhawk_repeater::Draft,
                 _: Option<&Identity>,
-            ) -> Result<hexora_repeater::Sent> {
+            ) -> Result<nullhawk_repeater::Sent> {
                 panic!("nothing may be sent when the budget cannot cover the run");
             }
-            fn would_leave_scope(&self, _: &hexora_repeater::Draft, _: Option<&Identity>) -> bool {
+            fn would_leave_scope(
+                &self,
+                _: &nullhawk_repeater::Draft,
+                _: Option<&Identity>,
+            ) -> bool {
                 false
             }
-            fn draft_of(&self, _: hexora_types::ids::RequestId) -> Result<hexora_repeater::Draft> {
+            fn draft_of(
+                &self,
+                _: nullhawk_types::ids::RequestId,
+            ) -> Result<nullhawk_repeater::Draft> {
                 panic!("not used")
             }
         }
@@ -623,15 +630,22 @@ mod tests {
         impl Lab for NoLab {
             async fn experiment(
                 &self,
-                _: &hexora_repeater::Draft,
+                _: &nullhawk_repeater::Draft,
                 _: Option<&Identity>,
-            ) -> Result<hexora_repeater::Sent> {
+            ) -> Result<nullhawk_repeater::Sent> {
                 panic!("nothing may be sent without knowing whose session it was");
             }
-            fn would_leave_scope(&self, _: &hexora_repeater::Draft, _: Option<&Identity>) -> bool {
+            fn would_leave_scope(
+                &self,
+                _: &nullhawk_repeater::Draft,
+                _: Option<&Identity>,
+            ) -> bool {
                 false
             }
-            fn draft_of(&self, _: hexora_types::ids::RequestId) -> Result<hexora_repeater::Draft> {
+            fn draft_of(
+                &self,
+                _: nullhawk_types::ids::RequestId,
+            ) -> Result<nullhawk_repeater::Draft> {
                 panic!("not used")
             }
         }

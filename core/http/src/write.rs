@@ -1,6 +1,6 @@
 //! Request serialization.
 //!
-//! The rule here is that Hexora sends what the user wrote. A normal client library
+//! The rule here is that Nullhawk sends what the user wrote. A normal client library
 //! would add a `Host` header if missing, fix up `Content-Length`, reorder fields or
 //! normalize casing — every one of which destroys a test case. Nothing is added,
 //! removed or reordered at this layer; `HttpRequest` is already the wire form, and
@@ -10,7 +10,7 @@
 //! deliberate: request smuggling research depends on it. Callers that must not do so
 //! by accident (scanner, fuzzer) check [`HttpRequest::check_framing`] first.
 
-use hexora_types::http::HttpRequest;
+use nullhawk_types::http::HttpRequest;
 
 /// Serializes a request to its HTTP/1.x wire form.
 pub fn serialize_request(request: &HttpRequest) -> Vec<u8> {
@@ -21,7 +21,7 @@ pub fn serialize_request(request: &HttpRequest) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::{Header, HttpService};
+    use nullhawk_types::http::{Header, HttpService};
 
     use super::*;
 

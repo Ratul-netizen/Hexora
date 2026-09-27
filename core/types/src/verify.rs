@@ -1,6 +1,6 @@
 //! The gap between "this looks suspicious" and "this is true", made structural.
 //!
-//! Every scanner Hexora will ever have produces two different things, and the whole
+//! Every scanner Nullhawk will ever have produces two different things, and the whole
 //! question of whether the tool can be trusted is whether they stay different:
 //!
 //! ```text
@@ -137,7 +137,7 @@ pub struct DetectorInfo {
     /// suspicion somebody else raised and runs the experiment that ends it, in either
     /// direction. `cors.reflection` settles `cors.configuration`.
     ///
-    /// Printed by `hexora detectors`, so a tester can see which of this build's
+    /// Printed by `nullhawk detectors`, so a tester can see which of this build's
     /// suspicions have somebody to answer them and which are still dead ends.
     pub settles: Option<&'static str>,
 }
@@ -469,7 +469,7 @@ impl Verified {
     /// this is precisely the door the rest of this module exists to keep shut. A test
     /// that needs a finding with a particular severity and confidence should not have
     /// to stage an experiment to get one; a detector should not be able to reach this
-    /// at all, and cannot — the feature is off in every binary Hexora ships.
+    /// at all, and cannot — the feature is off in every binary Nullhawk ships.
     #[cfg(feature = "test-support")]
     pub fn from_trusted_finding(finding: Finding) -> Self {
         Self(finding)

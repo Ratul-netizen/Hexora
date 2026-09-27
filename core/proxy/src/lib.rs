@@ -1,6 +1,6 @@
-//! # hexora-proxy
+//! # nullhawk-proxy
 //!
-//! Hexora's intercepting proxy.
+//! Nullhawk's intercepting proxy.
 //!
 //! ## Status (M3)
 //!
@@ -32,7 +32,7 @@
 //!
 //! Everything else here is plumbing. The CA private key is the ability to impersonate
 //! any site to the machine that trusts it, which makes it the most sensitive thing
-//! Hexora will ever hold. See [`ca`] for the rules that follow from that.
+//! Nullhawk will ever hold. See [`ca`] for the rules that follow from that.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::all)]

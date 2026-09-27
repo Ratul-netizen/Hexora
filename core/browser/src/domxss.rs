@@ -1,4 +1,4 @@
-//! DOM-based XSS detection — Hexora's answer to Burp's DOM Invader.
+//! DOM-based XSS detection — Nullhawk's answer to Burp's DOM Invader.
 //!
 //! Server-side XSS is visible in the response; DOM XSS is not. The payload never reaches the
 //! server — it flows from a client-side **source** (`location.hash`, `location.search`,
@@ -14,7 +14,7 @@
 //!
 //! A canary reaching `innerHTML` means the source flows to that sink. Whether it is exploitable
 //! depends on the page's own encoding and framework, which this does not decide. Like every
-//! passive lead in Hexora, it says what it saw — the flow — and leaves the proof to the tester.
+//! passive lead in Nullhawk, it says what it saw — the flow — and leaves the proof to the tester.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -22,7 +22,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use hexora_types::Result;
+use nullhawk_types::Result;
 
 use crate::launch::{Browser, LaunchOptions};
 use crate::Cdp;
@@ -53,9 +53,9 @@ impl Source {
             Source::Fragment => format!("{base}#{canary}"),
             Source::Query => {
                 if base.contains('?') {
-                    format!("{base}&hexora={canary}")
+                    format!("{base}&nullhawk={canary}")
                 } else {
-                    format!("{base}?hexora={canary}")
+                    format!("{base}?nullhawk={canary}")
                 }
             }
         }
@@ -92,18 +92,18 @@ impl DomXssReport {
 }
 
 /// The script installed before every document loads: it wraps the common DOM-XSS sinks and
-/// records every value they receive into `window.__hexora_sinks`, truncated and capped. The
+/// records every value they receive into `window.__nullhawk_sinks`, truncated and capped. The
 /// caller filters those records for its canary — so the page's own innocent sink use is ignored.
 const INSTRUMENTATION: &str = r#"
 (function () {
-  if (window.__hexora_installed) return;
-  window.__hexora_installed = true;
-  window.__hexora_sinks = [];
+  if (window.__nullhawk_installed) return;
+  window.__nullhawk_installed = true;
+  window.__nullhawk_sinks = [];
   function rec(sink, value) {
     try {
       var v = String(value);
       if (v.length > 400) v = v.slice(0, 400);
-      if (window.__hexora_sinks.length < 300) window.__hexora_sinks.push({ sink: sink, value: v });
+      if (window.__nullhawk_sinks.length < 300) window.__nullhawk_sinks.push({ sink: sink, value: v });
     } catch (e) {}
   }
   ["innerHTML", "outerHTML"].forEach(function (prop) {
@@ -161,7 +161,7 @@ fn fresh_canary() -> String {
         .unwrap_or(0);
     // Alphanumeric only: it must survive as a literal substring through a sink, and never
     // introduce markup of its own — the flow is what we are proving, not execution.
-    format!("hexoradom{nanos:x}{n:x}")
+    format!("nullhawkdom{nanos:x}{n:x}")
 }
 
 /// Drives a real browser to test one page for DOM XSS, planting a canary in each source.
@@ -170,8 +170,8 @@ fn fresh_canary() -> String {
 /// then navigates once per source and reads back the flows. The browser is killed on drop.
 pub async fn test(target: &str, headless: bool, timeout: Duration) -> Result<DomXssReport> {
     if crate::launch::find_browser().is_none() {
-        return Err(hexora_types::HexoraError::Internal(
-            "no Chrome/Edge/Chromium found to drive; set HEXORA_BROWSER to its path".to_string(),
+        return Err(nullhawk_types::NullhawkError::Internal(
+            "no Chrome/Edge/Chromium found to drive; set NULLHAWK_BROWSER to its path".to_string(),
         ));
     }
 
@@ -223,7 +223,7 @@ async fn scan_once(
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     let raw = cdp
-        .eval("JSON.stringify(window.__hexora_sinks || [])")
+        .eval("JSON.stringify(window.__nullhawk_sinks || [])")
         .await?;
     let text = raw.as_str().unwrap_or("[]");
     let entries: Vec<SinkEntry> = serde_json::from_str(text).unwrap_or_default();
@@ -255,11 +255,11 @@ mod tests {
     fn query_injection_appends_and_drops_the_fragment() {
         assert_eq!(
             Source::Query.inject("https://t.com/p#frag", "CAN"),
-            "https://t.com/p?hexora=CAN"
+            "https://t.com/p?nullhawk=CAN"
         );
         assert_eq!(
             Source::Query.inject("https://t.com/p?a=1", "CAN"),
-            "https://t.com/p?a=1&hexora=CAN"
+            "https://t.com/p?a=1&nullhawk=CAN"
         );
     }
 
@@ -273,11 +273,11 @@ mod tests {
 
     #[test]
     fn sink_entries_parse_and_filter_by_canary() {
-        let json = r#"[{"sink":"innerHTML","value":"<b>hexoradomABC</b>"},{"sink":"eval","value":"safe()"}]"#;
+        let json = r#"[{"sink":"innerHTML","value":"<b>nullhawkdomABC</b>"},{"sink":"eval","value":"safe()"}]"#;
         let entries: Vec<SinkEntry> = serde_json::from_str(json).unwrap();
         let hits: Vec<_> = entries
             .into_iter()
-            .filter(|e| e.value.contains("hexoradomABC"))
+            .filter(|e| e.value.contains("nullhawkdomABC"))
             .collect();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].sink, "innerHTML");

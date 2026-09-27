@@ -3,7 +3,7 @@
 //! An installed passive-check extension is a WASM module plus the capabilities the user granted.
 //! This turns one into a [`PassiveCheck`] the scanner runs alongside the built-ins and the custom
 //! checks: it serialises the exchange the scanner already assembled to JSON, runs the module in
-//! the [`hexora_wasm`] sandbox, and folds the observations the module returns back into the scan.
+//! the [`nullhawk_wasm`] sandbox, and folds the observations the module returns back into the scan.
 //!
 //! # The module runs with nothing but the bytes it is given
 //!
@@ -15,7 +15,7 @@
 //!
 //! # The capability gate, and what a module never sees
 //!
-//! An extension runs here only if it passes [`hexora_wasm::may_run_passive`]: a passive kind,
+//! An extension runs here only if it passes [`nullhawk_wasm::may_run_passive`]: a passive kind,
 //! switched on, holding `http:read`. Without that grant it never sees the traffic. And it sees the
 //! same redacted exchange every check sees — credential request headers and `Set-Cookie` values
 //! arrive already replaced (see [`crate::Exchange`]), so an extension cannot read a secret back
@@ -27,8 +27,8 @@
 //! observations as leads capped at `Confidence::Reported`. An extension cannot raise a hypothesis
 //! the active scheduler would try to settle, and it cannot overclaim.
 
-use hexora_ext::InstalledExtension;
-use hexora_wasm::{Limits, Sandbox};
+use nullhawk_ext::InstalledExtension;
+use nullhawk_wasm::{Limits, Sandbox};
 use serde::{Deserialize, Serialize};
 
 use crate::checks::prelude::*;
@@ -40,7 +40,7 @@ use crate::checks::prelude::*;
 pub fn load(exts: &[InstalledExtension]) -> Vec<Box<dyn PassiveCheck>> {
     let mut out: Vec<Box<dyn PassiveCheck>> = Vec::new();
     for ext in exts {
-        if hexora_wasm::may_run_passive(ext).is_err() {
+        if nullhawk_wasm::may_run_passive(ext).is_err() {
             continue;
         }
         if ext.module.is_empty() {
@@ -210,7 +210,7 @@ struct HeaderView<'a> {
     value: String,
 }
 
-fn header_views(headers: &hexora_types::http::Headers) -> Vec<HeaderView<'_>> {
+fn header_views(headers: &nullhawk_types::http::Headers) -> Vec<HeaderView<'_>> {
     headers
         .iter()
         .map(|h| HeaderView {
@@ -259,10 +259,10 @@ impl From<RawSeverity> for Severity {
 mod tests {
     use super::*;
     use crate::checks::test_support::*;
-    use hexora_ext::{InstalledExtension, Manifest};
+    use nullhawk_ext::{InstalledExtension, Manifest};
 
     /// A WASM module (bump allocator + `run`) whose `run` body is the given WAT. Mirrors the
-    /// harness in `hexora-wasm`, so tests here exercise the real sandbox path.
+    /// harness in `nullhawk-wasm`, so tests here exercise the real sandbox path.
     fn module(run_body: &str) -> Vec<u8> {
         let src = format!(
             r#"(module

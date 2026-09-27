@@ -8,7 +8,7 @@
 //! surprises and pseudo-header confusion get found, and they cannot travel through a
 //! validating library.
 //!
-//! So this is a small, deliberate HTTP/2 client that Hexora controls end to end. The tester
+//! So this is a small, deliberate HTTP/2 client that Nullhawk controls end to end. The tester
 //! supplies an **ordered list of header fields, pseudo-headers and all, exactly as bytes**,
 //! and this encodes them into a HEADERS frame with **no validation, no lowercasing, no
 //! reordering** — the h2 analogue of raw mode. The encoding is HPACK *literal without
@@ -17,7 +17,7 @@
 //! The response is read at the frame level too. Its header block is HPACK-decoded far
 //! enough to recover a static-table `:status` and any literal field, while a Huffman or
 //! dynamic-table field is consumed exactly (so the decoder never loses sync) and marked
-//! rather than guessed — the same honesty the rest of Hexora keeps about what it did and
+//! rather than guessed — the same honesty the rest of Nullhawk keeps about what it did and
 //! did not decode. A stream the server refuses (`RST_STREAM`) or a connection it abandons
 //! (`GOAWAY`) is reported as what it is, with the error code, because "the server rejected
 //! this" is the result an adversarial request is looking for.
@@ -25,12 +25,12 @@
 use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
-use hexora_engine::transport::Exchange;
-use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result, TimeoutPhase};
-use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpVersion};
-use hexora_types::limits::Limits;
-use hexora_types::raw::RawH2Request;
-use hexora_types::tls::TlsInfo;
+use nullhawk_engine::transport::Exchange;
+use nullhawk_types::error::{NetworkError, NullhawkError, ProtocolError, Result, TimeoutPhase};
+use nullhawk_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpVersion};
+use nullhawk_types::limits::Limits;
+use nullhawk_types::raw::RawH2Request;
+use nullhawk_types::tls::TlsInfo;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// The HTTP/2 connection preface every client sends first (RFC 9113 §3.4).
@@ -151,7 +151,7 @@ where
             FRAME_PING => {}
             FRAME_GOAWAY => {
                 let code = payload.get(4..8).map(be_u32).unwrap_or(0);
-                return Err(HexoraError::Protocol(ProtocolError::Malformed {
+                return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                     protocol: "HTTP/2",
                     reason: format!(
                         "the server sent GOAWAY (error {code}) — it rejected the connection \
@@ -161,7 +161,7 @@ where
             }
             FRAME_RST_STREAM if stream_id == 1 => {
                 let code = payload.get(0..4).map(be_u32).unwrap_or(0);
-                return Err(HexoraError::Protocol(ProtocolError::Malformed {
+                return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                     protocol: "HTTP/2",
                     reason: format!(
                         "the server reset the stream (error {code}) — it refused this request"
@@ -205,7 +205,7 @@ where
     }
 
     let status = status.ok_or_else(|| {
-        HexoraError::Protocol(ProtocolError::Malformed {
+        NullhawkError::Protocol(ProtocolError::Malformed {
             protocol: "HTTP/2",
             reason: "the stream ended without a response header block".to_string(),
         })
@@ -356,7 +356,7 @@ where
     tokio::time::timeout(timeout, stream.read_exact(buf))
         .await
         .map_err(|_| {
-            HexoraError::Network(NetworkError::Timeout {
+            NullhawkError::Network(NetworkError::Timeout {
                 phase,
                 elapsed: timeout,
             })
@@ -369,8 +369,8 @@ fn be_u32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
 }
 
-fn io_error(context: &str, e: std::io::Error) -> HexoraError {
-    HexoraError::Network(NetworkError::Io(format!("http/2 raw: {context}: {e}")))
+fn io_error(context: &str, e: std::io::Error) -> NullhawkError {
+    NullhawkError::Network(NetworkError::Io(format!("http/2 raw: {context}: {e}")))
 }
 
 /// Drops the optional pad-length byte, padding and priority bytes from a HEADERS payload,
@@ -758,7 +758,7 @@ mod tests {
 
     #[test]
     fn a_raw_request_view_reads_its_pseudo_headers() {
-        let service = hexora_types::http::HttpService::new("example.com", 443, true);
+        let service = nullhawk_types::http::HttpService::new("example.com", 443, true);
         let mut request = RawH2Request::get(service, "/accounts/7");
         request
             .headers

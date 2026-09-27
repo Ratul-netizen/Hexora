@@ -1,11 +1,11 @@
-//! # hexora-scan
+//! # nullhawk-scan
 //!
 //! Observations over traffic that has already been captured.
 //!
 //! ## It cannot send, and that is structural
 //!
-//! [`passive::scan`] takes a [`Project`](hexora_storage::Project) and nothing else.
-//! There is no `HttpTransport` in its signature, no [`Lab`](hexora_verify::Lab), and
+//! [`passive::scan`] takes a [`Project`](nullhawk_storage::Project) and nothing else.
+//! There is no `HttpTransport` in its signature, no [`Lab`](nullhawk_verify::Lab), and
 //! no way to obtain either from what it is given — so "the passive scanner makes no
 //! network requests" is not a rule somebody has to keep, it is a fact about the
 //! function's arguments. The same shape as the identifier analyzer, for the same
@@ -24,14 +24,14 @@
 //! ```
 //!
 //! A passive check states facts. A fact needs no experiment, so it goes through
-//! [`Verification::Observed`](hexora_types::verify::Verification::Observed), whose
-//! ceiling is [`Confidence::Reported`](hexora_types::Confidence::Reported) — a lead,
+//! [`Verification::Observed`](nullhawk_types::verify::Verification::Observed), whose
+//! ceiling is [`Confidence::Reported`](nullhawk_types::Confidence::Reported) — a lead,
 //! not a vulnerability. **A passive check cannot produce anything stronger, by
 //! construction**: it does not choose its own verification, the scanner applies the
 //! same one to every observation, and the ladder in `core/types` does the rest.
 //!
 //! When a check is suspicious rather than certain it raises a
-//! [`Hypothesis`](hexora_types::finding::Hypothesis), and that is where the hypothesis
+//! [`Hypothesis`](nullhawk_types::finding::Hypothesis), and that is where the hypothesis
 //! stops. Nothing here verifies one, because verifying one would mean sending
 //! something. `Access-Control-Allow-Origin` echoing one request's `Origin` is
 //! consistent with a reflecting server and equally consistent with a server that
@@ -75,11 +75,11 @@ pub mod custom;
 pub mod extension;
 pub mod passive;
 
-use hexora_types::finding::Hypothesis;
-use hexora_types::http::{Header, Headers};
-use hexora_types::ids::{RequestId, TargetId};
-use hexora_types::tls::TlsInfo;
-use hexora_types::verify::{DetectorInfo, Observation, Writeup};
+use nullhawk_types::finding::Hypothesis;
+use nullhawk_types::http::{Header, Headers};
+use nullhawk_types::ids::{RequestId, TargetId};
+use nullhawk_types::tls::TlsInfo;
+use nullhawk_types::verify::{DetectorInfo, Observation, Writeup};
 
 pub use passive::{scan, Grouped, Selection, Summary};
 
@@ -132,7 +132,7 @@ pub struct Exchange {
     /// Which subsystem sent it: `proxy`, `repeater`, `authz`, `scanner`.
     ///
     /// A check almost never needs it. What does need it is anything enumerating *what
-    /// an application takes*, which must not read Hexora's own generated requests back
+    /// an application takes*, which must not read Nullhawk's own generated requests back
     /// as though they were the application's traffic — see
     /// [`Summary::endpoints`](crate::passive::Summary::endpoints).
     pub origin: String,

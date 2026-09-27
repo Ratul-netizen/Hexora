@@ -1,22 +1,22 @@
-//! `hexora proxy` — run the intercepting proxy.
+//! `nullhawk proxy` — run the intercepting proxy.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hexora_engine::guard::ScopeDecision;
-use hexora_engine::transport::Exchange;
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_proxy::attach::Attaching;
-use hexora_proxy::hook::{Interceptor, PassThrough};
-use hexora_proxy::{
+use nullhawk_engine::guard::ScopeDecision;
+use nullhawk_engine::transport::Exchange;
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_proxy::attach::Attaching;
+use nullhawk_proxy::hook::{Interceptor, PassThrough};
+use nullhawk_proxy::{
     trust, CertificateAuthority, ExchangeObserver, Fanout, InterceptionPolicy, ProjectCapture,
     ProxyConfig, ProxyServer, Rewriter, Rewriting, TrustState,
 };
-use hexora_types::scope::Scope;
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::scope::Scope;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora proxy`.
+/// Options for `nullhawk proxy`.
 pub struct ProxyArgs<'a> {
     pub project: Option<&'a Path>,
     pub in_scope_only: bool,
@@ -29,7 +29,7 @@ pub struct ProxyArgs<'a> {
     pub attach_headers: bool,
 }
 
-/// Options for `hexora ca`.
+/// Options for `nullhawk ca`.
 pub struct CaArgs<'a> {
     pub dir: Option<&'a Path>,
     pub export: Option<&'a Path>,
@@ -72,7 +72,7 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
     let bind: SocketAddr = args
         .listen
         .parse()
-        .map_err(|e| HexoraError::invalid_input("listen", format!("{:?}: {e}", args.listen)))?;
+        .map_err(|e| NullhawkError::invalid_input("listen", format!("{:?}: {e}", args.listen)))?;
 
     let ca_dir = resolve_ca_dir(args.ca_dir)?;
     let ca = Arc::new(CertificateAuthority::load_or_create(&ca_dir)?);
@@ -125,10 +125,10 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         (Some(project), true) => {
             let headers = project.settings().attached_headers()?;
             if headers.is_empty() {
-                return Err(HexoraError::invalid_input(
+                return Err(NullhawkError::invalid_input(
                     "--attach-headers",
                     "this project has no attached headers, so there is nothing to put on \
-                     your browser's requests. Add one with `hexora header add`",
+                     your browser's requests. Add one with `nullhawk header add`",
                 ));
             }
             let scope = project.settings().scope()?;
@@ -136,18 +136,18 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
                 // An empty scope matches nothing, so this would silently do nothing at
                 // all — and "silently does nothing" is the exact failure mode that makes
                 // a researcher think their traffic is identified when it is not.
-                return Err(HexoraError::invalid_input(
+                return Err(NullhawkError::invalid_input(
                     "--attach-headers",
                     "this project has no scope, and headers are attached only to hosts \
                      the project declared — otherwise every site you browse would be \
-                     told who you are. Declare the programme's hosts with `hexora scope \
+                     told who you are. Declare the programme's hosts with `nullhawk scope \
                      add`",
                 ));
             }
             Some((headers, Arc::new(scope)))
         }
         (None, true) => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "--attach-headers",
                 "the headers come from a project, so this needs --project DIR",
             ));
@@ -161,7 +161,7 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         Some(project) => {
             let rules = project.settings().match_replace_rules()?;
             let rewriter = Rewriter::compile(&rules)
-                .map_err(|why| HexoraError::invalid_input("match-replace", why))?;
+                .map_err(|why| NullhawkError::invalid_input("match-replace", why))?;
             if rewriter.is_empty() {
                 None
             } else {
@@ -170,10 +170,10 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
                     // Rules apply only to declared hosts — otherwise a rule would rewrite the
                     // tester's own mail and bank. An empty scope means nowhere, so this would
                     // silently do nothing.
-                    return Err(HexoraError::invalid_input(
+                    return Err(NullhawkError::invalid_input(
                         "match-replace",
                         "this project has match-and-replace rules but no scope, and rules \
-                         apply only to hosts the project declared. Declare them with `hexora \
+                         apply only to hosts the project declared. Declare them with `nullhawk \
                          scope add`, or remove the rules",
                     ));
                 }
@@ -193,7 +193,7 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     runtime.block_on(async move {
         let server = ProxyServer::bind(
@@ -231,15 +231,18 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
         };
 
         let addr = server.local_addr()?;
-        eprintln!("Hexora proxy listening on {addr}");
-        eprintln!("CA certificate: {}", ca_dir.join("hexora-ca.crt").display());
+        eprintln!("Nullhawk proxy listening on {addr}");
+        eprintln!(
+            "CA certificate: {}",
+            ca_dir.join("nullhawk-ca.crt").display()
+        );
         if let Some((_, _, active)) = &rewrite {
             eprintln!("{active} match-and-replace rule(s) active on in-scope traffic.");
         }
         eprintln!();
         eprintln!("Configure your browser to use {addr} as its HTTP and HTTPS proxy,");
         eprintln!("then install the CA certificate so HTTPS can be intercepted:");
-        eprintln!("  hexora ca --export hexora-ca.crt");
+        eprintln!("  nullhawk ca --export nullhawk-ca.crt");
         eprintln!();
         if args.insecure_upstream {
             eprintln!("WARNING: upstream certificate verification is OFF. Connections to");
@@ -252,7 +255,7 @@ pub fn run(args: ProxyArgs<'_>) -> Result<()> {
                 if args.in_scope_only {
                     eprintln!("  only in-scope traffic is being recorded");
                 }
-                eprintln!("Browse it later with: hexora history {}", path.display());
+                eprintln!("Browse it later with: nullhawk history {}", path.display());
             }
             None => {
                 eprintln!("NOT recording: pass --project DIR to keep what you capture.");
@@ -333,7 +336,7 @@ pub fn ca(args: CaArgs<'_>) -> Result<()> {
 
     if let Some(path) = args.export {
         std::fs::write(path, ca.certificate_pem())
-            .map_err(|e| HexoraError::Internal(format!("writing {}: {e}", path.display())))?;
+            .map_err(|e| NullhawkError::Internal(format!("writing {}: {e}", path.display())))?;
         println!("Exported the CA certificate to {}", path.display());
         println!();
         print_trust_instructions(path);
@@ -371,7 +374,7 @@ fn print_status(ca: &CertificateAuthority, dir: &Path, json: bool) -> Result<()>
     println!("Trust state:  {state}");
     if state == TrustState::NotTrusted {
         println!();
-        println!("Install it with:  hexora ca --install");
+        println!("Install it with:  nullhawk ca --install");
     }
     Ok(())
 }
@@ -379,7 +382,7 @@ fn print_status(ca: &CertificateAuthority, dir: &Path, json: bool) -> Result<()>
 /// Installs the CA into this user's trust store, after saying what that means.
 fn install(ca: &CertificateAuthority, dir: &Path, yes: bool, json: bool) -> Result<()> {
     let fingerprint = ca.fingerprints();
-    let certificate = dir.join("hexora-ca.crt");
+    let certificate = dir.join("nullhawk-ca.crt");
 
     if trust::status(&fingerprint) == TrustState::Trusted {
         println!("Already trusted — nothing to do.");
@@ -388,17 +391,17 @@ fn install(ca: &CertificateAuthority, dir: &Path, yes: bool, json: bool) -> Resu
     }
 
     if !yes && !json {
-        // Trusting a root CA is the most consequential thing a Hexora user is asked to
+        // Trusting a root CA is the most consequential thing a Nullhawk user is asked to
         // do, so it is never a side effect of anything and never silent.
         println!("About to install a root certificate authority into your trust store.");
         println!();
         println!("  Fingerprint: {}", ca.fingerprint_display());
-        println!("  Private key: {}", dir.join("hexora-ca.key").display());
+        println!("  Private key: {}", dir.join("nullhawk-ca.key").display());
         println!();
-        println!("This lets Hexora decrypt HTTPS on this machine. Anyone who obtains that");
+        println!("This lets Nullhawk decrypt HTTPS on this machine. Anyone who obtains that");
         println!("private key could impersonate any site to you, so do this only on a");
         println!("machine you control, and remove it when you are done:");
-        println!("  hexora ca --delete");
+        println!("  nullhawk ca --delete");
         println!();
         if !confirm("Install it?")? {
             println!("Not installed.");
@@ -434,7 +437,7 @@ fn install(ca: &CertificateAuthority, dir: &Path, yes: bool, json: bool) -> Resu
     match installed.verified {
         TrustState::Trusted => println!("Verified: the platform reports it as trusted."),
         // Said out loud rather than inferred from a zero exit code, because a tester
-        // who believes the CA is installed will blame Hexora for what follows.
+        // who believes the CA is installed will blame Nullhawk for what follows.
         TrustState::NotTrusted => {
             println!("WARNING: the platform still does not report it as trusted.");
             println!("         Check your trust store before relying on interception.");
@@ -453,7 +456,7 @@ fn install(ca: &CertificateAuthority, dir: &Path, yes: bool, json: bool) -> Resu
     }
 
     println!();
-    println!("Now run:  hexora proxy --project ./engagement");
+    println!("Now run:  nullhawk proxy --project ./engagement");
     Ok(())
 }
 
@@ -467,13 +470,13 @@ pub fn confirm(question: &str) -> Result<bool> {
     print!("{question} [y/N] ");
     std::io::stdout()
         .flush()
-        .map_err(|e| HexoraError::Internal(format!("writing to the terminal: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("writing to the terminal: {e}")))?;
 
     let mut answer = String::new();
     let read = std::io::stdin()
         .lock()
         .read_line(&mut answer)
-        .map_err(|e| HexoraError::Internal(format!("reading from the terminal: {e}")))?;
+        .map_err(|e| NullhawkError::Internal(format!("reading from the terminal: {e}")))?;
     if read == 0 {
         return Ok(false);
     }
@@ -492,23 +495,23 @@ pub fn resolve_ca_dir(explicit: Option<&Path>) -> Result<PathBuf> {
     let base = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .ok_or_else(|| {
-            HexoraError::Internal(
+            NullhawkError::Internal(
                 "cannot determine a home directory; pass --ca-dir explicitly".to_string(),
             )
         })?;
-    Ok(PathBuf::from(base).join(".hexora").join("ca"))
+    Ok(PathBuf::from(base).join(".nullhawk").join("ca"))
 }
 
 /// Prints per-platform trust instructions.
 ///
-/// Installing a CA is the single most consequential thing a Hexora user will be asked
+/// Installing a CA is the single most consequential thing a Nullhawk user will be asked
 /// to do, so the instructions say what it means rather than only which button to press.
 fn print_trust_instructions(path: &Path) {
     let path = path.display();
-    println!("Installing this certificate lets Hexora decrypt HTTPS on this machine.");
+    println!("Installing this certificate lets Nullhawk decrypt HTTPS on this machine.");
     println!("Anyone who obtains the matching private key could impersonate any site to");
     println!("you, so install it only on a machine you control, and remove it when done:");
-    println!("  hexora ca --delete");
+    println!("  nullhawk ca --delete");
     println!();
     println!("Firefox (its own trust store, all platforms):");
     println!("  Settings > Privacy & Security > Certificates > View Certificates");
@@ -531,11 +534,11 @@ fn print_trust_instructions(path: &Path) {
         println!("    -k /Library/Keychains/System.keychain \"{path}\"");
     } else {
         println!("Linux (system store; Chrome also uses its own NSS database):");
-        println!("  sudo cp \"{path}\" /usr/local/share/ca-certificates/hexora.crt");
+        println!("  sudo cp \"{path}\" /usr/local/share/ca-certificates/nullhawk.crt");
         println!("  sudo update-ca-certificates");
         println!();
         println!("  # Chrome/Chromium additionally:");
-        println!("  certutil -d sql:$HOME/.pki/nssdb -A -t \"C,,\" -n Hexora -i \"{path}\"");
+        println!("  certutil -d sql:$HOME/.pki/nssdb -A -t \"C,,\" -n Nullhawk -i \"{path}\"");
     }
 }
 
@@ -555,13 +558,13 @@ mod tests {
         // access restrictions.
         let dir = resolve_ca_dir(None).unwrap();
         assert!(dir.ends_with("ca"), "{dir:?}");
-        assert!(dir.to_string_lossy().contains(".hexora"), "{dir:?}");
+        assert!(dir.to_string_lossy().contains(".nullhawk"), "{dir:?}");
     }
 
     /// A project with a scope and a header, as a real engagement would have.
     fn engagement(headers: bool, scope: bool) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        let project = hexora_storage::Project::open(dir.path()).unwrap();
+        let project = nullhawk_storage::Project::open(dir.path()).unwrap();
         project
             .metadata()
             .connection()
@@ -575,7 +578,7 @@ mod tests {
         if headers {
             project
                 .settings()
-                .set_attached_headers(&[hexora_types::http::Header::new(
+                .set_attached_headers(&[nullhawk_types::http::Header::new(
                     "X-HackerOne-Research",
                     "wahid_ratul",
                 )])
@@ -584,13 +587,15 @@ mod tests {
         if scope {
             project
                 .settings()
-                .set_scope(&Scope::new().include(hexora_types::scope::ScopeRule::host("wolt.com")))
+                .set_scope(
+                    &Scope::new().include(nullhawk_types::scope::ScopeRule::host("wolt.com")),
+                )
                 .unwrap();
         }
         dir
     }
 
-    fn attaching_run(dir: &std::path::Path) -> HexoraError {
+    fn attaching_run(dir: &std::path::Path) -> NullhawkError {
         run(ProxyArgs {
             project: Some(dir),
             in_scope_only: false,
@@ -612,7 +617,7 @@ mod tests {
         let dir = engagement(false, true);
         let err = attaching_run(dir.path());
         assert_eq!(err.code(), "invalid_input");
-        assert!(err.to_string().contains("hexora header add"), "{err}");
+        assert!(err.to_string().contains("nullhawk header add"), "{err}");
     }
 
     #[test]
@@ -622,7 +627,7 @@ mod tests {
         let dir = engagement(true, false);
         let err = attaching_run(dir.path());
         assert_eq!(err.code(), "invalid_input");
-        assert!(err.to_string().contains("hexora scope"), "{err}");
+        assert!(err.to_string().contains("nullhawk scope"), "{err}");
         assert!(
             err.to_string().contains("every site you browse"),
             "and it says why it is scoped: {err}"
@@ -685,7 +690,7 @@ mod tests {
             json: false,
         })
         .unwrap();
-        assert!(dir.path().join("hexora-ca.crt").exists());
+        assert!(dir.path().join("nullhawk-ca.crt").exists());
 
         ca(CaArgs {
             dir: Some(dir.path()),
@@ -698,7 +703,7 @@ mod tests {
             json: false,
         })
         .unwrap();
-        assert!(!dir.path().join("hexora-ca.crt").exists());
-        assert!(!dir.path().join("hexora-ca.key").exists());
+        assert!(!dir.path().join("nullhawk-ca.crt").exists());
+        assert!(!dir.path().join("nullhawk-ca.key").exists());
     }
 }

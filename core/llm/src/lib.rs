@@ -1,9 +1,9 @@
-//! # hexora-llm
+//! # nullhawk-llm
 //!
 //! Testing LLM-backed endpoints for **prompt injection** — an attacker's text in a user
 //! field overriding the system instructions the application relies on. Neither Burp nor
 //! Caido ships this; it is a genuine differentiator, and it is built the way the rest of
-//! Hexora tests things: with an oracle that produces **evidence**, not a guess.
+//! Nullhawk tests things: with an oracle that produces **evidence**, not a guess.
 //!
 //! ## The canary oracle
 //!
@@ -29,10 +29,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-use hexora_types::error::Result;
-use hexora_types::http::{Header, HttpRequest, HttpService};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+use nullhawk_types::error::Result;
+use nullhawk_types::http::{Header, HttpRequest, HttpService};
 
 /// The placeholder a body template marks the prompt position with.
 pub const PROMPT_PLACEHOLDER: &str = "{{PROMPT}}";
@@ -591,7 +591,7 @@ pub async fn test_output_handling<T: HttpTransport>(
 }
 
 /// Errors are re-exported for callers that thread `Result`.
-pub use hexora_types::error::HexoraError;
+pub use nullhawk_types::error::NullhawkError;
 /// Convenience alias.
 pub type LlmResult<T> = Result<T>;
 

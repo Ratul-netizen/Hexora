@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate Hexora's application icons.
+"""Generate Nullhawk's application icons.
 
 Kept as a script rather than hand-drawn binaries so the icon set can be regenerated
 reproducibly, and so a colour change is a one-line diff rather than an opaque blob.
 
-Draws a pointy-top hexagon (for "Hexora") in the product accent colour, supersampled
+Draws a pointy-top hexagon (for "Nullhawk") in the product accent colour, supersampled
 for antialiasing. Writes:
 
     apps/desktop/src-tauri/icons/icon.ico   (Windows resource + tray)

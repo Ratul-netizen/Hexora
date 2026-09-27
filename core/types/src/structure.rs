@@ -305,7 +305,7 @@ pub struct FieldDifference {
     /// Whether the field's name suggests it carries something personal.
     ///
     /// A hint for ordering, not a claim: `email`, `balance` and `role` are worth a
-    /// reader's eye before `sort_order` is. Hexora does not know what the data means.
+    /// reader's eye before `sort_order` is. Nullhawk does not know what the data means.
     pub notable: bool,
 }
 
@@ -860,7 +860,7 @@ fn names_a_credential(path: &str) -> bool {
 
 /// Whether a field's name suggests it carries something personal.
 ///
-/// Ordering only. Hexora does not know what an application's data means, and a field
+/// Ordering only. Nullhawk does not know what an application's data means, and a field
 /// called `balance` might be a progress bar.
 fn names_something_personal(path: &str) -> bool {
     const PERSONAL: &[&str] = &[

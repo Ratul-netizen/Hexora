@@ -59,7 +59,7 @@ pub struct Snapshot {
     pub note: Option<String>,
     /// When it was taken.
     pub taken_at: DateTime<Utc>,
-    /// The Hexora build that took it.
+    /// The Nullhawk build that took it.
     ///
     /// Recorded because a claim that stopped appearing after an upgrade and a claim
     /// that stopped appearing after a fix are not the same event, and a comparison
@@ -412,7 +412,7 @@ impl Change {
 ///
 /// **None of these means "fixed".** A finding is produced by a test; its absence is
 /// the absence of a result, and only a test that ran and actively established the
-/// negative could say anything stronger. Hexora does not have that yet — the
+/// negative could say anything stronger. Nullhawk does not have that yet — the
 /// verification framework is M13.1 — so this enum says exactly how much is known,
 /// which is sometimes nothing at all.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,7 +427,7 @@ pub enum WhyGone {
     NotReproduced,
     /// Nothing raised by that source appears in the later snapshot.
     ///
-    /// Hexora has no registry of which checks ran — that arrives with M13.1 — so
+    /// Nullhawk has no registry of which checks ran — that arrives with M13.1 — so
     /// "the check ran and found nothing" and "the check never ran" are the same
     /// picture from here. This says so instead of guessing.
     SourceSilent,

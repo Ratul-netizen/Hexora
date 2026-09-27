@@ -1,9 +1,9 @@
-//! Project scope: the set of hosts and paths Hexora is authorized to test.
+//! Project scope: the set of hosts and paths Nullhawk is authorized to test.
 //!
 //! Scope is a **safety control**, not a convenience filter. Automated subsystems —
 //! scanner, fuzzer, workflows, AI tools — must not send traffic to a target that is
 //! not in scope; the engine boundary enforces this and returns
-//! [`crate::error::HexoraError::OutOfScope`]. See `docs/security-invariants.md`,
+//! [`crate::error::NullhawkError::OutOfScope`]. See `docs/security-invariants.md`,
 //! invariant 1.
 //!
 //! # Design decisions
@@ -241,7 +241,7 @@ impl Scope {
         self
     }
 
-    /// Whether Hexora is authorized to send this request.
+    /// Whether Nullhawk is authorized to send this request.
     ///
     /// Exclusions are evaluated first and are absolute.
     pub fn contains(&self, service: &HttpService, path: &str) -> bool {

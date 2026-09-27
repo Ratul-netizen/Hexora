@@ -1,6 +1,6 @@
 //! The interception certificate authority.
 //!
-//! # The most dangerous thing Hexora stores
+//! # The most dangerous thing Nullhawk stores
 //!
 //! To intercept HTTPS, the proxy mints a certificate for whatever host the client
 //! asked for and signs it with a CA the user has trusted. That CA private key is,
@@ -11,7 +11,7 @@
 //! Three rules follow, and they are not negotiable:
 //!
 //! 1. **The CA is generated per installation, never shipped.** A CA baked into a
-//!    release would let anyone holding a copy of Hexora intercept every user of it.
+//!    release would let anyone holding a copy of Nullhawk intercept every user of it.
 //!    This is not hypothetical: shipped-CA incidents have ended products.
 //! 2. **The key never leaves the machine.** It is not synced, not uploaded, not
 //!    included in a project export, and not printed by any `Debug` implementation.
@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use hexora_types::error::{HexoraError, Result};
+use nullhawk_types::error::{NullhawkError, Result};
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, KeyUsagePurpose,
 };
@@ -42,9 +42,9 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use time::{Duration, OffsetDateTime};
 
 /// File name of the CA certificate inside the CA directory.
-const CERT_FILE: &str = "hexora-ca.crt";
+const CERT_FILE: &str = "nullhawk-ca.crt";
 /// File name of the CA private key inside the CA directory.
-const KEY_FILE: &str = "hexora-ca.key";
+const KEY_FILE: &str = "nullhawk-ca.key";
 
 /// How long a generated CA is valid.
 ///
@@ -105,13 +105,16 @@ fn decode_certificate_pem(pem: &str, path: &Path) -> Result<CertificateDer<'stat
         .next()
         .transpose()
         .map_err(|e| {
-            HexoraError::invalid_input(
+            NullhawkError::invalid_input(
                 "ca",
                 format!("{} is not a readable certificate: {e}", path.display()),
             )
         })?
         .ok_or_else(|| {
-            HexoraError::invalid_input("ca", format!("{} contains no certificate", path.display()))
+            NullhawkError::invalid_input(
+                "ca",
+                format!("{} contains no certificate", path.display()),
+            )
         })?;
     Ok(certificate.into_owned())
 }
@@ -136,7 +139,7 @@ impl CertificateAuthority {
         // one file. Guessing which half to keep would produce a CA whose certificate
         // and key do not match, so refuse and say what to do.
         if cert_path.exists() != key_path.exists() {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "ca",
                 format!(
                     "{} contains only half of a certificate authority; \
@@ -175,8 +178,8 @@ impl CertificateAuthority {
         let mut name = DistinguishedName::new();
         // Named so a user scrolling their trust store can tell what it is and where it
         // came from. An anonymous CA in a trust store is alarming and rightly so.
-        name.push(DnType::CommonName, "Hexora Interception CA");
-        name.push(DnType::OrganizationName, "Hexora");
+        name.push(DnType::CommonName, "Nullhawk Interception CA");
+        name.push(DnType::OrganizationName, "Nullhawk");
         name.push(
             DnType::OrganizationalUnitName,
             "Locally generated - do not trust elsewhere",
@@ -264,7 +267,7 @@ impl CertificateAuthority {
     ///
     /// This is how a CA is named to a platform trust store: the store holds many
     /// certificates and a subject name is neither unique nor stable, but the digest of
-    /// the DER encoding identifies exactly this certificate. Removing "the Hexora CA"
+    /// the DER encoding identifies exactly this certificate. Removing "the Nullhawk CA"
     /// by name could remove a different one — by fingerprint it cannot.
     ///
     /// The same value a user sees in their browser's certificate viewer, so it can be
@@ -352,13 +355,13 @@ impl CertificateAuthority {
                 // client-controlled CONNECT line or Host header, so it is validated
                 // rather than trusted.
                 if !is_valid_dns_name(host) {
-                    return Err(HexoraError::invalid_input(
+                    return Err(NullhawkError::invalid_input(
                         "host",
                         format!("{host:?} is not a valid DNS name"),
                     ));
                 }
                 rcgen::SanType::DnsName(host.to_string().try_into().map_err(|_| {
-                    HexoraError::invalid_input("host", format!("{host:?} is not representable"))
+                    NullhawkError::invalid_input("host", format!("{host:?} is not representable"))
                 })?)
             }
         };
@@ -389,7 +392,7 @@ impl CertificateAuthority {
                 self.der.clone(),
             ],
             key: PrivateKeyDer::try_from(leaf_key.serialize_der())
-                .map_err(|e| HexoraError::Internal(format!("leaf key not usable: {e}")))?,
+                .map_err(|e| NullhawkError::Internal(format!("leaf key not usable: {e}")))?,
         })
     }
 
@@ -403,7 +406,7 @@ impl CertificateAuthority {
 
     /// Deletes the CA from disk.
     ///
-    /// The counterpart to installing it. A user who wants Hexora off their machine
+    /// The counterpart to installing it. A user who wants Nullhawk off their machine
     /// should not have to hunt for files, and a CA left behind is a standing risk.
     pub fn delete(directory: impl AsRef<Path>) -> Result<()> {
         let directory = directory.as_ref();
@@ -467,12 +470,12 @@ fn days_from_now(days: i64) -> OffsetDateTime {
     OffsetDateTime::now_utc() + Duration::days(days)
 }
 
-fn io_error(what: &'static str) -> impl Fn(std::io::Error) -> HexoraError {
-    move |e| HexoraError::Internal(format!("{what}: {e}"))
+fn io_error(what: &'static str) -> impl Fn(std::io::Error) -> NullhawkError {
+    move |e| NullhawkError::Internal(format!("{what}: {e}"))
 }
 
-fn rcgen_error(what: &'static str) -> impl Fn(rcgen::Error) -> HexoraError {
-    move |e| HexoraError::Internal(format!("{what}: {e}"))
+fn rcgen_error(what: &'static str) -> impl Fn(rcgen::Error) -> NullhawkError {
+    move |e| NullhawkError::Internal(format!("{what}: {e}"))
 }
 
 #[cfg(test)]
@@ -595,15 +598,15 @@ mod tests {
     #[test]
     fn the_ca_is_named_so_a_user_can_recognise_it_in_a_trust_store() {
         let ca = CertificateAuthority::generate().unwrap();
-        let summary = hexora_http::tls::summarise_certificate(ca.certificate_der());
-        assert!(summary.subject.contains("Hexora"), "{summary:?}");
+        let summary = nullhawk_http::tls::summarise_certificate(ca.certificate_der());
+        assert!(summary.subject.contains("Nullhawk"), "{summary:?}");
         assert!(summary.self_signed, "a root CA signs itself");
     }
 
     #[test]
     fn every_generated_ca_is_unique() {
         // The single most important property. A CA shared between installations would
-        // let anyone with a copy of Hexora intercept every other user.
+        // let anyone with a copy of Nullhawk intercept every other user.
         let a = CertificateAuthority::generate().unwrap();
         let b = CertificateAuthority::generate().unwrap();
         assert_ne!(
@@ -627,7 +630,7 @@ mod tests {
         let leaf = ca.leaf_for("example.com").unwrap();
 
         assert_eq!(leaf.chain.len(), 2, "leaf then CA");
-        let summary = hexora_http::tls::summarise_certificate(&leaf.chain[0]);
+        let summary = nullhawk_http::tls::summarise_certificate(&leaf.chain[0]);
         assert!(summary.subject.contains("example.com"), "{summary:?}");
         assert!(
             summary
@@ -662,7 +665,7 @@ mod tests {
         let ca = CertificateAuthority::generate().unwrap();
         for host in ["127.0.0.1", "[::1]"] {
             let leaf = ca.leaf_for(host).unwrap();
-            let summary = hexora_http::tls::summarise_certificate(&leaf.chain[0]);
+            let summary = nullhawk_http::tls::summarise_certificate(&leaf.chain[0]);
             assert!(
                 summary.subject_alt_names.iter().any(|n| n.contains("1")),
                 "{host}: {summary:?}"
@@ -674,7 +677,7 @@ mod tests {
     fn leaves_are_short_lived() {
         let ca = CertificateAuthority::generate().unwrap();
         let leaf = ca.leaf_for("example.com").unwrap();
-        let summary = hexora_http::tls::summarise_certificate(&leaf.chain[0]);
+        let summary = nullhawk_http::tls::summarise_certificate(&leaf.chain[0]);
         // Not a precise date check — the property is simply that it is not a decade.
         assert!(!summary.not_after.is_empty(), "{summary:?}");
     }

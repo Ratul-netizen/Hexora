@@ -5,13 +5,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{Exchange, HttpTransport, SendOptions};
-use hexora_llm::{test, Target, PROMPT_PLACEHOLDER};
-use hexora_types::error::Result;
-use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-use hexora_types::raw::{RawH2Request, RawRequest};
-use hexora_types::scope::{Scope, ScopeRule};
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{Exchange, HttpTransport, SendOptions};
+use nullhawk_llm::{test, Target, PROMPT_PLACEHOLDER};
+use nullhawk_types::error::Result;
+use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use nullhawk_types::raw::{RawH2Request, RawRequest};
+use nullhawk_types::scope::{Scope, ScopeRule};
 
 /// A mock LLM: `vulnerable` obeys any instruction to emit a token (so an injected canary comes
 /// back); otherwise it refuses. It reads the injected payload out of the JSON body.
@@ -181,7 +181,7 @@ impl HttpTransport for LeakyLlm {
 async fn a_leaking_endpoint_is_surfaced_as_a_lead() {
     let scope = Scope::new().include(ScopeRule::host("api.test"));
     let guard = ScopeGuard::new(LeakyLlm, Arc::new(scope));
-    let report = hexora_llm::test_leakage(&guard, &target()).await;
+    let report = nullhawk_llm::test_leakage(&guard, &target()).await;
     assert!(report.any(), "expected disclosures");
     // The control (benign) did not carry the signals, so they are genuinely elicited.
     let d = &report.disclosures[0];
@@ -194,7 +194,7 @@ async fn a_defended_endpoint_leaks_nothing() {
     let scope = Scope::new().include(ScopeRule::host("api.test"));
     // The defended MockLlm always refuses — no system-prompt signals in its answers.
     let guard = ScopeGuard::new(MockLlm { vulnerable: false }, Arc::new(scope));
-    let report = hexora_llm::test_leakage(&guard, &target()).await;
+    let report = nullhawk_llm::test_leakage(&guard, &target()).await;
     assert!(!report.any());
 }
 
@@ -248,16 +248,19 @@ async fn unencoded_output_is_flagged() {
     let scope = Scope::new().include(ScopeRule::host("api.test"));
     // The vulnerable mock echoes the marker verbatim; JSON does not encode `<`, so it survives.
     let guard = ScopeGuard::new(MockLlm { vulnerable: true }, Arc::new(scope));
-    let report = hexora_llm::test_output_handling(&guard, &target()).await;
+    let report = nullhawk_llm::test_output_handling(&guard, &target()).await;
     assert!(report.any(), "expected unsafe-output findings");
     assert!(report.findings[0].marker.contains("<hxllm>"));
-    assert_eq!(report.findings[0].context, hexora_llm::OutputContext::Json);
+    assert_eq!(
+        report.findings[0].context,
+        nullhawk_llm::OutputContext::Json
+    );
 }
 
 #[tokio::test]
 async fn html_encoded_output_is_safe() {
     let scope = Scope::new().include(ScopeRule::host("api.test"));
     let guard = ScopeGuard::new(EncodingLlm, Arc::new(scope));
-    let report = hexora_llm::test_output_handling(&guard, &target()).await;
+    let report = nullhawk_llm::test_output_handling(&guard, &target()).await;
     assert!(!report.any(), "encoded output should not be flagged");
 }

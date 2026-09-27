@@ -1,6 +1,6 @@
 //! Secret redaction.
 //!
-//! Hexora handles credentials for a living: session cookies, bearer tokens, API keys
+//! Nullhawk handles credentials for a living: session cookies, bearer tokens, API keys
 //! and client certificates all flow through the engine. The threat model
 //! (`docs/threat-model.md`) requires that none of this reaches logs, crash reports,
 //! telemetry or exported reports unless the user explicitly opts in.
@@ -62,7 +62,7 @@ pub fn is_sensitive_header(name: &str) -> bool {
 /// [`exposed`] adapter — both greppable in review.
 ///
 /// ```
-/// use hexora_types::redact::Secret;
+/// use nullhawk_types::redact::Secret;
 /// let token = Secret::new("hunter2".to_string());
 /// assert_eq!(format!("{token:?}"), "<redacted>");
 /// assert_eq!(token.expose(), "hunter2");
@@ -106,7 +106,7 @@ impl<T> fmt::Debug for Secret<T> {
 /// opting in per field:
 ///
 /// ```
-/// use hexora_types::redact::{exposed, Secret};
+/// use nullhawk_types::redact::{exposed, Secret};
 /// use serde::Serialize;
 ///
 /// #[derive(Serialize)]

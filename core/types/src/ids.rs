@@ -1,6 +1,6 @@
 //! Stable identifiers for persisted entities.
 //!
-//! All Hexora IDs are UUIDv7: time-ordered, so they sort chronologically and index
+//! All Nullhawk IDs are UUIDv7: time-ordered, so they sort chronologically and index
 //! well in SQLite, while staying globally unique so a project can be merged from
 //! several collaborating testers without renumbering.
 //!
@@ -13,7 +13,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::HexoraError;
+use crate::error::NullhawkError;
 
 macro_rules! define_id {
     ($(#[$meta:meta])* $name:ident, $prefix:literal) => {
@@ -55,12 +55,12 @@ macro_rules! define_id {
         }
 
         impl FromStr for $name {
-            type Err = HexoraError;
+            type Err = NullhawkError;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 let body = s.strip_prefix(concat!($prefix, "_")).unwrap_or(s);
                 Uuid::parse_str(body).map(Self).map_err(|e| {
-                    HexoraError::invalid_input(stringify!($name), e.to_string())
+                    NullhawkError::invalid_input(stringify!($name), e.to_string())
                 })
             }
         }
@@ -68,7 +68,7 @@ macro_rules! define_id {
 }
 
 define_id!(
-    /// Identifies a project (one `.hexora` database).
+    /// Identifies a project (one `.nullhawk` database).
     ProjectId,
     "prj"
 );

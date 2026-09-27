@@ -23,10 +23,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hexora_types::error::{HexoraError, Result};
-use hexora_types::http::HttpRequest;
-use hexora_types::raw::{RawH2Request, RawRequest};
-use hexora_types::scope::Scope;
+use nullhawk_types::error::{NullhawkError, Result};
+use nullhawk_types::http::HttpRequest;
+use nullhawk_types::raw::{RawH2Request, RawRequest};
+use nullhawk_types::scope::Scope;
 
 use crate::transport::{Exchange, HttpTransport, SendOptions};
 
@@ -94,7 +94,7 @@ impl<T: HttpTransport> ScopeGuard<T> {
 
     fn decide_for(
         &self,
-        service: &hexora_types::http::HttpService,
+        service: &nullhawk_types::http::HttpService,
         path: &str,
         options: &SendOptions,
     ) -> ScopeDecision {
@@ -123,7 +123,7 @@ impl<T: HttpTransport> HttpTransport for ScopeGuard<T> {
                     target = %target,
                     "refusing out-of-scope request from an automated subsystem"
                 );
-                Err(HexoraError::OutOfScope(target))
+                Err(NullhawkError::OutOfScope(target))
             }
             ScopeDecision::AllowedOutOfScope => {
                 tracing::debug!(
@@ -146,7 +146,7 @@ impl<T: HttpTransport> HttpTransport for ScopeGuard<T> {
                     target = %target,
                     "refusing an out-of-scope raw request from an automated subsystem"
                 );
-                Err(HexoraError::OutOfScope(target))
+                Err(NullhawkError::OutOfScope(target))
             }
             ScopeDecision::AllowedOutOfScope => {
                 tracing::debug!(
@@ -169,7 +169,7 @@ impl<T: HttpTransport> HttpTransport for ScopeGuard<T> {
                     target = %target,
                     "refusing an out-of-scope frame-level HTTP/2 request from an automated subsystem"
                 );
-                Err(HexoraError::OutOfScope(target))
+                Err(NullhawkError::OutOfScope(target))
             }
             ScopeDecision::AllowedOutOfScope => {
                 tracing::debug!(
@@ -186,8 +186,8 @@ impl<T: HttpTransport> HttpTransport for ScopeGuard<T> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::HttpService;
-    use hexora_types::scope::ScopeRule;
+    use nullhawk_types::http::HttpService;
+    use nullhawk_types::scope::ScopeRule;
 
     use super::*;
     use crate::transport::{Origin, RecordingTransport};

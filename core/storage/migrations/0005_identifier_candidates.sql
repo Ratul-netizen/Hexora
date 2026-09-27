@@ -29,7 +29,7 @@ CREATE TABLE identifier_candidates (
     -- How many times it was observed when analysis last ran.
     occurrences     INTEGER NOT NULL DEFAULT 0,
     -- Serialized `Vec<Signal>`: why it was suggested, and what each reason counted
-    -- for. Stored rather than recomputed so "why did Hexora suggest this?" has the
+    -- for. Stored rather than recomputed so "why did Nullhawk suggest this?" has the
     -- same answer next week.
     signals_json    TEXT NOT NULL DEFAULT '[]',
     score           INTEGER NOT NULL DEFAULT 0,

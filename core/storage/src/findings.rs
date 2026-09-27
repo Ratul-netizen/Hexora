@@ -1,6 +1,6 @@
 //! Persisting findings.
 //!
-//! A finding that exists only in a terminal is not evidence. The point of a Hexora
+//! A finding that exists only in a terminal is not evidence. The point of a Nullhawk
 //! project is that six months later somebody can open it, read a claim, and follow it
 //! back to the exact exchanges that support it — which requires the claim to be in the
 //! project alongside the traffic, not in a scrollback buffer.
@@ -8,9 +8,9 @@
 //! # The door is a type, not a check
 //!
 //! [`FindingStore::save`] and [`FindingStore::record`] take a
-//! [`Verified`](hexora_types::verify::Verified), which is the only thing a
-//! [`Verification`](hexora_types::verify::Verification) can produce. A detector emits
-//! a [`Hypothesis`](hexora_types::finding::Hypothesis), and there is no path from one
+//! [`Verified`](nullhawk_types::verify::Verified), which is the only thing a
+//! [`Verification`](nullhawk_types::verify::Verification) can produce. A detector emits
+//! a [`Hypothesis`](nullhawk_types::finding::Hypothesis), and there is no path from one
 //! to the other — so a check that is merely suspicious cannot reach a report by
 //! taking the storage route around the verification engine. It is not that the store
 //! refuses it; it is that the call does not compile.
@@ -37,11 +37,11 @@
 //!   `Confirmed` finding citing an unverified comparison would be exactly the
 //!   dishonesty the model exists to prevent.
 
-use hexora_types::finding::{
+use nullhawk_types::finding::{
     Confidence, Evidence, Finding, FindingSource, FindingStatus, Location, Severity,
 };
-use hexora_types::ids::{FindingId, TargetId};
-use hexora_types::verify::Verified;
+use nullhawk_types::ids::{FindingId, TargetId};
+use nullhawk_types::verify::Verified;
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Result, StorageError};
@@ -703,8 +703,8 @@ pub fn parse_status(value: &str) -> Result<FindingStatus> {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::finding::MessagePart;
-    use hexora_types::ids::RequestId;
+    use nullhawk_types::finding::MessagePart;
+    use nullhawk_types::ids::RequestId;
 
     use super::*;
 
@@ -724,8 +724,8 @@ mod tests {
     /// These tests are about the *store* — ordering, paging, triage, the claim key —
     /// not about the verification ladder, which is tested where it lives. The feature
     /// this uses is off in every shipped binary.
-    fn verified(finding: Finding) -> hexora_types::verify::Verified {
-        hexora_types::verify::Verified::from_trusted_finding(finding)
+    fn verified(finding: Finding) -> nullhawk_types::verify::Verified {
+        nullhawk_types::verify::Verified::from_trusted_finding(finding)
     }
 
     fn finding(target: TargetId, severity: Severity, confidence: Confidence) -> Finding {
@@ -793,20 +793,20 @@ mod tests {
         let mut invalid = finding(target, Severity::High, Confidence::Firm);
         invalid.evidence.clear();
 
-        let hypothesis = hexora_types::finding::Hypothesis {
+        let hypothesis = nullhawk_types::finding::Hypothesis {
             detector: "test".into(),
             claim: "something".into(),
             source_request: RequestId::new(),
             location: None,
             provisional_severity: Severity::High,
         };
-        let empty = hexora_types::verify::Verification::Supported {
-            support: hexora_types::verify::Support::Distinctive,
+        let empty = nullhawk_types::verify::Verification::Supported {
+            support: nullhawk_types::verify::Support::Distinctive,
             note: "nothing behind it".into(),
             evidence: Vec::new(),
         };
         assert!(
-            hexora_types::verify::Verified::conclude(&hypothesis, &empty, writeup_for(&invalid))
+            nullhawk_types::verify::Verified::conclude(&hypothesis, &empty, writeup_for(&invalid))
                 .is_none(),
             "a claim with no evidence must not become a Verified"
         );
@@ -816,8 +816,8 @@ mod tests {
         assert_eq!(store.count().unwrap(), 0);
     }
 
-    fn writeup_for(finding: &Finding) -> hexora_types::verify::Writeup {
-        hexora_types::verify::Writeup {
+    fn writeup_for(finding: &Finding) -> nullhawk_types::verify::Writeup {
+        nullhawk_types::verify::Writeup {
             target: finding.target,
             title: finding.title.clone(),
             description: finding.description.clone(),
@@ -1120,7 +1120,7 @@ mod tests {
             note: "second".into(),
         });
         f.evidence.push(Evidence::ResponseExcerpt {
-            response: hexora_types::ids::ResponseId::new(),
+            response: nullhawk_types::ids::ResponseId::new(),
             offset: 12,
             excerpt: "third".into(),
         });

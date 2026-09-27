@@ -34,18 +34,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use hexora_engine::guard::ScopeGuard;
-use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
-use hexora_types::http::{Header, HttpRequest, HttpService};
-use hexora_types::identity::Identity;
+use nullhawk_engine::guard::ScopeGuard;
+use nullhawk_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
+use nullhawk_types::http::{Header, HttpRequest, HttpService};
+use nullhawk_types::identity::Identity;
 
 use crate::robots::Robots;
 use crate::{extract, LinkSource};
 
 /// The product token the crawler identifies itself with — sent as `User-Agent` and
-/// matched against `robots.txt` groups. A site that wants to steer or exclude Hexora's
+/// matched against `robots.txt` groups. A site that wants to steer or exclude Nullhawk's
 /// crawl can name it.
-pub const CRAWLER_USER_AGENT: &str = "Hexora";
+pub const CRAWLER_USER_AGENT: &str = "Nullhawk";
 
 /// Substrings in a request target that mark a link as likely state-changing. A crawl that
 /// followed every link would log itself out or delete records; a link whose path or query
@@ -224,8 +224,8 @@ struct Pending {
 /// follow destructive-looking links; the builder methods relax or tighten them.
 ///
 /// ```no_run
-/// # async fn f<T: hexora_engine::transport::HttpTransport>(guard: &hexora_engine::guard::ScopeGuard<T>) {
-/// use hexora_crawl::Crawler;
+/// # async fn f<T: nullhawk_engine::transport::HttpTransport>(guard: &nullhawk_engine::guard::ScopeGuard<T>) {
+/// use nullhawk_crawl::Crawler;
 /// let report = Crawler::new(guard).run(["https://example.test/"]).await;
 /// # let _ = report;
 /// # }

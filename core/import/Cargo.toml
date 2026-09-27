@@ -1,5 +1,5 @@
 [package]
-name = "hexora-import"
+name = "nullhawk-import"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

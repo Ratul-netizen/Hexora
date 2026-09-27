@@ -1,4 +1,4 @@
-//! `hexora ws` — the captured WebSocket sessions and their message timelines.
+//! `nullhawk ws` — the captured WebSocket sessions and their message timelines.
 //!
 //! A WebSocket is not request/response, so it does not show up in `history` as one row: it
 //! is a session of frames going both ways. This lists those sessions, and opens one as an
@@ -6,26 +6,26 @@
 
 use std::path::Path;
 
-use hexora_storage::CapturedExchange;
-use hexora_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
-use hexora_types::ids::RequestId;
-use hexora_types::limits::Limits;
-use hexora_types::ws::WsDirection;
-use hexora_types::{HexoraError, Result};
+use nullhawk_storage::CapturedExchange;
+use nullhawk_types::http::{Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::limits::Limits;
+use nullhawk_types::ws::WsDirection;
+use nullhawk_types::{NullhawkError, Result};
 
-/// `hexora ws list <project>` — the captured sessions.
+/// `nullhawk ws list <project>` — the captured sessions.
 pub fn list(project: &Path, json: bool) -> Result<()> {
     let project = open(project)?;
     list_store(&project.traffic(), json)
 }
 
-/// `hexora ws show <project> <id>` — a session's message timeline.
+/// `nullhawk ws show <project> <id>` — a session's message timeline.
 pub fn show(project: &Path, id: &str, json: bool) -> Result<()> {
     let project = open(project)?;
     show_store(&project.traffic(), id, json)
 }
 
-fn list_store(store: &hexora_storage::TrafficStore, json: bool) -> Result<()> {
+fn list_store(store: &nullhawk_storage::TrafficStore, json: bool) -> Result<()> {
     let sessions = store.ws_sessions()?;
 
     if json {
@@ -59,10 +59,10 @@ fn list_store(store: &hexora_storage::TrafficStore, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn show_store(store: &hexora_storage::TrafficStore, id: &str, json: bool) -> Result<()> {
+fn show_store(store: &nullhawk_storage::TrafficStore, id: &str, json: bool) -> Result<()> {
     let request_id: RequestId = id
         .parse()
-        .map_err(|_| HexoraError::invalid_input("id", format!("{id:?} is not a request id")))?;
+        .map_err(|_| NullhawkError::invalid_input("id", format!("{id:?} is not a request id")))?;
     let messages = store.ws_messages(request_id)?;
 
     if json {
@@ -104,7 +104,7 @@ fn show_store(store: &hexora_storage::TrafficStore, id: &str, json: bool) -> Res
     Ok(())
 }
 
-/// `hexora ws send <project> <url> [message]` — the WebSocket repeater.
+/// `nullhawk ws send <project> <url> [message]` — the WebSocket repeater.
 ///
 /// Connects to a target, sends a message and listens for replies, recording the whole
 /// session into the project like any captured one. Human-driven, so an out-of-scope target
@@ -133,19 +133,19 @@ pub fn send(
     }
 
     let tls = if insecure {
-        hexora_http::TlsConfig::accept_any()
+        nullhawk_http::TlsConfig::accept_any()
     } else {
-        hexora_http::TlsConfig::verified()
+        nullhawk_http::TlsConfig::verified()
     };
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| HexoraError::Internal(e.to_string()))?;
+        .map_err(|e| NullhawkError::Internal(e.to_string()))?;
 
     runtime.block_on(async move {
         let mut connection =
-            hexora_http::ws::connect(&service, &path, &tls, &Limits::default()).await?;
+            nullhawk_http::ws::connect(&service, &path, &tls, &Limits::default()).await?;
         let request_id = record_handshake(&store, &service, &path)?;
 
         if let Some(hex) = raw {
@@ -220,14 +220,14 @@ pub fn send(
             );
         }
 
-        Ok::<(), HexoraError>(())
+        Ok::<(), NullhawkError>(())
     })
 }
 
 /// Records the WebSocket upgrade as an exchange, so the session's frames have a request to
 /// anchor to — the same reason the proxy records the upgrade first.
 fn record_handshake(
-    store: &hexora_storage::TrafficStore,
+    store: &nullhawk_storage::TrafficStore,
     service: &HttpService,
     path: &str,
 ) -> Result<RequestId> {
@@ -275,7 +275,7 @@ fn record_handshake(
 fn decode_hex(hex: &str) -> Result<Vec<u8>> {
     let clean: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
     if !clean.len().is_multiple_of(2) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "raw",
             "the hex string has an odd number of digits",
         ));
@@ -284,14 +284,14 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>> {
         .step_by(2)
         .map(|i| {
             u8::from_str_radix(&clean[i..i + 2], 16)
-                .map_err(|_| HexoraError::invalid_input("raw", "the hex string is not valid hex"))
+                .map_err(|_| NullhawkError::invalid_input("raw", "the hex string is not valid hex"))
         })
         .collect()
 }
 
 /// Parses the opcode and payload of the first frame in `bytes`, for recording a raw send.
 fn parse_one_frame(bytes: &[u8]) -> Option<(u8, Vec<u8>)> {
-    let mut parser = hexora_http::ws::FrameParser::new(16 * 1024 * 1024);
+    let mut parser = nullhawk_http::ws::FrameParser::new(16 * 1024 * 1024);
     parser.push(bytes);
     match parser.next_frame() {
         Ok(Some(frame)) => Some((frame.opcode.as_u8(), frame.payload)),
@@ -323,9 +323,9 @@ fn opcode_name(opcode: u8) -> &'static str {
     }
 }
 
-fn open(path: &Path) -> Result<hexora_storage::Project> {
+fn open(path: &Path) -> Result<nullhawk_storage::Project> {
     if !path.join("project.db").exists() {
-        return Err(HexoraError::not_found(
+        return Err(NullhawkError::not_found(
             "project",
             path.display().to_string(),
         ));

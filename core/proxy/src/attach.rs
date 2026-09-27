@@ -2,7 +2,7 @@
 //!
 //! # Why the proxy needs this at all
 //!
-//! M14.2 puts a project's attached headers on every request *Hexora* sends — the
+//! M14.2 puts a project's attached headers on every request *Nullhawk* sends — the
 //! repeater, the scanner's probes, the intruder, every replay. It does nothing for the
 //! requests a **browser** makes, and during a bug bounty engagement those are the
 //! overwhelming majority. A programme that says
@@ -43,8 +43,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hexora_types::http::{Header, HttpRequest, HttpResponse};
-use hexora_types::scope::Scope;
+use nullhawk_types::http::{Header, HttpRequest, HttpResponse};
+use nullhawk_types::scope::Scope;
 
 use crate::hook::{Interceptor, RequestVerdict, ResponseVerdict};
 
@@ -123,8 +123,8 @@ impl Interceptor for Attaching {
 
 #[cfg(test)]
 mod tests {
-    use hexora_types::http::HttpService;
-    use hexora_types::scope::ScopeRule;
+    use nullhawk_types::http::HttpService;
+    use nullhawk_types::scope::ScopeRule;
 
     use super::*;
     use crate::hook::PassThrough;

@@ -1,4 +1,4 @@
-//! `hexora matchreplace` — rules that rewrite proxied traffic.
+//! `nullhawk matchreplace` — rules that rewrite proxied traffic.
 //!
 //! Burp and Caido's match-and-replace, kept as an ordered list on the project so it is part of
 //! the engagement record. Rules apply only to in-scope hosts (see `core/proxy/src/rewrite.rs`),
@@ -8,8 +8,8 @@
 
 use std::path::Path;
 
-use hexora_types::matchreplace::{MatchReplaceRule, RuleTarget};
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::matchreplace::{MatchReplaceRule, RuleTarget};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Prints the project's match-and-replace rules, in the order they apply.
 pub fn list(project: &Path, json: bool) -> Result<()> {
@@ -23,7 +23,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
     }
 
     if rules.is_empty() {
-        println!("No match-and-replace rules. Add one with `hexora matchreplace add`.");
+        println!("No match-and-replace rules. Add one with `nullhawk matchreplace add`.");
         return Ok(());
     }
 
@@ -50,10 +50,13 @@ pub struct AddArgs<'a> {
 pub fn add(args: AddArgs<'_>) -> Result<()> {
     let name = args.name.trim();
     if name.is_empty() {
-        return Err(HexoraError::invalid_input("--name", "a rule needs a name"));
+        return Err(NullhawkError::invalid_input(
+            "--name",
+            "a rule needs a name",
+        ));
     }
     let target = RuleTarget::parse(args.target).ok_or_else(|| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "--target",
             format!(
                 "{:?} is not a target. Use one of: {}",
@@ -68,14 +71,14 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
     if args.pattern.is_empty() {
         if target.is_header() {
             if !args.replacement.contains(':') {
-                return Err(HexoraError::invalid_input(
+                return Err(NullhawkError::invalid_input(
                     "--replace",
                     "an empty pattern on a header target adds a header, so the replacement \
                      must be `Name: value`",
                 ));
             }
         } else {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "--match",
                 "give a pattern to match; only header targets accept an empty pattern (to add \
                  a header)",
@@ -86,7 +89,7 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
     let settings = crate::open_project(args.project)?.settings();
     let mut rules = settings.match_replace_rules()?;
     if rules.iter().any(|r| r.name == name) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "--name",
             format!("a rule named {name:?} already exists; remove it first or pick another name"),
         ));
@@ -104,8 +107,8 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
     // Compile the whole set so an invalid regex is refused here, not when the proxy runs.
     let mut candidate = rules.clone();
     candidate.push(rule.clone());
-    hexora_proxy::Rewriter::compile(&candidate)
-        .map_err(|why| HexoraError::invalid_input("--match", why))?;
+    nullhawk_proxy::Rewriter::compile(&candidate)
+        .map_err(|why| NullhawkError::invalid_input("--match", why))?;
 
     rules.push(rule.clone());
     settings.set_match_replace_rules(&rules)?;
@@ -126,7 +129,7 @@ pub fn remove(project: &Path, name: &str, json: bool) -> Result<()> {
     let before = rules.len();
     rules.retain(|r| r.name != name);
     if rules.len() == before {
-        return Err(HexoraError::not_found(
+        return Err(NullhawkError::not_found(
             "match-replace rule",
             name.to_string(),
         ));
@@ -148,7 +151,7 @@ pub fn set_enabled(project: &Path, name: &str, enabled: bool, json: bool) -> Res
     let rule = rules
         .iter_mut()
         .find(|r| r.name == name)
-        .ok_or_else(|| HexoraError::not_found("match-replace rule", name.to_string()))?;
+        .ok_or_else(|| NullhawkError::not_found("match-replace rule", name.to_string()))?;
     rule.enabled = enabled;
     let summary = rule.summary();
     settings.set_match_replace_rules(&rules)?;

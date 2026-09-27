@@ -2,7 +2,7 @@
 //!
 //! Security testing has an unusual requirement: the tool must be able to send and
 //! record messages that are *deliberately* invalid. Request smuggling, header
-//! injection and parser-differential testing all depend on Hexora preserving
+//! injection and parser-differential testing all depend on Nullhawk preserving
 //! byte-for-byte what the user wrote, including duplicate headers, unusual casing,
 //! obs-fold whitespace and non-UTF-8 bytes.
 //!
@@ -18,7 +18,7 @@ use std::fmt;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{HexoraError, ProtocolError, Result};
+use crate::error::{NullhawkError, ProtocolError, Result};
 
 /// The HTTP version a message was sent or received on.
 #[allow(missing_docs)]
@@ -282,7 +282,7 @@ impl HttpService {
     pub fn parse_url(url: &str) -> crate::Result<(Self, String)> {
         let trimmed = url.trim();
         if trimmed.is_empty() {
-            return Err(crate::HexoraError::invalid_input(
+            return Err(crate::NullhawkError::invalid_input(
                 "url",
                 "a URL is required",
             ));
@@ -295,7 +295,7 @@ impl HttpService {
                 "https" | "wss" => (true, rest),
                 "http" | "ws" => (false, rest),
                 other => {
-                    return Err(crate::HexoraError::invalid_input(
+                    return Err(crate::NullhawkError::invalid_input(
                         "url",
                         format!("scheme {other:?} is not http(s) or ws(s)"),
                     ))
@@ -315,7 +315,7 @@ impl HttpService {
 
         let parse_port = |p: &str| -> crate::Result<u16> {
             p.parse::<u16>().map_err(|_| {
-                crate::HexoraError::invalid_input("url", format!("port {p:?} is not a number"))
+                crate::NullhawkError::invalid_input("url", format!("port {p:?} is not a number"))
             })
         };
 
@@ -323,7 +323,7 @@ impl HttpService {
             // A bracketed IPv6 literal: `[addr]`, optionally followed by `:port`. The
             // colons inside are the address, so the port is only ever what follows `]`.
             let close = rest.find(']').ok_or_else(|| {
-                crate::HexoraError::invalid_input("url", "the IPv6 host is not closed with ']'")
+                crate::NullhawkError::invalid_input("url", "the IPv6 host is not closed with ']'")
             })?;
             let addr = &rest[..close];
             let after = &rest[close + 1..];
@@ -332,7 +332,7 @@ impl HttpService {
             } else if after.is_empty() {
                 default_port
             } else {
-                return Err(crate::HexoraError::invalid_input(
+                return Err(crate::NullhawkError::invalid_input(
                     "url",
                     "unexpected characters after the IPv6 host",
                 ));
@@ -348,13 +348,13 @@ impl HttpService {
         };
 
         if host.is_empty() {
-            return Err(crate::HexoraError::invalid_input(
+            return Err(crate::NullhawkError::invalid_input(
                 "url",
                 "the URL has no host",
             ));
         }
         if host.chars().any(char::is_whitespace) {
-            return Err(crate::HexoraError::invalid_input(
+            return Err(crate::NullhawkError::invalid_input(
                 "url",
                 "the host contains whitespace",
             ));
@@ -379,7 +379,7 @@ impl fmt::Display for HttpService {
     }
 }
 
-/// An HTTP request as Hexora stores and sends it.
+/// An HTTP request as Nullhawk stores and sends it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpRequest {
     /// Where the request is sent.
@@ -441,19 +441,19 @@ impl HttpRequest {
 
     /// Rejects requests whose framing headers are self-contradictory.
     ///
-    /// Hexora does not *prevent* sending these — smuggling tests need them — but the
+    /// Nullhawk does not *prevent* sending these — smuggling tests need them — but the
     /// engine calls this so it can warn, and so automated subsystems (scanner,
     /// fuzzer) never send an ambiguous message by accident.
     pub fn check_framing(&self) -> Result<()> {
         let cl = self.headers.count("Content-Length");
         let te = self.headers.count("Transfer-Encoding");
         if cl > 1 {
-            return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(
+            return Err(NullhawkError::Protocol(ProtocolError::AmbiguousFraming(
                 format!("{cl} Content-Length headers"),
             )));
         }
         if cl == 1 && te >= 1 {
-            return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(
+            return Err(NullhawkError::Protocol(ProtocolError::AmbiguousFraming(
                 "both Content-Length and Transfer-Encoding present".into(),
             )));
         }
@@ -461,7 +461,7 @@ impl HttpRequest {
     }
 }
 
-/// An HTTP response as Hexora records it.
+/// An HTTP response as Nullhawk records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpResponse {
     /// The status code, verbatim. Not validated: targets do send invalid codes.

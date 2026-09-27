@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! captured:  GET /login?next=/dashboard   →  302  Location: /dashboard
-//! probed:    GET /login?next=https://hexora-probe.invalid/
-//!                                         →  302  Location: https://hexora-probe.invalid/
+//! probed:    GET /login?next=https://nullhawk-probe.invalid/
+//!                                         →  302  Location: https://nullhawk-probe.invalid/
 //! ```
 //!
 //! # The header is read, never followed
@@ -12,7 +12,7 @@
 //! the one way an automated tool can be talked into generating traffic to a machine
 //! nobody authorized. The scope guard would refuse it, and relying on that would be
 //! relying on a backstop instead of not doing the thing. So the destination is resolved
-//! from the header and the request's own host, by [`hexora_types::redirect`], and no
+//! from the header and the request's own host, by [`nullhawk_types::redirect`], and no
 //! request is ever made to it.
 //!
 //! # The destination is a host, not a substring
@@ -21,11 +21,11 @@
 //! browser anywhere:
 //!
 //! ```text
-//! https://hexora-probe.invalid/                    taken
-//! //hexora-probe.invalid/                          taken — and invisible to a filter
+//! https://nullhawk-probe.invalid/                    taken
+//! //nullhawk-probe.invalid/                          taken — and invisible to a filter
 //!                                                          that only looks for `http`
-//! https://app.example.com@hexora-probe.invalid/    taken — the host is after the `@`
-//! /redirect?to=https://hexora-probe.invalid        carried, not obeyed
+//! https://app.example.com@nullhawk-probe.invalid/    taken — the host is after the `@`
+//! /redirect?to=https://nullhawk-probe.invalid        carried, not obeyed
 //! ```
 //!
 //! A carried value is **refuted, with the reason**, because a tester who has been told
@@ -57,15 +57,17 @@
 //! stated limitations rather than quiet ones.
 
 use async_trait::async_trait;
-use hexora_types::finding::{Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity};
-use hexora_types::inject::{inputs_in, substitute};
-use hexora_types::object::ObjectLocation;
-use hexora_types::redirect::{resolve, Destination};
-use hexora_types::verify::{
+use nullhawk_types::finding::{
+    Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
+};
+use nullhawk_types::inject::{inputs_in, substitute};
+use nullhawk_types::object::ObjectLocation;
+use nullhawk_types::redirect::{resolve, Destination};
+use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
-use hexora_types::Result;
-use hexora_verify::Lab;
+use nullhawk_types::Result;
+use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
@@ -92,8 +94,8 @@ const INFO: DetectorInfo = DetectorInfo {
 /// a browser opened by hand, a library that follows automatically — reaches nothing.
 /// Nobody can register it either, so a redirect reported last year cannot be turned
 /// into a live one by somebody buying the domain.
-const PROBE_HOST: &str = "hexora-probe.invalid";
-const SECOND_PROBE_HOST: &str = "hexora-second-probe.invalid";
+const PROBE_HOST: &str = "nullhawk-probe.invalid";
+const SECOND_PROBE_HOST: &str = "nullhawk-second-probe.invalid";
 
 #[async_trait]
 impl ActiveCheck for RedirectDestination {
@@ -209,7 +211,7 @@ impl ActiveCheck for RedirectDestination {
             description: format!(
                 "{} {} was sent a destination in {where_} naming a host that cannot \
                  exist, and answered with a Location header pointing at it. {}\n\nThe \
-                 header was read, never followed: Hexora does not send a request to a \
+                 header was read, never followed: Nullhawk does not send a request to a \
                  destination a target chose.",
                 subject.exchange.method,
                 subject.exchange.url,
@@ -231,7 +233,7 @@ impl ActiveCheck for RedirectDestination {
                 .into(),
             reproduction: format!(
                 "Send {} {} with {where_} set to `https://{PROBE_HOST}/` and read the \
-                 Location header on the response without following it. `hexora poc \
+                 Location header on the response without following it. `nullhawk poc \
                  <project> <finding>` compiles the exact requests.",
                 subject.exchange.method, subject.exchange.url,
             ),
@@ -372,7 +374,7 @@ fn severity_for(verification: &Verification) -> Severity {
 
 /// One probe and what came back.
 struct Answer {
-    request: hexora_types::ids::RequestId,
+    request: nullhawk_types::ids::RequestId,
     status: u16,
     redirected: bool,
     destination: Destination,
@@ -499,7 +501,7 @@ fn evidence(subject: &Subject, slot: &ObjectLocation, answers: &[&Answer]) -> Ve
 /// `Location` is evidence that this endpoint redirects. The cost is that a redirect
 /// which happens only for certain values is missed, and that is written down rather
 /// than hidden.
-pub fn suspect(exchange: &hexora_scan::Exchange) -> Vec<Hypothesis> {
+pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
     if !(300..400).contains(&exchange.status) || exchange.response_headers.get("location").is_none()
     {
         return Vec::new();
@@ -539,20 +541,20 @@ mod tests {
         Hypothesis {
             detector: detector.into(),
             claim: "something".into(),
-            source_request: hexora_types::ids::RequestId::new(),
+            source_request: nullhawk_types::ids::RequestId::new(),
             location: None,
             provisional_severity: Severity::Info,
         }
     }
 
-    fn exchange(status: u16, location: Option<&str>) -> hexora_scan::Exchange {
-        let mut response_headers = hexora_types::http::Headers::new();
+    fn exchange(status: u16, location: Option<&str>) -> nullhawk_scan::Exchange {
+        let mut response_headers = nullhawk_types::http::Headers::new();
         if let Some(location) = location {
             response_headers.set("Location", location);
         }
-        hexora_scan::Exchange {
-            id: hexora_types::ids::RequestId::new(),
-            target: hexora_types::ids::TargetId::new(),
+        nullhawk_scan::Exchange {
+            id: nullhawk_types::ids::RequestId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             host: "app.example.com".into(),
             port: 443,
             secure: true,
@@ -560,7 +562,7 @@ mod tests {
             url: "https://app.example.com/login?next=/dashboard".into(),
             path: "/login?next=/dashboard".into(),
             status,
-            request_headers: hexora_types::http::Headers::new(),
+            request_headers: nullhawk_types::http::Headers::new(),
             response_headers,
             response_bytes: 0,
             authenticated: false,
@@ -694,8 +696,8 @@ mod tests {
                 source_request: exchange.id,
                 ..raised(SETTLES)
             },
-            draft: hexora_repeater::Draft::new(hexora_types::http::HttpRequest::get(
-                hexora_types::http::HttpService::new("app.example.com", 443, true),
+            draft: nullhawk_repeater::Draft::new(nullhawk_types::http::HttpRequest::get(
+                nullhawk_types::http::HttpService::new("app.example.com", 443, true),
                 "/login?next=/dashboard",
             )),
             target: exchange.target,
@@ -706,7 +708,7 @@ mod tests {
 
     fn answer(location: &str) -> Answer {
         Answer {
-            request: hexora_types::ids::RequestId::new(),
+            request: nullhawk_types::ids::RequestId::new(),
             status: 302,
             redirected: true,
             destination: resolve("app.example.com", location),

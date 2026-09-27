@@ -1,15 +1,15 @@
-//! `hexora check` — user-defined scan checks (Hexora's answer to Burp's BChecks).
+//! `nullhawk check` — user-defined scan checks (Nullhawk's answer to Burp's BChecks).
 //!
 //! A custom check is a saved query plus a finding template. When the query matches a captured
 //! exchange, the passive scanner records a lead with the check's name, severity and message.
-//! Checks run whenever `hexora scan passive` runs; they match on metadata and headers, never on
+//! Checks run whenever `nullhawk scan passive` runs; they match on metadata and headers, never on
 //! bodies, and can only ever produce a lead — never an actionable finding.
 
 use std::path::Path;
 
-use hexora_types::custom::CustomCheck;
-use hexora_types::finding::Severity;
-use hexora_types::{HexoraError, Result};
+use nullhawk_types::custom::CustomCheck;
+use nullhawk_types::finding::Severity;
+use nullhawk_types::{NullhawkError, Result};
 
 /// Prints the project's custom checks, in the order they run.
 pub fn list(project: &Path, json: bool) -> Result<()> {
@@ -20,10 +20,10 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
         return Ok(());
     }
     if checks.is_empty() {
-        println!("No custom checks. Add one with `hexora check add`.");
+        println!("No custom checks. Add one with `nullhawk check add`.");
         return Ok(());
     }
-    println!("Custom checks (run during `hexora scan passive`):");
+    println!("Custom checks (run during `nullhawk scan passive`):");
     for check in &checks {
         println!("  {}", check.summary());
     }
@@ -46,10 +46,10 @@ pub struct AddArgs<'a> {
 pub fn add(args: AddArgs<'_>) -> Result<()> {
     let id = args.id.trim();
     if id.is_empty() {
-        return Err(HexoraError::invalid_input("id", "a check needs an id"));
+        return Err(NullhawkError::invalid_input("id", "a check needs an id"));
     }
     let severity = Severity::parse(args.severity).ok_or_else(|| {
-        HexoraError::invalid_input(
+        NullhawkError::invalid_input(
             "--severity",
             format!(
                 "{:?} is not a severity (info, low, medium, high, critical)",
@@ -62,13 +62,13 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
     check.enabled = !args.disabled;
 
     // The query must compile and touch no body — refused here, not silently at scan time.
-    hexora_scan::custom::validate(&check)
-        .map_err(|why| HexoraError::invalid_input("--query", why))?;
+    nullhawk_scan::custom::validate(&check)
+        .map_err(|why| NullhawkError::invalid_input("--query", why))?;
 
     let settings = crate::open_project(args.project)?.settings();
     let mut checks = settings.custom_checks()?;
     if checks.iter().any(|c| c.id == id) {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "id",
             format!("a check with id {id:?} already exists; remove it or pick another id"),
         ));
@@ -80,7 +80,7 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
         println!("{}", serde_json::to_string(&check).unwrap_or_default());
     } else {
         println!("Added check: {}", check.summary());
-        println!("It runs during `hexora scan passive` and files a lead when it matches.");
+        println!("It runs during `nullhawk scan passive` and files a lead when it matches.");
     }
     Ok(())
 }
@@ -92,7 +92,7 @@ pub fn remove(project: &Path, id: &str, json: bool) -> Result<()> {
     let before = checks.len();
     checks.retain(|c| c.id != id);
     if checks.len() == before {
-        return Err(HexoraError::not_found("custom check", id.to_string()));
+        return Err(NullhawkError::not_found("custom check", id.to_string()));
     }
     settings.set_custom_checks(&checks)?;
 
@@ -111,7 +111,7 @@ pub fn set_enabled(project: &Path, id: &str, enabled: bool, json: bool) -> Resul
     let check = checks
         .iter_mut()
         .find(|c| c.id == id)
-        .ok_or_else(|| HexoraError::not_found("custom check", id.to_string()))?;
+        .ok_or_else(|| NullhawkError::not_found("custom check", id.to_string()))?;
     check.enabled = enabled;
     let summary = check.summary();
     settings.set_custom_checks(&checks)?;

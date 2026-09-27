@@ -68,7 +68,7 @@ Two separate things, easy to conflate:
 | File | Meaning |
 | ---- | ------- |
 | `rust-toolchain.toml` | The **exact** compiler used for development and CI. Pinned, so every machine agrees. |
-| `rust-version` in `Cargo.toml` | The **minimum** compiler Hexora claims to support (MSRV). |
+| `rust-version` in `Cargo.toml` | The **minimum** compiler Nullhawk claims to support (MSRV). |
 
 They are deliberately different values. The MSRV is `1.88`, which is not a preference —
 it is the floor imposed by the dependency graph (`plist`, `serde_with`, `time`,
@@ -82,15 +82,15 @@ a dependency or a language feature genuinely requires it, and say which in the c
 
 ```bash
 # Core crates and CLI — no system dependencies needed
-cargo test --workspace --exclude hexora-desktop
+cargo test --workspace --exclude nullhawk-desktop
 
 # Everything, once Tauri's system dependencies are installed
 cargo test --workspace
 
 # What CI runs
 cargo fmt --all -- --check
-cargo clippy --workspace --exclude hexora-desktop --all-targets -- -D warnings
-cargo test --workspace --exclude hexora-desktop
+cargo clippy --workspace --exclude nullhawk-desktop --all-targets -- -D warnings
+cargo test --workspace --exclude nullhawk-desktop
 
 # Frontend
 pnpm -C frontend install
@@ -106,9 +106,9 @@ an error that says nothing about the cause.
 Running the CLI:
 
 ```bash
-cargo run -p hexora-cli -- --help
-cargo run -p hexora-cli -- project init ./scratch/demo
-cargo run -p hexora-cli -- project info ./scratch/demo --json
+cargo run -p nullhawk-cli -- --help
+cargo run -p nullhawk-cli -- project init ./scratch/demo
+cargo run -p nullhawk-cli -- project info ./scratch/demo --json
 ```
 
 Running the desktop shell (needs Tauri prerequisites):
@@ -116,12 +116,12 @@ Running the desktop shell (needs Tauri prerequisites):
 ```bash
 pnpm -C frontend install
 pnpm -C frontend dev            # leave this running
-cargo run -p hexora-desktop     # in a second terminal
+cargo run -p nullhawk-desktop     # in a second terminal
 ```
 
 **A debug build loads the dev server, not `frontend/dist`.** `tauri.conf.json` sets
 both `devUrl` and `frontendDist`, and a debug binary uses the first — so
-`pnpm build && cargo run -p hexora-desktop` opens a window showing
+`pnpm build && cargo run -p nullhawk-desktop` opens a window showing
 `ERR_CONNECTION_REFUSED`, which looks like a broken application rather than a missing
 dev server. Either run the dev server alongside it, as above, or build in release
 (`cargo tauri build`), which embeds `dist`.
@@ -133,14 +133,14 @@ Two ways to send, and they promise different things:
 ```bash
 # Serialized from the message model: header order, casing and duplicates survive, but
 # bare LF becomes CRLF and missing framing headers may be added.
-cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --edit
+cargo run -p nullhawk-cli -- repeat ./scratch/demo req_01a08b… --edit
 
 # Written byte for byte. Nothing is parsed on the way out.
-cargo run -p hexora-cli -- repeat ./scratch/demo req_01a08b… --raw --edit
+cargo run -p nullhawk-cli -- repeat ./scratch/demo req_01a08b… --raw --edit
 ```
 
 A request captured in raw mode reloads in raw mode without the flag — the mode is a
-property of the stored request, not of the command. `hexora history` marks those rows
+property of the stored request, not of the command. `nullhawk history` marks those rows
 `[raw]`, and the desktop repeater has a Structured/Raw switch.
 
 Raw mode does not bypass scope: the destination is the service the request is addressed
@@ -150,8 +150,8 @@ cannot be read is refused rather than sent.
 ## Response bodies exist twice
 
 ```bash
-hexora history ./scratch/demo --body req_01a08b…          # content-decoded: the JSON
-hexora history ./scratch/demo --body req_01a08b… --wire   # transfer-decoded: the gzip
+nullhawk history ./scratch/demo --body req_01a08b…          # content-decoded: the JSON
+nullhawk history ./scratch/demo --body req_01a08b… --wire   # transfer-decoded: the gzip
 ```
 
 The names are exact and are defined in [`architecture.md`](architecture.md): *raw
@@ -246,7 +246,7 @@ Reference the milestone (`M1: …`) when the change belongs to one.
 
 ## Not-yet-implemented surfaces
 
-Unfinished work returns `HexoraError::NotImplemented`, which fails loudly. Do not
+Unfinished work returns `NullhawkError::NotImplemented`, which fails loudly. Do not
 return empty collections, plausible-looking placeholder data, or `Ok(())` from a path
 that does nothing — a security tool that appears to have scanned and found nothing is
 worse than one that says it cannot scan yet.

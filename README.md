@@ -1,24 +1,24 @@
-# Hexora
+# Nullhawk
 
 **The Modern Offensive Security Workbench**
 
-Hexora is a web and API security testing platform for **authorized** penetration
+Nullhawk is a web and API security testing platform for **authorized** penetration
 testing, application security testing and security research. It is built as a fast
 native core in Rust, with a desktop client (Tauri + React), a headless CLI that shares
 the same engine, and an extension system with a real permission model.
 
-> ⚠️ **For authorized security testing only.** Using Hexora against systems you do not
+> ⚠️ **For authorized security testing only.** Using Nullhawk against systems you do not
 > own or have written permission to test is illegal in most jurisdictions.
 
 ---
 
 ## Status: M14.1 — one request, many values, and the row that does not match
 
-Hexora intercepts traffic, stores it as evidence, replays it, and now tells you whether
+Nullhawk intercepts traffic, stores it as evidence, replays it, and now tells you whether
 an application actually checks *who* is asking:
 
 ```console
-$ hexora authz ./engagement req_01a08c30bf9d… --as-identity "User A" --verify
+$ nullhawk authz ./engagement req_01a08c30bf9d… --as-identity "User A" --verify
 GET https://api.example.com/accounts/acct-1000
 Baseline: User A → 200
 
@@ -46,7 +46,7 @@ The finding is in the project, not just the terminal — with the two request id
 it, so the claim can be re-opened and re-run months later:
 
 ```console
-$ hexora findings ./engagement
+$ nullhawk findings ./engagement
 ID                                     SEVERITY  CONFIDENCE STATUS   TITLE
 fnd_01a08c5140…                        high      confirmed  new      Broken object-level authorization in GET /accounts/acct-1000
 ```
@@ -56,7 +56,7 @@ response quoted under every claim, credentials redacted, and unverified leads ke
 their own section rather than dressed up as findings:
 
 ```console
-$ hexora report ./engagement --format html --output acme.html
+$ nullhawk report ./engagement --format html --output acme.html
 Wrote acme.html (10875 bytes): 1 established issue across 13 exchanges, plus 1 unverified lead.
 1 unverified lead is listed separately. Re-run the test with --verify before presenting it as an issue.
 ```
@@ -67,7 +67,7 @@ cell's exchange, work the findings list, follow a claim back to the traffic behi
 triage, and preview the report before writing it.
 
 Unimplemented paths return `NotImplemented` naming the milestone that will provide
-them, rather than empty results, and `hexora --help` lists only commands that genuinely
+them, rather than empty results, and `nullhawk --help` lists only commands that genuinely
 work.
 
 | Area | Status |
@@ -79,28 +79,28 @@ work.
 | Both body forms kept: transfer-decoded and content-decoded (`history --body --wire`) | **IMPLEMENTED** |
 | Raw request mode — bytes sent exactly as written (`repeat --raw`) | **IMPLEMENTED** |
 | Intercepting proxy, TLS interception, request/response hooks | **IMPLEMENTED** |
-| Interception CA, trust installation, `hexora setup` | **IMPLEMENTED** |
+| Interception CA, trust installation, `nullhawk setup` | **IMPLEMENTED** |
 | Project storage: SQLite metadata + content-addressed blob store, migrations | **IMPLEMENTED** |
 | Traffic history, Repeater with diffing and branch trees | **IMPLEMENTED** |
-| Identities, project scope, authorization matrix (`hexora authz`) | **IMPLEMENTED** |
-| Declared object identifiers and constructed cross-identity attempts (`hexora object`, `authz --construct`) | **IMPLEMENTED** |
-| Findings persisted with their evidence, triage (`hexora findings`) | **IMPLEMENTED** |
-| Suggested identifiers with the reasoning behind each one, never an ownership claim (`hexora identifiers`) | **IMPLEMENTED** |
-| Engagement snapshots and retest comparison, which report why a claim is gone and never that it is fixed (`hexora snapshot`) | **IMPLEMENTED** |
-| Verification framework: a detector raises a hypothesis, only a verifier's result can be stored, and the compiler enforces it (`hexora detectors`) | **IMPLEMENTED** |
-| Passive scanner: six checks over captured traffic, sending nothing, every result a lead (`hexora scan passive`) | **IMPLEMENTED** |
-| Proof-of-concept compilation: a finding becomes runnable steps, credentials replaced by placeholders (`hexora poc`) | **IMPLEMENTED** |
+| Identities, project scope, authorization matrix (`nullhawk authz`) | **IMPLEMENTED** |
+| Declared object identifiers and constructed cross-identity attempts (`nullhawk object`, `authz --construct`) | **IMPLEMENTED** |
+| Findings persisted with their evidence, triage (`nullhawk findings`) | **IMPLEMENTED** |
+| Suggested identifiers with the reasoning behind each one, never an ownership claim (`nullhawk identifiers`) | **IMPLEMENTED** |
+| Engagement snapshots and retest comparison, which report why a claim is gone and never that it is fixed (`nullhawk snapshot`) | **IMPLEMENTED** |
+| Verification framework: a detector raises a hypothesis, only a verifier's result can be stored, and the compiler enforces it (`nullhawk detectors`) | **IMPLEMENTED** |
+| Passive scanner: six checks over captured traffic, sending nothing, every result a lead (`nullhawk scan passive`) | **IMPLEMENTED** |
+| Proof-of-concept compilation: a finding becomes runnable steps, credentials replaced by placeholders (`nullhawk poc`) | **IMPLEMENTED** |
 | Structural response comparison: which JSON field differed, at which path, under a normalization policy the report states | **IMPLEMENTED** |
-| Active scheduler: one queue per host, a request ceiling, a plan you see before anything is sent (`hexora scan active`) | **IMPLEMENTED** |
+| Active scheduler: one queue per host, a request ceiling, a plan you see before anything is sent (`nullhawk scan active`) | **IMPLEMENTED** |
 | Reflected-input verification: which characters survived, and whether they landed in markup, script or data | **IMPLEMENTED** |
 | Redirect verification: the `Location` header resolved the way a browser resolves it, and never followed | **IMPLEMENTED** |
 | Authentication enforcement: whether an endpoint needs a session, and whether it verifies the one it is given | **IMPLEMENTED** |
 | Cross-identity access, scheduled: every authenticated endpoint replayed as every other identity, owner inferred from the captured credential | **IMPLEMENTED** |
-| Intruder: one request, a payload list, and responses grouped by behaviour so the outlier is one short row (`hexora fuzz`) | **IMPLEMENTED** |
+| Intruder: one request, a payload list, and responses grouped by behaviour so the outlier is one short row (`nullhawk fuzz`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
 | Extension permission model · AI tool-permission gate | **IMPLEMENTED** |
 | Desktop UI: project, CA, proxy, history, repeater, scope, identities, identifier suggestions, the authorization matrix, findings, the report and snapshots | **IMPLEMENTED** |
-| Reports: Markdown / HTML / JSON, every claim citing its exchange (`hexora report`) | **IMPLEMENTED** |
+| Reports: Markdown / HTML / JSON, every claim citing its exchange (`nullhawk report`) | **IMPLEMENTED** |
 | Attack chains | **PLANNED (rest of M12)** |
 | Connection reuse | **DEFERRED (M1.4)** |
 | Active scanner, Fuzzer, Workflows, OAST, AI, Burp compatibility | **PLANNED** |
@@ -109,7 +109,7 @@ Full detail: [`docs/roadmap.md`](docs/roadmap.md).
 
 ---
 
-## What Hexora is trying to be
+## What Nullhawk is trying to be
 
 Not a Burp clone. The bet is on four things that existing tools do not do well:
 
@@ -133,11 +133,11 @@ matrix — not as a claim that every extension works.
 ## Architecture in one diagram
 
 ```text
-        Desktop (Tauri + React)          CLI (hexora)
+        Desktop (Tauri + React)          CLI (nullhawk)
                     │                          │
                     └────────────┬─────────────┘
                                  │
-                         Hexora core (Rust)
+                         Nullhawk core (Rust)
                                  │
         ┌────────────────────────┼────────────────────────┐
         │                        │                        │
@@ -160,9 +160,9 @@ Requires Rust 1.88+ (the toolchain is pinned in `rust-toolchain.toml`), Node 20+
 
 ```bash
 # Core crates and CLI
-cargo test --workspace --exclude hexora-desktop
-cargo run -p hexora-cli -- --help
-cargo run -p hexora-cli -- send http://example.com/
+cargo test --workspace --exclude nullhawk-desktop
+cargo run -p nullhawk-cli -- --help
+cargo run -p nullhawk-cli -- send http://example.com/
 
 # Frontend
 pnpm -C frontend install
@@ -193,7 +193,7 @@ nothing like a toolchain problem. Full instructions:
 | [`docs/feature-parity.md`](docs/feature-parity.md) | Burp / Caido / ZAP parity matrix and competitive position |
 | [`docs/dependencies.md`](docs/dependencies.md) | Dependency, audit and secret-scanning policy |
 
-**Read the threat model before trusting Hexora with a client's credentials.** It states
+**Read the threat model before trusting Nullhawk with a client's credentials.** It states
 plainly what is not protected — notably that project data is not encrypted at rest and
 that native and Burp-compatible extensions are not sandboxed.
 
@@ -208,5 +208,5 @@ rules exist because the natural way to write the code violates them.
 
 ## License
 
-AGPL-3.0-or-later. Hexora is an independent implementation and contains no proprietary
+AGPL-3.0-or-later. Nullhawk is an independent implementation and contains no proprietary
 code, assets or trademarks from other security products.

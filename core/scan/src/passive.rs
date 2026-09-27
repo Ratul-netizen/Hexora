@@ -7,7 +7,7 @@
 //! ```
 //!
 //! That signature is the invariant. There is no `HttpTransport` here, no
-//! [`Lab`](hexora_verify::Lab), and nothing in a [`Project`](hexora_storage::Project)
+//! [`Lab`](nullhawk_verify::Lab), and nothing in a [`Project`](nullhawk_storage::Project)
 //! that can reach a network — so "the passive scanner makes no requests" is not a
 //! rule anybody keeps, it is a property of what the function was given. A test that
 //! mocked a transport would be testing a parameter that does not exist.
@@ -35,14 +35,14 @@
 
 use std::collections::BTreeMap;
 
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::{DetectorRun, Project, RunStatus, ScanRun};
-use hexora_types::finding::{Evidence, Hypothesis};
-use hexora_types::http::Headers;
-use hexora_types::ids::{RequestId, ScanRunId, TargetId};
-use hexora_types::programme::Programme;
-use hexora_types::verify::{Observation, Verification, Verified};
-use hexora_types::Result;
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_storage::{DetectorRun, Project, RunStatus, ScanRun};
+use nullhawk_types::finding::{Evidence, Hypothesis};
+use nullhawk_types::http::Headers;
+use nullhawk_types::ids::{RequestId, ScanRunId, TargetId};
+use nullhawk_types::programme::Programme;
+use nullhawk_types::verify::{Observation, Verification, Verified};
+use nullhawk_types::Result;
 
 use crate::checks;
 use crate::{
@@ -148,7 +148,7 @@ pub struct Summary {
     /// it here means the active run tests exactly the traffic the passive pass
     /// reported on rather than a second, differently-filtered set.
     ///
-    /// **Traffic Hexora generated is left out**, whichever subsystem generated it.
+    /// **Traffic Nullhawk generated is left out**, whichever subsystem generated it.
     ///
     /// A project accumulates the tool's own requests: probes from the scanner, replays
     /// from the authorization matrix. Reading those back as though they were the
@@ -160,9 +160,9 @@ pub struct Summary {
     ///   credential, so every check that needs authenticated traffic silently stops
     ///   raising work for it after the first run.
     ///
-    /// The line is [`Origin::is_automated`](hexora_engine::transport::Origin) draws:
+    /// The line is [`Origin::is_automated`](nullhawk_engine::transport::Origin) draws:
     /// the proxy and the repeater are a person doing something, everything else is
-    /// Hexora doing something.
+    /// Nullhawk doing something.
     pub endpoints: Vec<Exchange>,
     /// What each detector did, including the ones that found nothing.
     pub detectors: Vec<DetectorRun>,
@@ -425,7 +425,7 @@ pub fn scan(project: &Project, selection: &Selection) -> Result<Summary> {
         // truth rather than a value nobody filled in.
         requests_sent: 0,
         stopped_because: None,
-        tool_version: hexora_types::VERSION.to_string(),
+        tool_version: nullhawk_types::VERSION.to_string(),
         detectors: counts.values().cloned().collect(),
     };
     project.scans().record(&run)?;
@@ -516,9 +516,9 @@ fn as_hypothesis(observation: &Observation) -> Hypothesis {
 
 /// Whether an exchange is one this run was asked to look at.
 fn wanted(
-    row: &hexora_storage::StoredTraffic,
+    row: &nullhawk_storage::StoredTraffic,
     selection: &Selection,
-    scope: &hexora_types::scope::Scope,
+    scope: &nullhawk_types::scope::Scope,
 ) -> bool {
     let Some(host) = host_of(&row.url) else {
         return false;
@@ -535,7 +535,7 @@ fn wanted(
         }
     }
     if !selection.everything {
-        let service = hexora_types::http::HttpService::new(
+        let service = nullhawk_types::http::HttpService::new(
             host,
             port_of(&row.url).unwrap_or(if row.secure { 443 } else { 80 }),
             row.secure,
@@ -550,13 +550,13 @@ fn wanted(
 /// Whether an exchange was made because a person did something.
 ///
 /// The proxy saw a browser; the repeater sent what somebody typed. Everything else —
-/// the scanner, the authorization matrix, a future fuzzer — is Hexora's own traffic,
+/// the scanner, the authorization matrix, a future fuzzer — is Nullhawk's own traffic,
 /// and reading it back as the application's is how a tool starts reporting on itself.
 ///
 /// Matched on the stored string rather than on
-/// [`Origin`](hexora_engine::transport::Origin), because this crate deliberately does
+/// [`Origin`](nullhawk_engine::transport::Origin), because this crate deliberately does
 /// not depend on the transport layer. An origin nobody recognises is treated as
-/// Hexora's, which is the direction to be wrong in.
+/// Nullhawk's, which is the direction to be wrong in.
 fn human_driven(origin: &str) -> bool {
     matches!(origin, "proxy" | "repeater")
 }
@@ -565,7 +565,7 @@ fn human_driven(origin: &str) -> bool {
 ///
 /// Human traffic does, and so does the **crawler**: it is automated, but it fetches the
 /// application's own links, so a crawled `/search?q=…` is the application's endpoint and its
-/// parameters are the application's — the opposite of a scanner probe, whose value Hexora
+/// parameters are the application's — the opposite of a scanner probe, whose value Nullhawk
 /// invented. So the active run may enumerate crawled endpoints (that is the point of a crawl:
 /// "the scanner now has more to scan"), while still never reading its own probes back.
 fn describes_app_surface(origin: &str) -> bool {
@@ -618,7 +618,7 @@ pub fn exchange_at(project: &Project, request: RequestId) -> Result<Option<Excha
 }
 
 /// Reads one exchange into the shape a check sees.
-fn assemble(project: &Project, row: &hexora_storage::StoredTraffic) -> Result<Option<Exchange>> {
+fn assemble(project: &Project, row: &nullhawk_storage::StoredTraffic) -> Result<Option<Exchange>> {
     let traffic = project.traffic();
     let Ok((status, _, _, response_headers)) = traffic.response_head(row.id) else {
         return Ok(None);

@@ -1,6 +1,6 @@
-//! # hexora-storage
+//! # nullhawk-storage
 //!
-//! Project persistence for Hexora.
+//! Project persistence for Nullhawk.
 //!
 //! ## The split
 //!
@@ -45,7 +45,7 @@
 //! [`IdentityStore`], [`ObjectStore`] (declared object identifiers and the requests
 //! constructed from them), [`Settings`] (the project scope) and [`FindingStore`] —
 //! findings with their evidence, filtered and paged, refusing anything
-//! [`Finding::validate`](hexora_types::finding::Finding::validate) rejects.
+//! [`Finding::validate`](nullhawk_types::finding::Finding::validate) rejects.
 //!
 //! Still unimplemented: the session and search traits in [`repository`]. Nothing here
 //! pretends otherwise.
@@ -183,7 +183,7 @@ impl MetadataDb {
 /// On disk a project is a directory, not a single file:
 ///
 /// ```text
-/// engagement.hexora/
+/// engagement.nullhawk/
 /// ├── project.db      metadata (SQLite)
 /// └── blobs/          content-addressed bodies
 ///     └── ab/abcdef…
@@ -228,7 +228,7 @@ impl Project {
         })
     }
 
-    /// Opens a project that persists nothing. Used by tests and `hexora replay`.
+    /// Opens a project that persists nothing. Used by tests and `nullhawk replay`.
     pub fn in_memory() -> Result<Self> {
         Ok(Self {
             metadata: MetadataDb::in_memory()?,
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn a_project_survives_being_closed_and_reopened() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("engagement.hexora");
+        let root = dir.path().join("engagement.nullhawk");
 
         let project = Project::open(&root).unwrap();
         project
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn a_project_keeps_metadata_and_bodies_in_separate_places() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("p.hexora");
+        let root = dir.path().join("p.nullhawk");
         let project = Project::open(&root).unwrap();
         project.blobs().put(b"body").unwrap();
         assert!(root.join("project.db").is_file());

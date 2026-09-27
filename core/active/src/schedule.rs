@@ -31,12 +31,12 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use futures::stream::StreamExt;
-use hexora_storage::{DetectorRun, Project};
-use hexora_types::finding::Hypothesis;
-use hexora_types::programme::Programme;
-use hexora_types::verify::{Verification, Verified};
-use hexora_types::Result;
-use hexora_verify::{Judged, Lab};
+use nullhawk_storage::{DetectorRun, Project};
+use nullhawk_types::finding::Hypothesis;
+use nullhawk_types::programme::Programme;
+use nullhawk_types::verify::{Verification, Verified};
+use nullhawk_types::Result;
+use nullhawk_verify::{Judged, Lab};
 
 use crate::{ActiveCheck, Budget, Cancel, Subject};
 
@@ -63,7 +63,7 @@ pub fn is_state_changing(method: &str) -> bool {
 /// session is the point of it. So is a credential that states no lifetime — an opaque
 /// token knows nothing about itself, and assuming it dead would stop runs over a number
 /// nobody wrote.
-fn expired_now(identities: &[hexora_types::identity::Identity]) -> bool {
+fn expired_now(identities: &[nullhawk_types::identity::Identity]) -> bool {
     let now = chrono::Utc::now().timestamp();
     let mut said_something = false;
     for identity in identities {
@@ -79,10 +79,12 @@ fn expired_now(identities: &[hexora_types::identity::Identity]) -> bool {
 }
 
 /// How many of these are the anonymous principal, which has nothing to expire.
-fn anonymous_count(identities: &[hexora_types::identity::Identity]) -> usize {
+fn anonymous_count(identities: &[nullhawk_types::identity::Identity]) -> usize {
     identities
         .iter()
-        .filter(|identity| identity.privilege == hexora_types::identity::PrivilegeLevel::Anonymous)
+        .filter(|identity| {
+            identity.privilege == nullhawk_types::identity::PrivilegeLevel::Anonymous
+        })
         .count()
 }
 
@@ -139,7 +141,7 @@ impl StoppedBecause {
             Self::CredentialExpired => {
                 "the session being replayed expired while the run was working, so the \
                  experiments after that point could not have established anything and \
-                 were not attempted. Browse the application logged in, then `hexora \
+                 were not attempted. Browse the application logged in, then `nullhawk \
                  identity refresh`, and run it again"
             }
             Self::Cancelled => {
@@ -175,7 +177,7 @@ pub struct Plan {
     /// The same list every subject holds. Kept here as well so the loop can ask the
     /// question without a subject in hand — a queue that has just gone empty still
     /// needs to say *why*.
-    pub programme_identities: Vec<hexora_types::identity::Identity>,
+    pub programme_identities: Vec<nullhawk_types::identity::Identity>,
 }
 
 impl Plan {
@@ -193,7 +195,7 @@ impl Plan {
     ) -> Result<Self> {
         budget
             .check()
-            .map_err(|why| hexora_types::HexoraError::invalid_input("budget", why))?;
+            .map_err(|why| nullhawk_types::NullhawkError::invalid_input("budget", why))?;
 
         // Read once for the whole plan rather than per experiment. A project has a
         // handful of identities and a queue has hundreds of subjects.
@@ -202,7 +204,7 @@ impl Plan {
         // Not a nicety: `requests.identity_id` has a foreign key, so a request
         // attributed to a principal the project has never heard of cannot be stored,
         // and the send fails at the last step with an error about a database
-        // constraint. `hexora authz` has always done this for the same reason.
+        // constraint. `nullhawk authz` has always done this for the same reason.
         //
         // It writes a row and sends nothing, which is the promise `prepare` makes.
         // The terms the engagement is conducted under. An active check whose finding
@@ -217,11 +219,10 @@ impl Plan {
         let programme = project.settings().programme().unwrap_or_default();
 
         let mut identities = project.identities().list().unwrap_or_default();
-        if !identities
-            .iter()
-            .any(|identity| identity.privilege == hexora_types::identity::PrivilegeLevel::Anonymous)
-        {
-            let anonymous = hexora_types::identity::Identity::anonymous();
+        if !identities.iter().any(|identity| {
+            identity.privilege == nullhawk_types::identity::PrivilegeLevel::Anonymous
+        }) {
+            let anonymous = nullhawk_types::identity::Identity::anonymous();
             if project.identities().put(&anonymous).is_ok() {
                 identities.push(anonymous);
             }
@@ -268,7 +269,7 @@ impl Plan {
                         "every credential this project holds has expired by its own \
                          reckoning — {} — so a replay would be refused and prove \
                          nothing. Browse the application logged in, through the proxy, \
-                         then `hexora identity refresh`",
+                         then `nullhawk identity refresh`",
                         stale.join(", ")
                     ),
                 });
@@ -300,7 +301,7 @@ impl Plan {
             }
 
             let exchange =
-                match hexora_scan::passive::exchange_at(project, hypothesis.source_request) {
+                match nullhawk_scan::passive::exchange_at(project, hypothesis.source_request) {
                     Ok(Some(exchange)) => exchange,
                     Ok(None) | Err(_) => {
                         skipped.push(Skipped {
@@ -459,7 +460,7 @@ impl Plan {
 #[derive(Debug, Clone, Default)]
 pub struct Outcome {
     /// The run as it was written into the project, when it was.
-    pub run: Option<hexora_storage::ScanRun>,
+    pub run: Option<nullhawk_storage::ScanRun>,
     /// Every experiment and what became of it.
     pub judged: Vec<Judged>,
     /// Hypotheses nothing was sent for.
@@ -506,7 +507,7 @@ impl Outcome {
 
 /// Runs the plan.
 ///
-/// The only function in Hexora that sends traffic nobody typed. Everything that makes
+/// The only function in Nullhawk that sends traffic nobody typed. Everything that makes
 /// that acceptable is above it: the plan was worked out without sending, the budget
 /// was checked, scope is re-asked before each request, and [`Cancel`] is read between
 /// every one.
@@ -639,8 +640,8 @@ async fn run_recording(
     let detectors: Vec<DetectorRun> = counts.into_values().collect();
     let mut record = None;
     if let Some(project) = project {
-        let run = hexora_storage::ScanRun {
-            id: hexora_types::ids::ScanRunId::new(),
+        let run = nullhawk_storage::ScanRun {
+            id: nullhawk_types::ids::ScanRunId::new(),
             selection: format!(
                 "{} experiment(s) across {} host(s); {}",
                 plan.work.len(),
@@ -652,12 +653,12 @@ async fn run_recording(
             // `Completed` says the run reached its end without erroring, which a
             // cancelled run also does. Whether it worked through its queue is
             // `stopped_because`, and the two questions are deliberately separate.
-            status: hexora_storage::RunStatus::Completed,
+            status: nullhawk_storage::RunStatus::Completed,
             exchanges_read: plan.work.len() as u64,
             exchanges_skipped: plan.skipped.len() as u64,
             requests_sent: spend.spent() as u64,
             stopped_because: stopped.map(|why| why.as_column().to_string()),
-            tool_version: hexora_types::VERSION.to_string(),
+            tool_version: nullhawk_types::VERSION.to_string(),
             detectors: detectors.clone(),
         };
         project.scans().record(&run)?;
@@ -744,17 +745,17 @@ struct Metered<'a> {
 impl Lab for Metered<'_> {
     async fn experiment(
         &self,
-        draft: &hexora_repeater::Draft,
-        as_identity: Option<&hexora_types::identity::Identity>,
-    ) -> Result<hexora_repeater::Sent> {
+        draft: &nullhawk_repeater::Draft,
+        as_identity: Option<&nullhawk_types::identity::Identity>,
+    ) -> Result<nullhawk_repeater::Sent> {
         if self.cancel.stopped() {
-            return Err(hexora_types::HexoraError::invalid_input(
+            return Err(nullhawk_types::NullhawkError::invalid_input(
                 "cancelled",
                 "the run was stopped before this request was sent",
             ));
         }
         if !self.spend.take() {
-            return Err(hexora_types::HexoraError::invalid_input(
+            return Err(nullhawk_types::NullhawkError::invalid_input(
                 "budget",
                 "the run reached its request ceiling before this request was sent",
             ));
@@ -763,7 +764,7 @@ impl Lab for Metered<'_> {
         // is draining, and a target authorized ten minutes ago is not thereby
         // authorized now.
         if self.inner.would_leave_scope(draft, as_identity) {
-            return Err(hexora_types::HexoraError::invalid_input(
+            return Err(nullhawk_types::NullhawkError::invalid_input(
                 "scope",
                 "the target left the project's scope before this request was sent",
             ));
@@ -773,13 +774,16 @@ impl Lab for Metered<'_> {
 
     fn would_leave_scope(
         &self,
-        draft: &hexora_repeater::Draft,
-        as_identity: Option<&hexora_types::identity::Identity>,
+        draft: &nullhawk_repeater::Draft,
+        as_identity: Option<&nullhawk_types::identity::Identity>,
     ) -> bool {
         self.inner.would_leave_scope(draft, as_identity)
     }
 
-    fn draft_of(&self, request: hexora_types::ids::RequestId) -> Result<hexora_repeater::Draft> {
+    fn draft_of(
+        &self,
+        request: nullhawk_types::ids::RequestId,
+    ) -> Result<nullhawk_repeater::Draft> {
         self.inner.draft_of(request)
     }
 }
@@ -908,7 +912,7 @@ mod tests {
 
     #[test]
     fn a_credential_that_states_no_lifetime_never_stops_a_run() {
-        use hexora_types::identity::Identity;
+        use nullhawk_types::identity::Identity;
 
         // An opaque token knows nothing about itself. Treating silence as death would
         // stop runs over a number nobody wrote.
@@ -922,7 +926,7 @@ mod tests {
 
     #[test]
     fn one_live_session_keeps_a_run_going() {
-        use hexora_types::identity::Identity;
+        use nullhawk_types::identity::Identity;
 
         // An engagement with three identities does not stop because one lapsed.
         let dead = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.c2ln";

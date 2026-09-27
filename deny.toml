@@ -12,7 +12,7 @@
 yanked = "warn"
 
 # Accepted advisories, each an *unmaintained* transitive dependency — not a vulnerability — that
-# Hexora cannot remediate without an upstream change. Listed explicitly (not blanket-downgraded)
+# Nullhawk cannot remediate without an upstream change. Listed explicitly (not blanket-downgraded)
 # so a NEW unmaintained crate still fails here and forces a deliberate decision. Recorded with
 # justification in docs/dependencies.md; re-review when Tauri and the rustls stack update.
 ignore = [
@@ -48,34 +48,34 @@ allow = [
 ]
 confidence-threshold = 0.8
 
-# Hexora's own crates are AGPL-3.0 — that is the point. They get a per-crate exception so
+# Nullhawk's own crates are AGPL-3.0 — that is the point. They get a per-crate exception so
 # the project licenses itself as it means to, while AGPL-3.0-or-later stays *out* of the
 # general allow list, so a copyleft *dependency* (which the commercial tier could not ship)
 # still fails here and is a decision someone has to make on purpose.
 exceptions = [
-    { name = "hexora-types", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-storage", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-engine", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-http", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-proxy", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-repeater", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-verify", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-scan", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-active", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-fuzz", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-authz", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-crawl", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-browser", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-llm", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-oob", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-query", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-import", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-sequencer", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-ext", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-wasm", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-report", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-cli", allow = ["AGPL-3.0-or-later"] },
-    { name = "hexora-desktop", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-types", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-storage", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-engine", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-http", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-proxy", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-repeater", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-verify", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-scan", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-active", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-fuzz", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-authz", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-crawl", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-browser", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-llm", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-oob", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-query", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-import", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-sequencer", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-ext", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-wasm", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-report", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-cli", allow = ["AGPL-3.0-or-later"] },
+    { name = "nullhawk-desktop", allow = ["AGPL-3.0-or-later"] },
 ]
 
 [bans]

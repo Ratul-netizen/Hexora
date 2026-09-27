@@ -1,4 +1,4 @@
-//! `hexora poc` — a finding, as something somebody can run.
+//! `nullhawk poc` — a finding, as something somebody can run.
 //!
 //! The last mile of an engagement. A claim in a report invites an argument; the two
 //! requests that produced it, in a form a triager can paste into a terminal, ends
@@ -10,9 +10,9 @@
 
 use std::path::Path;
 
-use hexora_report::poc::{reproduce, Curl, Reproduction};
-use hexora_types::ids::FindingId;
-use hexora_types::Result;
+use nullhawk_report::poc::{reproduce, Curl, Reproduction};
+use nullhawk_types::ids::FindingId;
+use nullhawk_types::Result;
 
 /// Which form to print.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +37,7 @@ impl Form {
     }
 }
 
-/// Options for `hexora poc`.
+/// Options for `nullhawk poc`.
 pub struct Args<'a> {
     pub project: &'a Path,
     /// The finding to reproduce.
@@ -65,7 +65,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
     }
 
     let form = Form::parse(args.format).ok_or_else(|| {
-        hexora_types::HexoraError::invalid_input(
+        nullhawk_types::NullhawkError::invalid_input(
             "--format",
             format!("{:?} is not one of raw, curl, markdown", args.format),
         )
@@ -75,7 +75,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
     match args.save_to {
         Some(path) => {
             std::fs::write(path, &rendered).map_err(|e| {
-                hexora_types::HexoraError::invalid_input(
+                nullhawk_types::NullhawkError::invalid_input(
                     "--save",
                     format!("{}: {e}", path.display()),
                 )
@@ -206,7 +206,7 @@ fn as_json(poc: &Reproduction) -> serde_json::Value {
     serde_json::json!({
         "finding": poc.finding.to_string(),
         "title": poc.title,
-        "confidence": hexora_report::confidence_word(poc.confidence),
+        "confidence": nullhawk_report::confidence_word(poc.confidence),
         "runnable": poc.is_runnable(),
         "summary": poc.summary,
         "placeholders": poc.placeholders.iter().map(|placeholder| serde_json::json!({
@@ -252,7 +252,7 @@ mod tests {
 
         let error = run(Args {
             project: &path,
-            id: &hexora_types::ids::FindingId::new().to_string(),
+            id: &nullhawk_types::ids::FindingId::new().to_string(),
             format: "markdown",
             save_to: None,
             json: false,

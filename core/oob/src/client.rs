@@ -3,7 +3,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use hexora_types::error::{HexoraError, NetworkError, Result};
+use nullhawk_types::error::{NetworkError, NullhawkError, Result};
 
 use crate::{fresh_token, Interaction};
 
@@ -70,21 +70,21 @@ pub async fn poll(authority: &str, token: &str) -> Result<Vec<Interaction>> {
 
     let mut stream = TcpStream::connect(&target)
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     let request = format!(
-        "GET /_hexora/poll?token={token} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+        "GET /_nullhawk/poll?token={token} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     stream.flush().await.ok();
 
     let mut raw = Vec::new();
     stream
         .read_to_end(&mut raw)
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
 
     let text = String::from_utf8_lossy(&raw);
     let body = text
@@ -92,7 +92,7 @@ pub async fn poll(authority: &str, token: &str) -> Result<Vec<Interaction>> {
         .map(|(_, body)| body)
         .unwrap_or("");
     serde_json::from_str::<Vec<Interaction>>(body.trim()).map_err(|e| {
-        HexoraError::Internal(format!("the collaborator poll response was not valid: {e}"))
+        NullhawkError::Internal(format!("the collaborator poll response was not valid: {e}"))
     })
 }
 

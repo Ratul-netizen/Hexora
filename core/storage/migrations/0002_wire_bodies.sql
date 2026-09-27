@@ -1,4 +1,4 @@
--- Hexora project schema, revision 2: preserve the body as it arrived.
+-- Nullhawk project schema, revision 2: preserve the body as it arrived.
 --
 -- Revision 1 stored one body per message. The engine hands back a *decoded* body —
 -- chunked framing removed, Content-Encoding reversed — because that is what a tester
@@ -35,7 +35,7 @@ CREATE INDEX idx_responses_encoded_body_hash ON responses(encoded_body_hash);
 ALTER TABLE requests ADD COLUMN quirks TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE responses ADD COLUMN quirks TEXT NOT NULL DEFAULT '[]';
 
--- What the TLS handshake produced, serialized as `hexora_types::tls::TlsInfo`.
+-- What the TLS handshake produced, serialized as `nullhawk_types::tls::TlsInfo`.
 -- NULL for plaintext exchanges. Kept on the request because that is what carries the
 -- connection, and because a finding derived from an unverified connection has to be
 -- able to disclose that.

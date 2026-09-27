@@ -1,6 +1,6 @@
 //! HTTP/1.x request head parsing.
 //!
-//! The response parser exists so Hexora can see what a target sent. This one exists
+//! The response parser exists so Nullhawk can see what a target sent. This one exists
 //! for the opposite reason: it reads requests *arriving at the proxy*, which is the
 //! message a front-end and a back-end can disagree about — and that disagreement is
 //! what request smuggling is.
@@ -14,9 +14,9 @@
 //! Same rule as everywhere else in this crate: accept what a lenient implementation
 //! would, and record each deviation as a [`Quirk`].
 
-use hexora_types::error::{HexoraError, ProtocolError, Result};
-use hexora_types::http::{Headers, HttpService, HttpVersion};
-use hexora_types::limits::Limits;
+use nullhawk_types::error::{NullhawkError, ProtocolError, Result};
+use nullhawk_types::http::{Headers, HttpService, HttpVersion};
+use nullhawk_types::limits::Limits;
 
 use crate::parse::{parse_header_line, split_lines, BodyFraming, Quirk};
 
@@ -140,7 +140,7 @@ impl RequestHead {
             return Ok(service);
         }
         let host = self.host_header().ok_or_else(|| {
-            HexoraError::Protocol(ProtocolError::Malformed {
+            NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
                 reason: "request has neither an absolute target nor a Host header".to_string(),
             })
@@ -174,8 +174,8 @@ pub fn parse_request_head(buf: &[u8], limits: &Limits) -> Result<RequestHead> {
         }
         parse_header_line(line, &mut headers, &mut quirks, &mut previous_had_value)?;
         if headers.len() > limits.max_header_count {
-            return Err(HexoraError::LimitExceeded(
-                hexora_types::error::LimitError::HeadersTooLarge {
+            return Err(NullhawkError::LimitExceeded(
+                nullhawk_types::error::LimitError::HeadersTooLarge {
                     limit: limits.max_header_count,
                 },
             ));
@@ -213,7 +213,7 @@ fn parse_request_line(line: &[u8]) -> Result<(String, RequestTarget, HttpVersion
         "HTTP/1.1" => HttpVersion::Http11,
         "HTTP/1.0" | "HTTP/0.9" => HttpVersion::Http10,
         other => {
-            return Err(HexoraError::Protocol(ProtocolError::Malformed {
+            return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
                 reason: format!("unsupported request version {other:?}"),
             }))
@@ -239,7 +239,7 @@ pub fn parse_request_target(text: &str) -> Result<RequestTarget> {
             "http" => false,
             "https" => true,
             other => {
-                return Err(HexoraError::Protocol(ProtocolError::Malformed {
+                return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                     protocol: "HTTP/1.1",
                     reason: format!("unsupported scheme {other:?} in request target"),
                 }))
@@ -336,7 +336,7 @@ fn request_framing(headers: &Headers, quirks: &mut Vec<Quirk>) -> Result<BodyFra
             .collect();
         values.dedup();
         if values.len() > 1 {
-            return Err(HexoraError::Protocol(ProtocolError::AmbiguousFraming(
+            return Err(NullhawkError::Protocol(ProtocolError::AmbiguousFraming(
                 format!("conflicting Content-Length values: {}", values.join(", ")),
             )));
         }
@@ -344,7 +344,7 @@ fn request_framing(headers: &Headers, quirks: &mut Vec<Quirk>) -> Result<BodyFra
             quirks.push(Quirk::DuplicateContentLength);
         }
         let length: u64 = values[0].parse().map_err(|_| {
-            HexoraError::Protocol(ProtocolError::Malformed {
+            NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
                 reason: format!("invalid Content-Length {:?}", values[0]),
             })
@@ -355,8 +355,8 @@ fn request_framing(headers: &Headers, quirks: &mut Vec<Quirk>) -> Result<BodyFra
     Ok(BodyFraming::None)
 }
 
-fn malformed(reason: &str) -> HexoraError {
-    HexoraError::Protocol(ProtocolError::Malformed {
+fn malformed(reason: &str) -> NullhawkError {
+    NullhawkError::Protocol(ProtocolError::Malformed {
         protocol: "HTTP/1.1",
         reason: reason.to_string(),
     })

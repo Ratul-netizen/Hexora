@@ -11,5 +11,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    hexora_http::ws::fuzz_parse_frames(data);
+    nullhawk_http::ws::fuzz_parse_frames(data);
 });

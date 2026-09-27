@@ -8,13 +8,13 @@
 //! CONNECT example.com:443 HTTP/1.1
 //! ```
 //!
-//! and expects an opaque byte pipe. To *see* inside it, Hexora answers `200`, then
+//! and expects an opaque byte pipe. To *see* inside it, Nullhawk answers `200`, then
 //! performs a TLS handshake with the client while pretending to be `example.com` —
 //! using a certificate minted on the spot by [`crate::ca`] — and a second, real
 //! handshake with the actual server. Two TLS sessions, plaintext in the middle:
 //!
 //! ```text
-//! browser <--TLS(Hexora leaf)--> Hexora <--TLS(real cert)--> example.com
+//! browser <--TLS(Nullhawk leaf)--> Nullhawk <--TLS(real cert)--> example.com
 //! ```
 //!
 //! This is a man-in-the-middle attack performed with the user's consent. That framing
@@ -23,8 +23,8 @@
 //! # Two rules
 //!
 //! **Upstream verification is independent of the client's.** The browser is checking
-//! Hexora's minted certificate, which tells it nothing about the real server. If
-//! Hexora did not verify upstream, a tester intercepting their own traffic would lose
+//! Nullhawk's minted certificate, which tells it nothing about the real server. If
+//! Nullhawk did not verify upstream, a tester intercepting their own traffic would lose
 //! the protection they think they still have, silently. Verification upstream stays
 //! on unless explicitly relaxed, exactly as for a direct request.
 //!
@@ -36,8 +36,8 @@
 
 use std::sync::Arc;
 
-use hexora_types::error::{HexoraError, NetworkError, Result};
-use hexora_types::http::HttpService;
+use nullhawk_types::error::{NetworkError, NullhawkError, Result};
+use nullhawk_types::http::HttpService;
 use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -132,7 +132,7 @@ pub fn server_config_for(
             .with_single_cert(leaf.chain.clone(), leaf.key.clone_key())
             .map_err(|e| tls_error(host, format!("installing the minted certificate: {e}")))?;
 
-    // Only offer what Hexora can actually speak. Advertising h2 here would have the
+    // Only offer what Nullhawk can actually speak. Advertising h2 here would have the
     // browser send HTTP/2 frames the engine cannot parse yet, which looks to the user
     // like a broken site rather than an unimplemented feature.
     config.alpn_protocols = alpn.to_vec();
@@ -145,17 +145,17 @@ pub async fn accept_tunnel<S: AsyncWrite + Unpin>(client: &mut S) -> Result<()> 
     client
         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     client
         .flush()
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
     Ok(())
 }
 
 /// Copies bytes both ways without decrypting anything.
 ///
-/// Used for exempt hosts. Hexora learns that a tunnel to `service` happened and
+/// Used for exempt hosts. Nullhawk learns that a tunnel to `service` happened and
 /// nothing else — which is the point.
 pub async fn tunnel_blind<C>(client: &mut C, service: &HttpService) -> Result<u64>
 where
@@ -164,7 +164,7 @@ where
     let mut upstream = TcpStream::connect((service.host.as_str(), service.port))
         .await
         .map_err(|e| {
-            HexoraError::Network(NetworkError::Io(format!(
+            NullhawkError::Network(NetworkError::Io(format!(
                 "connecting to {}: {e}",
                 service.authority()
             )))
@@ -172,7 +172,7 @@ where
 
     let (copied, _) = tokio::io::copy_bidirectional(client, &mut upstream)
         .await
-        .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
+        .map_err(|e| NullhawkError::Network(NetworkError::Io(e.to_string())))?;
 
     tracing::debug!(
         host = %service.authority(),
@@ -182,8 +182,8 @@ where
     Ok(copied)
 }
 
-fn tls_error(host: &str, reason: String) -> HexoraError {
-    HexoraError::Network(NetworkError::Tls {
+fn tls_error(host: &str, reason: String) -> NullhawkError {
+    NullhawkError::Network(NetworkError::Tls {
         peer: host.to_string(),
         reason,
     })

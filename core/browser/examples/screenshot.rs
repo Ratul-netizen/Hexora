@@ -3,7 +3,7 @@
 //!
 //! ```console
 //! $ chrome --headless=new --remote-debugging-port=9222 --window-size=1440,900 <url> &
-//! $ cargo run -p hexora-browser --example screenshot -- 9222 out.png 2000
+//! $ cargo run -p nullhawk-browser --example screenshot -- 9222 out.png 2000
 //! ```
 //!
 //! Args: `<port> <out.png> [settle_ms]`. Connects to a page target, waits `settle_ms` for the
@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 use base64::Engine as _;
-use hexora_browser::{discover_page_ws_url, Cdp};
+use nullhawk_browser::{discover_page_ws_url, Cdp};
 use serde_json::json;
 
 #[tokio::main]

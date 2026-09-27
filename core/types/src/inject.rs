@@ -133,7 +133,7 @@ pub fn substitute(
             let (path, query) = split_target(&request.path);
             let mut segments: Vec<String> = path_segments(path).map(str::to_string).collect();
             let slot = segments.get_mut(*index).ok_or_else(|| {
-                crate::HexoraError::invalid_input(
+                crate::NullhawkError::invalid_input(
                     "location",
                     format!("this request has no path segment {index}"),
                 )
@@ -155,7 +155,7 @@ pub fn substitute(
         ObjectLocation::Query { name, occurrence } => {
             let (path, query) = split_target(&request.path);
             let query = query.ok_or_else(|| {
-                crate::HexoraError::invalid_input("location", "this request has no query string")
+                crate::NullhawkError::invalid_input("location", "this request has no query string")
             })?;
 
             let mut matched = 0usize;
@@ -184,7 +184,7 @@ pub fn substitute(
                 .collect();
 
             if !replaced {
-                return Err(crate::HexoraError::invalid_input(
+                return Err(crate::NullhawkError::invalid_input(
                     "location",
                     format!("this request has no {name} parameter at occurrence {occurrence}"),
                 ));
@@ -193,7 +193,7 @@ pub fn substitute(
         }
         ObjectLocation::Header { name, occurrence } => {
             if is_sensitive_header(name) {
-                return Err(crate::HexoraError::invalid_input(
+                return Err(crate::NullhawkError::invalid_input(
                     "location",
                     format!(
                         "{name} carries a credential, not an object identifier, and is \
@@ -217,7 +217,7 @@ pub fn substitute(
                 headers.append(header.clone());
             }
             if !replaced {
-                return Err(crate::HexoraError::invalid_input(
+                return Err(crate::NullhawkError::invalid_input(
                     "location",
                     format!("this request has no {name} header at occurrence {occurrence}"),
                 ));
@@ -228,7 +228,7 @@ pub fn substitute(
             // A byte offset alone does not say how long the value is. The caller that
             // knows — because it matched the value in the first place — calls
             // `substitute_in_body`, and arriving here means somebody lost that.
-            return Err(crate::HexoraError::invalid_input(
+            return Err(crate::NullhawkError::invalid_input(
                 "location",
                 format!(
                     "a body substitution needs the value it is replacing, not only \
@@ -237,7 +237,7 @@ pub fn substitute(
             ));
         }
         ObjectLocation::Anywhere => {
-            return Err(crate::HexoraError::invalid_input(
+            return Err(crate::NullhawkError::invalid_input(
                 "location",
                 "this declaration records no place, so there is nothing to substitute \
                  into. A run resolves it against the sender's own object instead",
@@ -263,7 +263,7 @@ pub fn substitute_in_body(
     crate::object::validate_identifier(replacement)?;
     let end = offset + original.len();
     if end > request.body.len() || &request.body[offset..end] != original.as_bytes() {
-        return Err(crate::HexoraError::invalid_input(
+        return Err(crate::NullhawkError::invalid_input(
             "location",
             format!("the body no longer holds {original:?} at byte {offset}"),
         ));
@@ -295,7 +295,7 @@ pub fn substitute_in_body(
 ///
 /// **Path segments.** A segment is as often structure as data — `/api/v2/users/1000`
 /// has one input and three parts of a route — and putting a marker into the wrong one
-/// produces a 404 and a wasted request. `hexora identifiers` exists to tell those
+/// produces a 404 and a wasted request. `nullhawk identifiers` exists to tell those
 /// apart with evidence; guessing here would undo it.
 ///
 /// **Sensitive headers**, without exception, for the reason [`locate`] skips them.
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn a_path_segment_is_never_offered_as_an_input() {
         // `/api/v2/users/1000` has one input and three parts of a route, and nothing
-        // about the characters says which. `hexora identifiers` answers that with
+        // about the characters says which. `nullhawk identifiers` answers that with
         // evidence; guessing here would undo it.
         let found = inputs(&request("/api/v2/users/1000", &[]));
         assert!(

@@ -16,12 +16,12 @@ apps/desktop/src-tauri/gen/
 compatibility/burp-montoya/build/
 compatibility/burp-montoya/.gradle/
 
-# Hexora local state — never commit projects, CAs or captured traffic
-*.hexora
-*.hexora-wal
-*.hexora-shm
+# Nullhawk local state — never commit projects, CAs or captured traffic
+*.nullhawk
+*.nullhawk-wal
+*.nullhawk-shm
 /local/
-/.hexora/
+/.nullhawk/
 ca/
 *.pem
 *.key

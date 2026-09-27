@@ -21,25 +21,25 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hexora_authz::construct::ConstructionPlan;
-use hexora_authz::{analysis, AuthzTester, Cell, Plan, Verdict};
-use hexora_engine::guard::{ScopeDecision, ScopeGuard};
-use hexora_http::{TcpTransport, TlsConfig};
-use hexora_proxy::{
+use nullhawk_authz::construct::ConstructionPlan;
+use nullhawk_authz::{analysis, AuthzTester, Cell, Plan, Verdict};
+use nullhawk_engine::guard::{ScopeDecision, ScopeGuard};
+use nullhawk_http::{TcpTransport, TlsConfig};
+use nullhawk_proxy::{
     trust, CertificateAuthority, Fanout, InterceptionPolicy, ProjectCapture, ProxyConfig,
     ProxyServer, TrustState,
 };
-use hexora_repeater::{Draft, Repeater, Warning};
-use hexora_report::{Format, Report, ReportOptions};
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::{FindingFilter, Project, Recorded};
-use hexora_types::finding::{Confidence, Evidence, FindingStatus, Severity};
-use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
-use hexora_types::ids::RequestId;
-use hexora_types::limits::Limits;
-use hexora_types::object::{ObjectDeclaration, ObjectLocation};
-use hexora_types::redact::Secret;
-use hexora_types::scope::{PathMatch, SchemeMatch, Scope, ScopeRule};
+use nullhawk_repeater::{Draft, Repeater, Warning};
+use nullhawk_report::{Format, Report, ReportOptions};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_storage::{FindingFilter, Project, Recorded};
+use nullhawk_types::finding::{Confidence, Evidence, FindingStatus, Severity};
+use nullhawk_types::identity::{Credential, Identity, PrivilegeLevel};
+use nullhawk_types::ids::RequestId;
+use nullhawk_types::limits::Limits;
+use nullhawk_types::object::{ObjectDeclaration, ObjectLocation};
+use nullhawk_types::redact::Secret;
+use nullhawk_types::scope::{PathMatch, SchemeMatch, Scope, ScopeRule};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 
@@ -47,7 +47,7 @@ use crate::preview::{header_block, BodyPreview};
 use crate::state::{AppState, RunningProxy};
 
 /// The event name carrying newly captured exchanges to the window.
-pub const TRAFFIC_EVENT: &str = "hexora://traffic";
+pub const TRAFFIC_EVENT: &str = "nullhawk://traffic";
 
 type CommandResult<T> = std::result::Result<T, String>;
 
@@ -59,8 +59,8 @@ fn fail(error: impl std::fmt::Display) -> String {
 /// The entitlement gate for this run, from the licence at the default location. A paid
 /// command asks it before doing the work, so the window shows "needs Pro" rather than a
 /// feature that quietly does nothing.
-fn gate() -> hexora_engine::license::EntitlementGate {
-    hexora_engine::license::EntitlementGate::from_default_location(chrono::Utc::now())
+fn gate() -> nullhawk_engine::license::EntitlementGate {
+    nullhawk_engine::license::EntitlementGate::from_default_location(chrono::Utc::now())
 }
 
 /// The current licence, for the window's licence chip.
@@ -176,7 +176,7 @@ pub fn license_status() -> LicenseStatus {
 /// silently would hide why a paid feature is still unavailable.
 #[tauri::command]
 pub fn license_activate(file: String) -> CommandResult<LicenseStatus> {
-    use hexora_engine::license::{
+    use nullhawk_engine::license::{
         default_license_path, EntitlementGate, Tier, EMBEDDED_LICENSE_KEY,
     };
 
@@ -187,7 +187,7 @@ pub fn license_activate(file: String) -> CommandResult<LicenseStatus> {
     let g = EntitlementGate::from_license(&bytes, &EMBEDDED_LICENSE_KEY, now);
     if g.entitlements().tier == Tier::Free {
         return Err(
-            "this file did not verify as a Hexora licence signed for this build; \
+            "this file did not verify as a Nullhawk licence signed for this build; \
                     it was not installed"
                 .to_string(),
         );
@@ -205,7 +205,7 @@ pub fn license_activate(file: String) -> CommandResult<LicenseStatus> {
 /// Starts a time-limited Pro trial on this machine.
 #[tauri::command]
 pub fn license_start_trial() -> CommandResult<LicenseStatus> {
-    hexora_engine::license::start_trial(chrono::Utc::now()).map_err(fail)?;
+    nullhawk_engine::license::start_trial(chrono::Utc::now()).map_err(fail)?;
     Ok(license_status())
 }
 
@@ -235,8 +235,8 @@ pub struct EngineInfo {
 pub fn engine_info() -> EngineInfo {
     EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        rpc_contract_version: hexora_types::RPC_CONTRACT_VERSION,
-        schema_version: hexora_storage::migrations::target_version(),
+        rpc_contract_version: nullhawk_types::RPC_CONTRACT_VERSION,
+        schema_version: nullhawk_storage::migrations::target_version(),
         milestone: "M18 — Browser integration",
     }
 }
@@ -264,7 +264,7 @@ pub fn project_open(state: State<'_, AppState>, path: String) -> CommandResult<P
     // of a mistyped path is not recoverable by the person who did it.
     if path.exists() && !path.join("project.db").exists() && !is_empty_dir(&path) {
         return Err(format!(
-            "{} exists and is not a Hexora project",
+            "{} exists and is not a Nullhawk project",
             path.display()
         ));
     }
@@ -450,7 +450,7 @@ pub fn history_list(
     // With a filter, scan the project and keep matching rows up to the limit; the query engine
     // reads back only the request/response detail the filter mentions. Without one, page.
     if let Some(q) = query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-        let query = hexora_query::Query::parse(q).map_err(|e| e.message)?;
+        let query = nullhawk_query::Query::parse(q).map_err(|e| e.message)?;
         let mut rows = Vec::new();
         let mut cursor: Option<Cursor> = None;
         'pages: loop {
@@ -522,8 +522,8 @@ pub fn history_detail(state: State<'_, AppState>, id: String) -> CommandResult<E
     // line where they may have written something else — a pane that exists to be
     // evidence, showing a request nobody sent.
     let request_head = match (request.mode, &request.raw) {
-        (hexora_types::raw::RequestMode::Raw, Some(bytes)) => {
-            let raw = hexora_types::raw::RawRequest::new(request.service.clone(), bytes.clone())
+        (nullhawk_types::raw::RequestMode::Raw, Some(bytes)) => {
+            let raw = nullhawk_types::raw::RawRequest::new(request.service.clone(), bytes.clone())
                 .map_err(fail)?;
             String::from_utf8_lossy(&raw.head()).into_owned()
         }
@@ -596,8 +596,8 @@ pub fn repeater_draft(state: State<'_, AppState>, id: String) -> CommandResult<D
 /// for a captured request. Nothing is sent here — this only prepares the editor.
 #[tauri::command]
 pub fn repeater_new(url: String, method: Option<String>) -> CommandResult<DraftView> {
-    let (service, path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
-    let mut request = hexora_types::http::HttpRequest::get(service, path);
+    let (service, path) = nullhawk_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let mut request = nullhawk_types::http::HttpRequest::get(service, path);
     if let Some(method) = method {
         let method = method.trim();
         if !method.is_empty() {
@@ -671,8 +671,9 @@ pub async fn repeater_send(
     let mut draft = match (parent_id, target.as_deref()) {
         (Some(id), _) => repeater.draft_from(id).map_err(fail)?,
         (None, Some(url)) => {
-            let (service, path) = hexora_types::http::HttpService::parse_url(url).map_err(fail)?;
-            Draft::new(hexora_types::http::HttpRequest::get(service, path))
+            let (service, path) =
+                nullhawk_types::http::HttpService::parse_url(url).map_err(fail)?;
+            Draft::new(nullhawk_types::http::HttpRequest::get(service, path))
         }
         (None, None) => {
             return Err("a repeater send needs a request to start from or a target URL".to_string())
@@ -736,8 +737,8 @@ pub async fn repeater_send_raw_h2(
     url: String,
     insecure: bool,
 ) -> CommandResult<SendResult> {
-    let (service, _) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
-    let request = hexora_types::raw::RawH2Request::parse(service, &text).map_err(fail)?;
+    let (service, _) = nullhawk_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let request = nullhawk_types::raw::RawH2Request::parse(service, &text).map_err(fail)?;
 
     let repeater = build_repeater(&state, insecure)?;
     let sent = repeater.send_raw_h2(request).await.map_err(fail)?;
@@ -826,7 +827,7 @@ pub fn ca_status() -> CommandResult<CaStatus> {
 pub fn ca_install() -> CommandResult<CaStatus> {
     let dir = default_ca_dir()?;
     let ca = CertificateAuthority::load_or_create(&dir).map_err(fail)?;
-    trust::install(&dir.join("hexora-ca.crt"), &ca.fingerprints()).map_err(fail)?;
+    trust::install(&dir.join("nullhawk-ca.crt"), &ca.fingerprints()).map_err(fail)?;
     ca_status()
 }
 
@@ -946,7 +947,7 @@ pub struct MatchReplaceRuleView {
     pub summary: String,
 }
 
-fn rule_view(rule: &hexora_types::matchreplace::MatchReplaceRule) -> MatchReplaceRuleView {
+fn rule_view(rule: &nullhawk_types::matchreplace::MatchReplaceRule) -> MatchReplaceRuleView {
     MatchReplaceRuleView {
         name: rule.name.clone(),
         enabled: rule.enabled,
@@ -984,7 +985,7 @@ pub fn matchreplace_add(
     replacement: String,
     disabled: bool,
 ) -> CommandResult<Vec<MatchReplaceRuleView>> {
-    use hexora_types::matchreplace::{MatchReplaceRule, RuleTarget};
+    use nullhawk_types::matchreplace::{MatchReplaceRule, RuleTarget};
 
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -1022,7 +1023,7 @@ pub fn matchreplace_add(
     // Refuse an invalid regex here, not when the proxy runs.
     let mut candidate = rules.clone();
     candidate.push(rule.clone());
-    hexora_proxy::Rewriter::compile(&candidate).map_err(fail)?;
+    nullhawk_proxy::Rewriter::compile(&candidate).map_err(fail)?;
 
     rules.push(rule);
     settings.set_match_replace_rules(&rules).map_err(fail)?;
@@ -1082,7 +1083,7 @@ pub struct CustomCheckView {
     pub summary: String,
 }
 
-fn check_view(check: &hexora_types::custom::CustomCheck) -> CustomCheckView {
+fn check_view(check: &nullhawk_types::custom::CustomCheck) -> CustomCheckView {
     CustomCheckView {
         id: check.id.clone(),
         name: check.name.clone(),
@@ -1119,8 +1120,8 @@ pub fn check_add(
     message: String,
     disabled: bool,
 ) -> CommandResult<Vec<CustomCheckView>> {
-    use hexora_types::custom::CustomCheck;
-    use hexora_types::finding::Severity;
+    use nullhawk_types::custom::CustomCheck;
+    use nullhawk_types::finding::Severity;
 
     let id = id.trim().to_string();
     if id.is_empty() {
@@ -1132,7 +1133,7 @@ pub fn check_add(
 
     let mut check = CustomCheck::new(id.clone(), name, severity, query, message);
     check.enabled = !disabled;
-    hexora_scan::custom::validate(&check).map_err(fail)?;
+    nullhawk_scan::custom::validate(&check).map_err(fail)?;
 
     let project = open(&state)?;
     let settings = project.settings();
@@ -1197,7 +1198,7 @@ pub struct SequencerReportView {
     pub verdict: String,
 }
 
-fn sequencer_view(report: &hexora_sequencer::Report) -> SequencerReportView {
+fn sequencer_view(report: &nullhawk_sequencer::Report) -> SequencerReportView {
     SequencerReportView {
         samples: report.samples,
         unique: report.unique,
@@ -1241,7 +1242,7 @@ pub fn sequencer_run(
             "no tokens to analyse — paste some, or give a header/cookie to extract".to_string(),
         );
     }
-    Ok(sequencer_view(&hexora_sequencer::analyze(&collected)))
+    Ok(sequencer_view(&nullhawk_sequencer::analyze(&collected)))
 }
 
 /// Pulls token values out of captured traffic by response header or cookie name.
@@ -1266,7 +1267,7 @@ fn sequencer_extract(
     let project = open(state)?;
     let store = project.traffic();
     let query = match query.map(str::trim).filter(|q| !q.is_empty()) {
-        Some(q) => Some(hexora_query::Query::parse(q).map_err(|e| e.message)?),
+        Some(q) => Some(nullhawk_query::Query::parse(q).map_err(|e| e.message)?),
         None => None,
     };
 
@@ -1286,7 +1287,7 @@ fn sequencer_extract(
             let Ok((_, _, _, headers_raw)) = store.response_head(row.id) else {
                 continue;
             };
-            let headers = hexora_types::http::Headers::from_block(&headers_raw);
+            let headers = nullhawk_types::http::Headers::from_block(&headers_raw);
             match cookie {
                 Some(name) => {
                     for h in headers.get_all("set-cookie") {
@@ -1342,7 +1343,7 @@ pub struct ImportPreview {
 }
 
 /// Resolves the base URL: an override, or the spec's first server.
-fn import_base(spec: &hexora_import::ApiSpec, base: Option<&str>) -> CommandResult<String> {
+fn import_base(spec: &nullhawk_import::ApiSpec, base: Option<&str>) -> CommandResult<String> {
     if let Some(base) = base.map(str::trim).filter(|b| !b.is_empty()) {
         return Ok(base.trim_end_matches('/').to_string());
     }
@@ -1352,7 +1353,7 @@ fn import_base(spec: &hexora_import::ApiSpec, base: Option<&str>) -> CommandResu
         .ok_or_else(|| "the spec declares no server URL; give a base URL".to_string())
 }
 
-fn import_url(base: &str, op: &hexora_import::Operation) -> String {
+fn import_url(base: &str, op: &nullhawk_import::Operation) -> String {
     let sep = if op.target.starts_with('/') { "" } else { "/" };
     format!("{base}{sep}{}", op.target)
 }
@@ -1364,7 +1365,7 @@ fn import_is_safe(method: &str) -> bool {
 /// Parses an OpenAPI/Swagger spec and lists its operations. Sends nothing.
 #[tauri::command]
 pub fn import_parse(spec: String, base: Option<String>) -> CommandResult<ImportPreview> {
-    let parsed = hexora_import::parse(spec.as_bytes()).map_err(|e| e.message)?;
+    let parsed = nullhawk_import::parse(spec.as_bytes()).map_err(|e| e.message)?;
     let base = import_base(&parsed, base.as_deref())?;
     Ok(ImportPreview {
         title: parsed.title.clone(),
@@ -1401,7 +1402,7 @@ pub async fn import_send(
     insecure: bool,
 ) -> CommandResult<ImportResult> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -1418,9 +1419,9 @@ fn import_send_blocking(
     include_writes: bool,
     insecure: bool,
 ) -> CommandResult<ImportResult> {
-    use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
+    use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
 
-    let parsed = hexora_import::parse(spec.as_bytes()).map_err(|e| e.message)?;
+    let parsed = nullhawk_import::parse(spec.as_bytes()).map_err(|e| e.message)?;
     let base = import_base(&parsed, base.as_deref())?;
 
     let project = Project::open(&path).map_err(fail)?;
@@ -1436,7 +1437,7 @@ fn import_send_blocking(
     let store = project.traffic();
     let options = SendOptions::automated(Origin::Crawler);
 
-    let planned: Vec<&hexora_import::Operation> = parsed
+    let planned: Vec<&nullhawk_import::Operation> = parsed
         .operations
         .iter()
         .filter(|op| import_is_safe(&op.method) || include_writes)
@@ -1452,14 +1453,14 @@ fn import_send_blocking(
         let mut failed = 0usize;
         for op in &planned {
             let url = import_url(&base, op);
-            let (service, req_path) = match hexora_types::http::HttpService::parse_url(&url) {
+            let (service, req_path) = match nullhawk_types::http::HttpService::parse_url(&url) {
                 Ok(parts) => parts,
                 Err(_) => {
                     failed += 1;
                     continue;
                 }
             };
-            let mut request = hexora_types::http::HttpRequest::get(service, req_path);
+            let mut request = nullhawk_types::http::HttpRequest::get(service, req_path);
             request.method = op.method.clone();
             for header in &attached {
                 request.headers.set(
@@ -1469,7 +1470,7 @@ fn import_send_blocking(
             }
             match guard.send(request, options.clone()).await {
                 Ok(exchange) => {
-                    let captured = hexora_storage::CapturedExchange {
+                    let captured = nullhawk_storage::CapturedExchange {
                         request: exchange.request.clone(),
                         raw_request: exchange.raw_request.clone(),
                         response: exchange.response.clone(),
@@ -1514,7 +1515,7 @@ pub struct GraphqlOpView {
 /// Parses a GraphQL introspection result and lists its operations. Sends nothing.
 #[tauri::command]
 pub fn graphql_parse(spec: String) -> CommandResult<Vec<GraphqlOpView>> {
-    let api = hexora_import::parse_introspection(spec.as_bytes()).map_err(|e| e.message)?;
+    let api = nullhawk_import::parse_introspection(spec.as_bytes()).map_err(|e| e.message)?;
     Ok(api
         .operations
         .iter()
@@ -1537,7 +1538,7 @@ pub async fn graphql_send(
     insecure: bool,
 ) -> CommandResult<ImportResult> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -1554,10 +1555,10 @@ fn graphql_send_blocking(
     include_mutations: bool,
     insecure: bool,
 ) -> CommandResult<ImportResult> {
-    use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
+    use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
 
-    let api = hexora_import::parse_introspection(spec.as_bytes()).map_err(|e| e.message)?;
-    let (service, req_path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let api = nullhawk_import::parse_introspection(spec.as_bytes()).map_err(|e| e.message)?;
+    let (service, req_path) = nullhawk_types::http::HttpService::parse_url(&url).map_err(fail)?;
 
     let project = Project::open(&path).map_err(fail)?;
     let scope = Arc::new(project.settings().scope().map_err(fail)?);
@@ -1572,7 +1573,7 @@ fn graphql_send_blocking(
     let store = project.traffic();
     let options = SendOptions::automated(Origin::Crawler);
 
-    let planned: Vec<&hexora_import::GraphqlOp> = api
+    let planned: Vec<&nullhawk_import::GraphqlOp> = api
         .operations
         .iter()
         .filter(|op| !op.is_mutation() || include_mutations)
@@ -1588,7 +1589,7 @@ fn graphql_send_blocking(
         let mut failed = 0usize;
         for op in &planned {
             let mut request =
-                hexora_types::http::HttpRequest::get(service.clone(), req_path.clone());
+                nullhawk_types::http::HttpRequest::get(service.clone(), req_path.clone());
             request.method = "POST".to_string();
             request.headers.set("Content-Type", "application/json");
             for header in &attached {
@@ -1604,7 +1605,7 @@ fn graphql_send_blocking(
 
             match guard.send(request, options.clone()).await {
                 Ok(exchange) => {
-                    let captured = hexora_storage::CapturedExchange {
+                    let captured = nullhawk_storage::CapturedExchange {
                         request: exchange.request.clone(),
                         raw_request: exchange.raw_request.clone(),
                         response: exchange.response.clone(),
@@ -1669,9 +1670,9 @@ pub async fn domxss_run(
     timeout_secs: Option<u64>,
 ) -> CommandResult<DomXssReportView> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
-    let report = hexora_browser::domxss::test(
+    let report = nullhawk_browser::domxss::test(
         &url,
         !headed,
         std::time::Duration::from_secs(timeout_secs.unwrap_or(20)),
@@ -1726,7 +1727,7 @@ pub async fn race_run(
     insecure: bool,
 ) -> CommandResult<RaceReportView> {
     gate()
-        .require(hexora_engine::license::Feature::Intruder)
+        .require(nullhawk_engine::license::Feature::Intruder)
         .map_err(fail)?;
     if count < 2 {
         return Err("racing needs at least 2 concurrent requests".to_string());
@@ -1771,7 +1772,7 @@ fn race_run_blocking(
             let draft = draft.clone();
             async move {
                 match repeater
-                    .send_as(&draft, hexora_repeater::SendAs::repeater())
+                    .send_as(&draft, nullhawk_repeater::SendAs::repeater())
                     .await
                 {
                     Ok(sent) => (
@@ -1817,14 +1818,14 @@ fn race_run_blocking(
 // Attached headers (M14.2)
 // ---------------------------------------------------------------------------
 
-/// One header put on every request Hexora sends.
+/// One header put on every request Nullhawk sends.
 #[derive(Debug, Clone, Serialize)]
 pub struct AttachedHeaderView {
     pub name: String,
     pub value: String,
 }
 
-fn attached_header_views(headers: &[hexora_types::http::Header]) -> Vec<AttachedHeaderView> {
+fn attached_header_views(headers: &[nullhawk_types::http::Header]) -> Vec<AttachedHeaderView> {
     headers
         .iter()
         .map(|h| AttachedHeaderView {
@@ -1860,7 +1861,7 @@ pub fn header_add(
     let settings = project.settings();
     let mut headers = settings.attached_headers().map_err(fail)?;
     headers.retain(|h| !h.name.eq_ignore_ascii_case(name));
-    headers.push(hexora_types::http::Header::new(name, value.trim()));
+    headers.push(nullhawk_types::http::Header::new(name, value.trim()));
     settings.set_attached_headers(&headers).map_err(fail)?;
     Ok(attached_header_views(&headers))
 }
@@ -1902,7 +1903,7 @@ pub struct ProgrammeView {
     pub exclusions: Vec<ExclusionView>,
 }
 
-fn programme_view(p: &hexora_types::programme::Programme) -> ProgrammeView {
+fn programme_view(p: &nullhawk_types::programme::Programme) -> ProgrammeView {
     ProgrammeView {
         name: p.name.clone(),
         policy_url: p.policy_url.clone(),
@@ -1964,7 +1965,7 @@ pub fn programme_exclude(
     programme.exclusions.retain(|e| e.detector != detector);
     programme
         .exclusions
-        .push(hexora_types::programme::Exclusion::new(detector, reason));
+        .push(nullhawk_types::programme::Exclusion::new(detector, reason));
     settings.set_programme(&programme).map_err(fail)?;
     Ok(programme_view(&programme))
 }
@@ -2066,7 +2067,7 @@ pub fn identity_add(
     };
 
     let identity = Identity {
-        id: hexora_types::ids::IdentityId::new(),
+        id: nullhawk_types::ids::IdentityId::new(),
         label,
         privilege,
         credential,
@@ -2090,7 +2091,7 @@ pub fn identity_add(
 #[tauri::command]
 pub fn identity_remove(state: State<'_, AppState>, id: String) -> CommandResult<()> {
     let project = open(&state)?;
-    let identity_id: hexora_types::ids::IdentityId = id.parse().map_err(fail)?;
+    let identity_id: nullhawk_types::ids::IdentityId = id.parse().map_err(fail)?;
     if !project.identities().delete(identity_id).map_err(fail)? {
         return Err(format!("no identity {id}"));
     }
@@ -2115,7 +2116,7 @@ pub async fn identity_renew(
     insecure: bool,
 ) -> CommandResult<IdentityView> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -2181,7 +2182,7 @@ fn identity_renew_blocking(
         .build()
         .map_err(fail)?;
     let sent = runtime
-        .block_on(repeater.send_as(&draft, hexora_repeater::SendAs::repeater()))
+        .block_on(repeater.send_as(&draft, nullhawk_repeater::SendAs::repeater()))
         .map_err(fail)?;
     let response = &sent.exchange.response;
 
@@ -2310,7 +2311,7 @@ pub fn object_add(
             let request_id: RequestId = id.parse().map_err(fail)?;
             let stored = project.traffic().request(request_id).map_err(fail)?;
             let request = rebuild(&stored);
-            let locations = hexora_authz::construct::locate(&request, &value);
+            let locations = nullhawk_authz::construct::locate(&request, &value);
             if locations.is_empty() {
                 return Err(format!(
                     "{value:?} does not appear in that request — not in the path, the \
@@ -2399,9 +2400,9 @@ pub fn finding_reproduction(
     id: String,
 ) -> CommandResult<ReproductionView> {
     let project = open(&state)?;
-    let finding_id: hexora_types::ids::FindingId = id.parse().map_err(fail)?;
+    let finding_id: nullhawk_types::ids::FindingId = id.parse().map_err(fail)?;
     let finding = project.findings().get(finding_id).map_err(fail)?;
-    let poc = hexora_report::poc::reproduce(&project, &finding).map_err(fail)?;
+    let poc = nullhawk_report::poc::reproduce(&project, &finding).map_err(fail)?;
 
     Ok(ReproductionView {
         finding: poc.finding.to_string(),
@@ -2419,7 +2420,7 @@ pub fn finding_reproduction(
                 raw: step.raw.clone(),
                 curl: step.curl.command().map(str::to_string),
                 curl_refused: match &step.curl {
-                    hexora_report::poc::Curl::Inexpressible { reason } => Some(reason.clone()),
+                    nullhawk_report::poc::Curl::Inexpressible { reason } => Some(reason.clone()),
                     _ => None,
                 },
                 expect: step.expect.clone(),
@@ -2498,7 +2499,7 @@ pub struct ScanView {
 
 /// Reads captured traffic and reports what the checks saw.
 ///
-/// Sends nothing. `hexora_scan::passive::scan` takes a project and a selection and
+/// Sends nothing. `nullhawk_scan::passive::scan` takes a project and a selection and
 /// has no transport in its signature, so this command cannot put traffic on a wire
 /// even by mistake.
 #[tauri::command]
@@ -2509,7 +2510,7 @@ pub fn scan_passive(
     everything: bool,
 ) -> CommandResult<ScanView> {
     let project = open(&state)?;
-    let selection = hexora_scan::passive::Selection {
+    let selection = nullhawk_scan::passive::Selection {
         host: host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
         detector: detector
             .map(|d| d.trim().to_string())
@@ -2519,15 +2520,15 @@ pub fn scan_passive(
         everything,
     };
 
-    let summary = hexora_scan::passive::scan(&project, &selection).map_err(fail)?;
+    let summary = nullhawk_scan::passive::scan(&project, &selection).map_err(fail)?;
 
     let store = project.findings();
     let mut recorded_new = 0;
     let mut recorded_refreshed = 0;
     for finding in summary.findings() {
         match store.record(finding).map_err(fail)? {
-            hexora_storage::Recorded::Created(_) => recorded_new += 1,
-            hexora_storage::Recorded::Updated(_) => recorded_refreshed += 1,
+            nullhawk_storage::Recorded::Created(_) => recorded_new += 1,
+            nullhawk_storage::Recorded::Updated(_) => recorded_refreshed += 1,
         }
     }
 
@@ -2665,7 +2666,8 @@ pub fn scan_active_plan(
 ) -> CommandResult<PlanView> {
     let project = open(&state)?;
     let budget = active_budget(max_requests)?;
-    let standing = hexora_active::standing(&project, &selection(host.as_deref())).map_err(fail)?;
+    let standing =
+        nullhawk_active::standing(&project, &selection(host.as_deref())).map_err(fail)?;
     let hypotheses = standing.hypotheses;
     let out_of_scope = standing.out_of_scope;
 
@@ -2673,14 +2675,17 @@ pub fn scan_active_plan(
     // only ever asks it whether a draft would leave scope.
     let store = std::sync::Arc::new(project.traffic());
     let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
-    let repeater = hexora_repeater::Repeater::new(
-        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new().http2(true), scope),
+    let repeater = nullhawk_repeater::Repeater::new(
+        nullhawk_engine::guard::ScopeGuard::new(
+            nullhawk_http::TcpTransport::new().http2(true),
+            scope,
+        ),
         store,
     );
-    let lab = hexora_verify::RepeaterLab::scanner(&repeater);
-    let checks = hexora_active::active_checks();
+    let lab = nullhawk_verify::RepeaterLab::scanner(&repeater);
+    let checks = nullhawk_active::active_checks();
 
-    let plan = hexora_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
+    let plan = nullhawk_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
         .map_err(fail)?;
 
     Ok(plan_view(&plan, out_of_scope))
@@ -2702,7 +2707,7 @@ pub async fn scan_active_run(
     max_requests: Option<usize>,
 ) -> CommandResult<ActiveRunView> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
     // Registered before the work starts and cleared however it ends, so the stop
@@ -2739,31 +2744,34 @@ fn active_run_blocking(
     path: std::path::PathBuf,
     host: Option<String>,
     max_requests: Option<usize>,
-    cancel: hexora_active::Cancel,
+    cancel: nullhawk_active::Cancel,
 ) -> CommandResult<ActiveRunView> {
     let project = Project::open(&path).map_err(fail)?;
     let budget = active_budget(max_requests)?;
-    let hypotheses = hexora_active::standing(&project, &selection(host.as_deref()))
+    let hypotheses = nullhawk_active::standing(&project, &selection(host.as_deref()))
         .map_err(fail)?
         .hypotheses;
 
     let store = std::sync::Arc::new(project.traffic());
     let scope = std::sync::Arc::new(project.settings().scope().map_err(fail)?);
-    let repeater = hexora_repeater::Repeater::new(
-        hexora_engine::guard::ScopeGuard::new(hexora_http::TcpTransport::new().http2(true), scope),
+    let repeater = nullhawk_repeater::Repeater::new(
+        nullhawk_engine::guard::ScopeGuard::new(
+            nullhawk_http::TcpTransport::new().http2(true),
+            scope,
+        ),
         store,
     );
-    let lab = hexora_verify::RepeaterLab::scanner(&repeater);
-    let checks = hexora_active::active_checks();
+    let lab = nullhawk_verify::RepeaterLab::scanner(&repeater);
+    let checks = nullhawk_active::active_checks();
 
-    let plan = hexora_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
+    let plan = nullhawk_active::Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)
         .map_err(fail)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(fail)?;
     let outcome = runtime
-        .block_on(hexora_active::run_into(
+        .block_on(nullhawk_active::run_into(
             &plan, &lab, &checks, &cancel, &project,
         ))
         .map_err(fail)?;
@@ -2773,8 +2781,8 @@ fn active_run_blocking(
     let mut recorded_refreshed = 0;
     for finding in outcome.findings() {
         match findings_store.record(finding).map_err(fail)? {
-            hexora_storage::Recorded::Created(_) => recorded_new += 1,
-            hexora_storage::Recorded::Updated(_) => recorded_refreshed += 1,
+            nullhawk_storage::Recorded::Created(_) => recorded_new += 1,
+            nullhawk_storage::Recorded::Updated(_) => recorded_refreshed += 1,
         }
     }
 
@@ -2820,8 +2828,8 @@ fn active_run_blocking(
     })
 }
 
-fn active_budget(max_requests: Option<usize>) -> CommandResult<hexora_active::Budget> {
-    let mut budget = hexora_active::Budget::default();
+fn active_budget(max_requests: Option<usize>) -> CommandResult<nullhawk_active::Budget> {
+    let mut budget = nullhawk_active::Budget::default();
     if let Some(max) = max_requests {
         budget.max_requests = max;
     }
@@ -2830,14 +2838,14 @@ fn active_budget(max_requests: Option<usize>) -> CommandResult<hexora_active::Bu
 }
 
 /// What a run was asked to look at.
-fn selection(host: Option<&str>) -> hexora_scan::passive::Selection {
-    hexora_scan::passive::Selection {
+fn selection(host: Option<&str>) -> nullhawk_scan::passive::Selection {
+    nullhawk_scan::passive::Selection {
         host: host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
         ..Default::default()
     }
 }
 
-fn plan_view(plan: &hexora_active::Plan, out_of_scope: usize) -> PlanView {
+fn plan_view(plan: &nullhawk_active::Plan, out_of_scope: usize) -> PlanView {
     PlanView {
         experiments: plan
             .work
@@ -2865,7 +2873,7 @@ fn plan_view(plan: &hexora_active::Plan, out_of_scope: usize) -> PlanView {
     }
 }
 
-fn skipped_view(skipped: &hexora_active::Skipped) -> SkippedView {
+fn skipped_view(skipped: &nullhawk_active::Skipped) -> SkippedView {
     SkippedView {
         detector: skipped.detector.clone(),
         claim: skipped.claim.clone(),
@@ -2891,10 +2899,14 @@ pub struct DetectorView {
 /// Lists them, so a tester can see what this build looks for and which of it sends.
 #[tauri::command]
 pub fn detectors_list() -> CommandResult<Vec<DetectorView>> {
-    let registry = hexora_verify::Registry::new()
-        .with(hexora_authz::checks())
-        .with(hexora_scan::checks::all().iter().map(|check| check.about()))
-        .with(hexora_active::checks_info());
+    let registry = nullhawk_verify::Registry::new()
+        .with(nullhawk_authz::checks())
+        .with(
+            nullhawk_scan::checks::all()
+                .iter()
+                .map(|check| check.about()),
+        )
+        .with(nullhawk_active::checks_info());
 
     Ok(registry
         .all()
@@ -2932,7 +2944,7 @@ pub struct SnapshotView {
     pub objects: u64,
 }
 
-fn snapshot_view(snapshot: &hexora_storage::SnapshotSummary) -> SnapshotView {
+fn snapshot_view(snapshot: &nullhawk_storage::SnapshotSummary) -> SnapshotView {
     SnapshotView {
         id: snapshot.id.to_string(),
         label: snapshot.label.clone(),
@@ -2972,23 +2984,23 @@ pub fn snapshot_take(
     note: Option<String>,
 ) -> CommandResult<Vec<SnapshotView>> {
     gate()
-        .require(hexora_engine::license::Feature::RetestSnapshots)
+        .require(nullhawk_engine::license::Feature::RetestSnapshots)
         .map_err(fail)?;
     let project = open(&state)?;
     let store = project.snapshots();
     let existing = store.count().map_err(fail)?;
 
-    let snapshot = hexora_types::snapshot::Snapshot {
-        id: hexora_types::ids::SnapshotId::new(),
+    let snapshot = nullhawk_types::snapshot::Snapshot {
+        id: nullhawk_types::ids::SnapshotId::new(),
         label: label
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| format!("snapshot {}", existing + 1)),
         note: note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
         taken_at: chrono::Utc::now(),
-        tool_version: hexora_types::VERSION.to_string(),
+        tool_version: nullhawk_types::VERSION.to_string(),
         schema_version: project.metadata().schema_version().map_err(fail)?,
-        contents: hexora_storage::capture(&project).map_err(fail)?,
+        contents: nullhawk_storage::capture(&project).map_err(fail)?,
     };
     store.put(&snapshot).map_err(fail)?;
     snapshots_list(state)
@@ -2998,7 +3010,7 @@ pub fn snapshot_take(
 #[tauri::command]
 pub fn snapshot_delete(state: State<'_, AppState>, id: String) -> CommandResult<Vec<SnapshotView>> {
     let project = open(&state)?;
-    let snapshot_id: hexora_types::ids::SnapshotId = id.parse().map_err(fail)?;
+    let snapshot_id: nullhawk_types::ids::SnapshotId = id.parse().map_err(fail)?;
     if !project.snapshots().delete(snapshot_id).map_err(fail)? {
         return Err(format!("no snapshot {id}"));
     }
@@ -3016,30 +3028,30 @@ pub fn snapshot_compare(
     state: State<'_, AppState>,
     from: String,
     to: Option<String>,
-) -> CommandResult<hexora_types::snapshot::Comparison> {
+) -> CommandResult<nullhawk_types::snapshot::Comparison> {
     gate()
-        .require(hexora_engine::license::Feature::RetestSnapshots)
+        .require(nullhawk_engine::license::Feature::RetestSnapshots)
         .map_err(fail)?;
     let project = open(&state)?;
     let store = project.snapshots();
 
-    let from_id: hexora_types::ids::SnapshotId = from.parse().map_err(fail)?;
+    let from_id: nullhawk_types::ids::SnapshotId = from.parse().map_err(fail)?;
     let earlier = store.get(from_id).map_err(fail)?;
 
     let later = match to.as_deref().filter(|id| !id.trim().is_empty()) {
         Some(id) => {
-            let to_id: hexora_types::ids::SnapshotId = id.parse().map_err(fail)?;
+            let to_id: nullhawk_types::ids::SnapshotId = id.parse().map_err(fail)?;
             store.get(to_id).map_err(fail)?
         }
         // What a retest actually asks, and it must not require saving first.
-        None => hexora_types::snapshot::Snapshot::of_current(
-            hexora_storage::capture(&project).map_err(fail)?,
-            hexora_types::VERSION,
+        None => nullhawk_types::snapshot::Snapshot::of_current(
+            nullhawk_storage::capture(&project).map_err(fail)?,
+            nullhawk_types::VERSION,
             project.metadata().schema_version().map_err(fail)?,
         ),
     };
 
-    Ok(hexora_types::snapshot::compare(&earlier, &later))
+    Ok(nullhawk_types::snapshot::compare(&earlier, &later))
 }
 
 // ---------------------------------------------------------------------------
@@ -3073,7 +3085,7 @@ pub struct CandidateView {
     pub source_request: Option<String>,
 }
 
-fn candidate_view(candidate: &hexora_types::candidate::IdentifierCandidate) -> CandidateView {
+fn candidate_view(candidate: &nullhawk_types::candidate::IdentifierCandidate) -> CandidateView {
     CandidateView {
         id: candidate.id.to_string(),
         value: candidate.value.clone(),
@@ -3102,7 +3114,7 @@ pub fn candidates_list(state: State<'_, AppState>) -> CommandResult<Vec<Candidat
     let project = open(&state)?;
     Ok(project
         .candidates()
-        .list(&hexora_storage::CandidateFilter::default())
+        .list(&nullhawk_storage::CandidateFilter::default())
         .map_err(fail)?
         .iter()
         .map(candidate_view)
@@ -3117,7 +3129,7 @@ pub fn candidates_list(state: State<'_, AppState>) -> CommandResult<Vec<Candidat
 #[tauri::command]
 pub fn candidates_analyze(state: State<'_, AppState>) -> CommandResult<Vec<CandidateView>> {
     let project = open(&state)?;
-    hexora_authz::suggest::analyze(
+    nullhawk_authz::suggest::analyze(
         &project.traffic(),
         &project.objects(),
         &project.candidates(),
@@ -3137,8 +3149,8 @@ pub fn candidate_decide(
     status: String,
 ) -> CommandResult<Vec<CandidateView>> {
     let project = open(&state)?;
-    let candidate_id: hexora_types::ids::CandidateId = id.parse().map_err(fail)?;
-    let status = hexora_types::candidate::CandidateStatus::parse(&status)
+    let candidate_id: nullhawk_types::ids::CandidateId = id.parse().map_err(fail)?;
+    let status = nullhawk_types::candidate::CandidateStatus::parse(&status)
         .ok_or_else(|| format!("{status:?} is not a status a suggestion can be in"))?;
     project
         .candidates()
@@ -3209,7 +3221,7 @@ pub struct DifferenceView {
 /// A structural comparison, rendered.
 ///
 /// Rendered in Rust rather than shipped raw, so the decision about which values are
-/// quoted — see the credential rule in `hexora_types::structure` — is made once, on
+/// quoted — see the credential rule in `nullhawk_types::structure` — is made once, on
 /// the side of the boundary that holds the bytes.
 #[derive(Debug, Clone, Serialize)]
 pub struct StructureView {
@@ -3608,9 +3620,9 @@ pub fn report_render(
     let requested = parse_format(&format)?;
 
     // SARIF is the CI-export tier; the human-facing formats are free.
-    if requested == hexora_report::Format::Sarif {
+    if requested == nullhawk_report::Format::Sarif {
         gate()
-            .require(hexora_engine::license::Feature::SarifExport)
+            .require(nullhawk_engine::license::Feature::SarifExport)
             .map_err(fail)?;
     }
 
@@ -3622,9 +3634,9 @@ pub fn report_render(
             actionable_only: actionable,
             body_excerpt_bytes: 2048,
             redaction: if show_secrets {
-                hexora_types::redact::RedactionPolicy::Disabled
+                nullhawk_types::redact::RedactionPolicy::Disabled
             } else {
-                hexora_types::redact::RedactionPolicy::SensitiveHeaders
+                nullhawk_types::redact::RedactionPolicy::SensitiveHeaders
             },
             proof_of_concept: true,
             generated_at: chrono::Utc::now(),
@@ -3662,8 +3674,8 @@ struct WindowNotifier {
     app: tauri::AppHandle,
 }
 
-impl hexora_proxy::ExchangeObserver for WindowNotifier {
-    fn observe(&self, exchange: &hexora_engine::transport::Exchange, decision: ScopeDecision) {
+impl nullhawk_proxy::ExchangeObserver for WindowNotifier {
+    fn observe(&self, exchange: &nullhawk_engine::transport::Exchange, decision: ScopeDecision) {
         // A summary, not the exchange: the row is what the table needs, and shipping
         // whole bodies through IPC for traffic nobody has clicked on would stall the
         // window during a crawl.
@@ -3701,7 +3713,7 @@ fn warnings(warnings: &[Warning]) -> Vec<String> {
     warnings.iter().map(ToString::to_string).collect()
 }
 
-fn diff_view(diff: hexora_repeater::ResponseDiff) -> DiffView {
+fn diff_view(diff: nullhawk_repeater::ResponseDiff) -> DiffView {
     DiffView {
         summary: diff.summary(),
         interesting: diff.is_interesting(),
@@ -3722,7 +3734,7 @@ fn diff_view(diff: hexora_repeater::ResponseDiff) -> DiffView {
     }
 }
 
-fn row(item: hexora_storage::StoredTraffic) -> HistoryRow {
+fn row(item: nullhawk_storage::StoredTraffic) -> HistoryRow {
     HistoryRow {
         id: item.id.to_string(),
         method: item.method,
@@ -3742,12 +3754,12 @@ fn summarise(
     path: &Path,
     name: &str,
     project: &Project,
-) -> hexora_types::error::Result<ProjectSummary> {
+) -> nullhawk_types::error::Result<ProjectSummary> {
     let conn = project.metadata().connection()?;
-    let count = |table: &str| -> hexora_types::error::Result<i64> {
+    let count = |table: &str| -> nullhawk_types::error::Result<i64> {
         // The table name is never user input: both call sites pass a literal.
         conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
-            .map_err(|e| hexora_types::HexoraError::Storage(e.to_string()))
+            .map_err(|e| nullhawk_types::NullhawkError::Storage(e.to_string()))
     };
     let targets = count("targets")?;
     let requests = count("requests")?;
@@ -3761,23 +3773,23 @@ fn summarise(
     })
 }
 
-fn read_name(project: &Project) -> hexora_types::error::Result<String> {
+fn read_name(project: &Project) -> nullhawk_types::error::Result<String> {
     let conn = project.metadata().connection()?;
     Ok(conn
         .query_row("SELECT name FROM project LIMIT 1", [], |r| r.get(0))
         .unwrap_or_else(|_| "Untitled engagement".to_string()))
 }
 
-fn write_name(project: &Project, name: &str) -> hexora_types::error::Result<()> {
+fn write_name(project: &Project, name: &str) -> nullhawk_types::error::Result<()> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     project
         .metadata()
         .connection()?
         .execute(
             "INSERT INTO project (id, name, created_at, updated_at)              VALUES ('prj_default', ?1, ?2, ?2)",
-            hexora_storage::rusqlite::params![name, now],
+            nullhawk_storage::rusqlite::params![name, now],
         )
-        .map_err(|e| hexora_types::HexoraError::Storage(e.to_string()))?;
+        .map_err(|e| nullhawk_types::NullhawkError::Storage(e.to_string()))?;
     Ok(())
 }
 
@@ -3789,13 +3801,13 @@ fn is_empty_dir(path: &Path) -> bool {
 
 /// Where the CA lives when nobody has said otherwise.
 ///
-/// The same location the CLI uses, so `hexora ca --status` in a terminal reports on
+/// The same location the CLI uses, so `nullhawk ca --status` in a terminal reports on
 /// the same certificate the window installed.
 fn default_ca_dir() -> CommandResult<PathBuf> {
     let base = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .ok_or_else(|| "cannot determine a home directory".to_string())?;
-    Ok(PathBuf::from(base).join(".hexora").join("ca"))
+    Ok(PathBuf::from(base).join(".nullhawk").join("ca"))
 }
 
 // ---------------------------------------------------------------------------
@@ -3831,7 +3843,7 @@ pub async fn crawl_run(
     identity: Option<String>,
 ) -> CommandResult<CrawlSummary> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
 
@@ -3890,14 +3902,14 @@ fn crawl_run_blocking(
     }
     let seed_count = seeds.len();
 
-    let mut budget = hexora_crawl::CrawlBudget::default();
+    let mut budget = nullhawk_crawl::CrawlBudget::default();
     if let Some(m) = max_requests {
         budget.max_requests = m;
     }
     if let Some(d) = max_depth {
         budget.max_depth = d;
     }
-    let policy = hexora_crawl::CrawlPolicy {
+    let policy = nullhawk_crawl::CrawlPolicy {
         follow_destructive,
         ignore_robots,
     };
@@ -3908,7 +3920,7 @@ fn crawl_run_blocking(
         TcpTransport::new()
     };
     let guard = ScopeGuard::new(transport, Arc::new(scope));
-    let mut crawler = hexora_crawl::Crawler::new(&guard)
+    let mut crawler = nullhawk_crawl::Crawler::new(&guard)
         .budget(budget)
         .policy(policy)
         .attaching(attached);
@@ -3926,13 +3938,13 @@ fn crawl_run_blocking(
     let store = project.traffic();
     let mut recorded = 0;
     for exchange in &report.fetched {
-        let captured = hexora_storage::CapturedExchange {
+        let captured = nullhawk_storage::CapturedExchange {
             request: exchange.request.clone(),
             raw_request: exchange.raw_request.clone(),
             response: exchange.response.clone(),
             encoded_body: exchange.encoded_body.clone(),
             content_encoding: exchange.content_encoding.clone(),
-            origin: hexora_engine::transport::Origin::Crawler.as_str(),
+            origin: nullhawk_engine::transport::Origin::Crawler.as_str(),
             identity: identity_id,
             parent: None,
             quirks: Vec::new(),
@@ -3950,9 +3962,9 @@ fn crawl_run_blocking(
             .or_insert(0) += 1;
     }
     let stopped = match report.stopped {
-        hexora_crawl::CrawlStop::FrontierEmpty => "frontier_empty",
-        hexora_crawl::CrawlStop::RequestCeiling => "request_ceiling",
-        hexora_crawl::CrawlStop::Cancelled => "cancelled",
+        nullhawk_crawl::CrawlStop::FrontierEmpty => "frontier_empty",
+        nullhawk_crawl::CrawlStop::RequestCeiling => "request_ceiling",
+        nullhawk_crawl::CrawlStop::Cancelled => "cancelled",
     };
 
     Ok(CrawlSummary {
@@ -3993,15 +4005,15 @@ fn gather_seeds(project: &Project, scope: &Scope) -> CommandResult<Vec<String>> 
 
 /// Whether a captured URL is in scope.
 fn url_in_scope(scope: &Scope, url: &str) -> bool {
-    match hexora_types::http::HttpService::parse_url(url) {
+    match nullhawk_types::http::HttpService::parse_url(url) {
         Ok((service, path)) => scope.contains(&service, &path),
         Err(_) => false,
     }
 }
 
 /// A short reason word for a crawl skip.
-fn skip_reason_word(reason: hexora_crawl::SkipReason) -> &'static str {
-    use hexora_crawl::SkipReason as R;
+fn skip_reason_word(reason: nullhawk_crawl::SkipReason) -> &'static str {
+    use nullhawk_crawl::SkipReason as R;
     match reason {
         R::OutOfScope => "out of scope",
         R::DepthLimit => "past the depth limit",
@@ -4082,7 +4094,7 @@ pub fn sitemap_build(
             } else {
                 (String::new(), Vec::new())
             };
-            pages.push(hexora_crawl::CapturedPage {
+            pages.push(nullhawk_crawl::CapturedPage {
                 url: item.url.clone(),
                 method: item.method.clone(),
                 status: item.status,
@@ -4097,7 +4109,7 @@ pub fn sitemap_build(
         }
     }
 
-    let map = hexora_crawl::SiteMap::build(pages, &scope);
+    let map = nullhawk_crawl::SiteMap::build(pages, &scope);
     Ok(SitemapView {
         hosts: map
             .hosts
@@ -4133,14 +4145,14 @@ pub fn sitemap_build(
 
 /// Whether a captured URL's authority matches a host filter (bare host or host:port).
 fn url_matches_host(url: &str, want: &str) -> bool {
-    match hexora_types::http::HttpService::parse_url(url) {
+    match nullhawk_types::http::HttpService::parse_url(url) {
         Ok((service, _)) => service.host == want || service.authority() == want,
         Err(_) => false,
     }
 }
 
 /// Reads a row's content type and, for HTML, its body — best effort.
-fn read_body_for_forms(store: &hexora_storage::TrafficStore, id: RequestId) -> (String, Vec<u8>) {
+fn read_body_for_forms(store: &nullhawk_storage::TrafficStore, id: RequestId) -> (String, Vec<u8>) {
     let content_type = match store.response_head(id) {
         Ok((_, _, _, headers_raw)) => content_type_of(&headers_raw),
         Err(_) => return (String::new(), Vec::new()),
@@ -4225,7 +4237,7 @@ pub async fn llm_test(
     insecure: bool,
 ) -> CommandResult<LlmReportView> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -4243,9 +4255,9 @@ fn llm_test_blocking(
     headers: Vec<String>,
     insecure: bool,
 ) -> CommandResult<LlmReportView> {
-    use hexora_llm::{test, test_leakage, test_output_handling, Target, PROMPT_PLACEHOLDER};
+    use nullhawk_llm::{test, test_leakage, test_output_handling, Target, PROMPT_PLACEHOLDER};
 
-    let (service, path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let (service, path) = nullhawk_types::http::HttpService::parse_url(&url).map_err(fail)?;
 
     let body_template = match template.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => t.to_string(),
@@ -4329,7 +4341,7 @@ fn llm_test_blocking(
 }
 
 /// Parses `Name: value` header lines into engine headers.
-fn parse_named_headers(raw: &[String]) -> CommandResult<Vec<hexora_types::http::Header>> {
+fn parse_named_headers(raw: &[String]) -> CommandResult<Vec<nullhawk_types::http::Header>> {
     let mut out = Vec::new();
     for item in raw {
         let trimmed = item.trim();
@@ -4339,7 +4351,7 @@ fn parse_named_headers(raw: &[String]) -> CommandResult<Vec<hexora_types::http::
         let (name, value) = trimmed
             .split_once(':')
             .ok_or_else(|| format!("{item:?} is not `Name: value`"))?;
-        out.push(hexora_types::http::Header::new(name.trim(), value.trim()));
+        out.push(nullhawk_types::http::Header::new(name.trim(), value.trim()));
     }
     Ok(out)
 }
@@ -4396,7 +4408,7 @@ pub async fn oob_test(
     insecure: bool,
 ) -> CommandResult<OobReportView> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -4415,11 +4427,11 @@ fn oob_test_blocking(
     wait_secs: u64,
     insecure: bool,
 ) -> CommandResult<OobReportView> {
-    use hexora_engine::transport::{HttpTransport, Origin, SendOptions};
-    use hexora_oob::{Collaborator, PayloadMode};
-    use hexora_types::http::HttpRequest;
+    use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+    use nullhawk_oob::{Collaborator, PayloadMode};
+    use nullhawk_types::http::HttpRequest;
 
-    let (service, path) = hexora_types::http::HttpService::parse_url(&url).map_err(fail)?;
+    let (service, path) = nullhawk_types::http::HttpService::parse_url(&url).map_err(fail)?;
     let params = query_param_names(&path);
     if params.is_empty() {
         return Err(
@@ -4583,16 +4595,16 @@ pub fn fuzz_slots(state: State<'_, AppState>, id: String) -> CommandResult<Vec<F
         store,
     );
     let draft = repeater.draft_from(request_id).map_err(fail)?;
-    Ok(hexora_types::inject::inputs(&draft.request)
+    Ok(nullhawk_types::inject::inputs(&draft.request)
         .into_iter()
         .filter_map(|slot| match &slot {
             ObjectLocation::Query { name, .. } => Some(FuzzSlotView {
-                label: hexora_fuzz::describe(&slot),
+                label: nullhawk_fuzz::describe(&slot),
                 name: name.clone(),
                 kind: "query".to_string(),
             }),
             ObjectLocation::Header { name, .. } => Some(FuzzSlotView {
-                label: hexora_fuzz::describe(&slot),
+                label: nullhawk_fuzz::describe(&slot),
                 name: name.clone(),
                 kind: "header".to_string(),
             }),
@@ -4667,7 +4679,7 @@ pub async fn fuzz_run(
     insecure: bool,
 ) -> CommandResult<FuzzRunView> {
     gate()
-        .require(hexora_engine::license::Feature::ActiveScanner)
+        .require(nullhawk_engine::license::Feature::ActiveScanner)
         .map_err(fail)?;
     let path = state.project_path().map_err(fail)?;
 
@@ -4701,9 +4713,9 @@ fn fuzz_run_blocking(
     max_requests: Option<usize>,
     insecure: bool,
 ) -> CommandResult<FuzzRunView> {
-    use hexora_active::{Budget, Cancel};
-    use hexora_fuzz::{Attack, AttackMode};
-    use hexora_verify::RepeaterLab;
+    use nullhawk_active::{Budget, Cancel};
+    use nullhawk_fuzz::{Attack, AttackMode};
+    use nullhawk_verify::RepeaterLab;
 
     let mode = match mode.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
         Some(m) => AttackMode::parse(m).ok_or_else(|| {
@@ -4773,7 +4785,7 @@ fn fuzz_run_blocking(
     budget.check().map_err(fail)?;
 
     let method = draft.request.method.clone();
-    let state_changing = hexora_active::is_state_changing(&method);
+    let state_changing = nullhawk_active::is_state_changing(&method);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -4782,7 +4794,7 @@ fn fuzz_run_blocking(
     let lab = RepeaterLab::scanner(&repeater);
     let cancel = Cancel::new();
     let run = runtime
-        .block_on(hexora_fuzz::run_attack(&attack, &lab, &cancel))
+        .block_on(nullhawk_fuzz::run_attack(&attack, &lab, &cancel))
         .map_err(fail)?;
 
     Ok(FuzzRunView {
@@ -4826,18 +4838,18 @@ fn fuzz_run_blocking(
 /// Resolves where the payloads go: a value to replace (a single position), or one or more
 /// slot names.
 fn fuzz_positions(
-    request: &hexora_types::http::HttpRequest,
+    request: &nullhawk_types::http::HttpRequest,
     names: &[String],
     replacing: Option<&str>,
 ) -> CommandResult<Vec<ObjectLocation>> {
     if let Some(value) = replacing.map(str::trim).filter(|v| !v.is_empty()) {
-        let at = hexora_types::inject::locate(request, value)
+        let at = nullhawk_types::inject::locate(request, value)
             .into_iter()
             .next()
             .ok_or_else(|| format!("`{value}` does not appear in this request"))?;
         return Ok(vec![at]);
     }
-    let available = hexora_types::inject::inputs(request);
+    let available = nullhawk_types::inject::inputs(request);
     let wanted: Vec<&str> = names
         .iter()
         .map(|n| n.trim())
@@ -4878,7 +4890,7 @@ fn fuzz_slot_list(available: &[ObjectLocation]) -> String {
     }
     available
         .iter()
-        .map(hexora_fuzz::describe)
+        .map(nullhawk_fuzz::describe)
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -4961,7 +4973,7 @@ fn parse_privilege(value: &str) -> CommandResult<PrivilegeLevel> {
 /// Builds a credential from the kind the UI offered and the value it collected.
 ///
 /// Anything not recognised is taken as a header name, which is how API keys arrive.
-/// The name is used as typed: Hexora sends header names as written, and an
+/// The name is used as typed: Nullhawk sends header names as written, and an
 /// application that accepts only one casing is a finding rather than something to
 /// paper over.
 fn build_credential(kind: &str, value: String) -> CommandResult<Credential> {
@@ -4993,7 +5005,7 @@ fn build_credential(kind: &str, value: String) -> CommandResult<Credential> {
 ///
 /// Id first because it is unambiguous: a project with two identities labelled "Admin"
 /// can still be driven precisely.
-fn resolve_identity(store: &hexora_storage::IdentityStore, who: &str) -> CommandResult<Identity> {
+fn resolve_identity(store: &nullhawk_storage::IdentityStore, who: &str) -> CommandResult<Identity> {
     if let Ok(id) = who.parse() {
         if let Ok(identity) = store.get(id) {
             return Ok(identity);
@@ -5004,7 +5016,7 @@ fn resolve_identity(store: &hexora_storage::IdentityStore, who: &str) -> Command
 
 fn object_view(
     declaration: &ObjectDeclaration,
-    identities: &hexora_storage::IdentityStore,
+    identities: &nullhawk_storage::IdentityStore,
 ) -> ObjectView {
     ObjectView {
         id: declaration.id.to_string(),
@@ -5022,8 +5034,8 @@ fn object_view(
 
 /// Rebuilds a message model from a stored request, so a declared value can be looked
 /// for in the target, the headers and the body.
-fn rebuild(stored: &hexora_storage::StoredRequest) -> hexora_types::http::HttpRequest {
-    let mut request = hexora_types::http::HttpRequest::get(stored.service.clone(), &stored.path);
+fn rebuild(stored: &nullhawk_storage::StoredRequest) -> nullhawk_types::http::HttpRequest {
+    let mut request = nullhawk_types::http::HttpRequest::get(stored.service.clone(), &stored.path);
     request.method = stored.method.clone();
     request.body = bytes::Bytes::from(stored.body.clone());
     for line in String::from_utf8_lossy(&stored.headers_raw)
@@ -5033,7 +5045,7 @@ fn rebuild(stored: &hexora_storage::StoredRequest) -> hexora_types::http::HttpRe
         if let Some((name, value)) = line.split_once(':') {
             request
                 .headers
-                .append(hexora_types::http::Header::new(name.trim(), value.trim()));
+                .append(nullhawk_types::http::Header::new(name.trim(), value.trim()));
         }
     }
     request
@@ -5043,7 +5055,7 @@ fn rebuild(stored: &hexora_storage::StoredRequest) -> hexora_types::http::HttpRe
 /// is not always well behaved.
 const LF: char = '\n';
 
-fn attempt_view(attempt: &hexora_authz::construct::Attempt) -> AttemptView {
+fn attempt_view(attempt: &nullhawk_authz::construct::Attempt) -> AttemptView {
     AttemptView {
         sender: attempt.sender_label.clone(),
         object_name: attempt.object_name.clone(),
@@ -5093,11 +5105,11 @@ fn cell_view(cell: &Cell, owner_label: &str) -> CellView {
 }
 
 fn structure_view(
-    structure: &hexora_types::structure::Diff,
+    structure: &nullhawk_types::structure::Diff,
     control: &str,
     variant: &str,
 ) -> StructureView {
-    let render = |difference: &hexora_types::structure::FieldDifference| DifferenceView {
+    let render = |difference: &nullhawk_types::structure::FieldDifference| DifferenceView {
         path: difference.path.clone(),
         change: difference.change.as_str().to_string(),
         detail: difference.describe(control, variant),
@@ -5106,9 +5118,9 @@ fn structure_view(
 
     StructureView {
         comparable: match structure.comparable {
-            hexora_types::structure::Comparable::Structurally => "structurally",
-            hexora_types::structure::Comparable::NotStructured => "not_structured",
-            hexora_types::structure::Comparable::OnlyOneSide => "only_one_side",
+            nullhawk_types::structure::Comparable::Structurally => "structurally",
+            nullhawk_types::structure::Comparable::NotStructured => "not_structured",
+            nullhawk_types::structure::Comparable::OnlyOneSide => "only_one_side",
         }
         .to_string(),
         same_document: structure.same_document(),
@@ -5139,7 +5151,7 @@ fn verdict_word(verdict: Verdict) -> &'static str {
     }
 }
 
-fn finding_row(finding: &hexora_types::finding::Finding) -> FindingRow {
+fn finding_row(finding: &nullhawk_types::finding::Finding) -> FindingRow {
     FindingRow {
         id: finding.id.to_string(),
         title: finding.title.clone(),
@@ -5285,11 +5297,11 @@ mod tests {
         let info = engine_info();
         assert_eq!(
             info.rpc_contract_version,
-            hexora_types::RPC_CONTRACT_VERSION
+            nullhawk_types::RPC_CONTRACT_VERSION
         );
         assert_eq!(
             info.schema_version,
-            hexora_storage::migrations::target_version()
+            nullhawk_storage::migrations::target_version()
         );
     }
 
@@ -5304,9 +5316,9 @@ mod tests {
     fn a_history_row_carries_every_column_the_table_renders() {
         // A missing field renders as an empty cell rather than an error, so the shape
         // is asserted here instead of being discovered by eye.
-        let row = row(hexora_storage::StoredTraffic {
+        let row = row(nullhawk_storage::StoredTraffic {
             id: RequestId::new(),
-            target: hexora_types::ids::TargetId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             method: "GET".into(),
             url: "https://example.com/".into(),
             status: Some(200),
@@ -5316,7 +5328,7 @@ mod tests {
             quirks: vec!["BareLf".into()],
             secure: true,
             identity: Some("User B".into()),
-            mode: hexora_types::raw::RequestMode::Structured,
+            mode: nullhawk_types::raw::RequestMode::Structured,
         });
         let json = serde_json::to_value(&row).unwrap();
         for key in [
@@ -5336,11 +5348,11 @@ mod tests {
 
     #[test]
     fn the_ca_directory_matches_the_one_the_cli_uses() {
-        // Otherwise the window installs one certificate and `hexora ca --status`
+        // Otherwise the window installs one certificate and `nullhawk ca --status`
         // reports on another.
         let dir = default_ca_dir().unwrap();
         assert!(dir.ends_with("ca"), "{dir:?}");
-        assert!(dir.to_string_lossy().contains(".hexora"), "{dir:?}");
+        assert!(dir.to_string_lossy().contains(".nullhawk"), "{dir:?}");
     }
 
     #[test]
@@ -5367,13 +5379,13 @@ mod tests {
 
     #[test]
     fn an_attempt_view_says_what_was_substituted_and_carries_no_credential() {
-        let attempt = hexora_authz::construct::Attempt {
-            sender: hexora_types::ids::IdentityId::new(),
+        let attempt = nullhawk_authz::construct::Attempt {
+            sender: nullhawk_types::ids::IdentityId::new(),
             sender_label: "User B".into(),
-            declaration: hexora_types::ids::ObjectId::new(),
+            declaration: nullhawk_types::ids::ObjectId::new(),
             object_name: "account".into(),
             object_value: "acct-1000".into(),
-            owner: hexora_types::ids::IdentityId::new(),
+            owner: nullhawk_types::ids::IdentityId::new(),
             owner_label: "User A".into(),
             location: ObjectLocation::PathSegment { index: 1 },
             original_value: "acct-2000".into(),
@@ -5381,7 +5393,7 @@ mod tests {
             control: Some(RequestId::new()),
             status: Some(200),
             similarity: 1.0,
-            outcome: hexora_authz::Outcome::Allowed,
+            outcome: nullhawk_authz::Outcome::Allowed,
             verdict: Verdict::Violation,
             disclosed_object_ids: vec!["alice@example.com".into()],
             echoed: true,
@@ -5410,13 +5422,13 @@ mod tests {
         // The window offers a request to look in; the location comes from the value
         // actually being there, which is why a declaration that points nowhere is
         // refused rather than recorded.
-        let mut request = hexora_types::http::HttpRequest::get(
-            hexora_types::http::HttpService::new("api.example.com", 443, true),
+        let mut request = nullhawk_types::http::HttpRequest::get(
+            nullhawk_types::http::HttpService::new("api.example.com", 443, true),
             "/accounts/acct-1000",
         );
         request.headers.set("Authorization", "Bearer acct-1000");
 
-        let found = hexora_authz::construct::locate(&request, "acct-1000");
+        let found = nullhawk_authz::construct::locate(&request, "acct-1000");
         assert_eq!(found, vec![ObjectLocation::PathSegment { index: 1 }]);
         assert!(
             !found
@@ -5471,7 +5483,7 @@ mod tests {
     #[test]
     fn an_excerpt_cites_no_request_rather_than_a_made_up_one() {
         let view = evidence_view(&Evidence::ResponseExcerpt {
-            response: hexora_types::ids::ResponseId::new(),
+            response: nullhawk_types::ids::ResponseId::new(),
             offset: 412,
             excerpt: "acct-1000".into(),
         });
@@ -5515,18 +5527,18 @@ mod tests {
     fn a_matrix_cell_carries_the_request_id_a_finding_would_cite() {
         let request = RequestId::new();
         let cell = Cell {
-            identity: hexora_types::ids::IdentityId::new(),
+            identity: nullhawk_types::ids::IdentityId::new(),
             label: "User B".into(),
             privilege: PrivilegeLevel::User,
             request: Some(request),
             status: Some(200),
             similarity: 1.0,
             structure: None,
-            outcome: hexora_authz::Outcome::Allowed,
+            outcome: nullhawk_authz::Outcome::Allowed,
             verdict: Verdict::Violation,
             leaked_object_ids: vec!["acct-1000".into()],
             own_object_ids: Vec::new(),
-            verification: Some(hexora_types::verify::Verification::Reproduced {
+            verification: Some(nullhawk_types::verify::Verification::Reproduced {
                 note: "it happened again".into(),
                 evidence: Vec::new(),
             }),
@@ -5554,11 +5566,11 @@ mod tests {
     }
 
     /// A finding shaped like the ones the authorization subsystem produces.
-    fn a_finding() -> hexora_types::finding::Finding {
+    fn a_finding() -> nullhawk_types::finding::Finding {
         let now = chrono::Utc::now();
-        hexora_types::finding::Finding {
-            id: hexora_types::ids::FindingId::new(),
-            target: hexora_types::ids::TargetId::new(),
+        nullhawk_types::finding::Finding {
+            id: nullhawk_types::ids::FindingId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
             title: "Broken object-level authorization in GET /accounts/{id}".into(),
             severity: Severity::High,
             confidence: Confidence::Firm,
@@ -5575,7 +5587,7 @@ mod tests {
             cwe: None,
             owasp: None,
             cvss: None,
-            source: hexora_types::finding::FindingSource::AuthorizationTest,
+            source: nullhawk_types::finding::FindingSource::AuthorizationTest,
             created_at: now,
             updated_at: now,
             status: FindingStatus::New,
@@ -5584,15 +5596,15 @@ mod tests {
 
     #[test]
     fn a_diff_view_reports_a_timing_delta_the_ui_can_render() {
-        let before = hexora_types::http::HttpResponse {
+        let before = nullhawk_types::http::HttpResponse {
             status: 200,
             reason: None,
-            version: hexora_types::http::HttpVersion::Http11,
-            headers: hexora_types::http::Headers::new(),
+            version: nullhawk_types::http::HttpVersion::Http11,
+            headers: nullhawk_types::http::Headers::new(),
             body: bytes::Bytes::from_static(b"x"),
             truncated: false,
         };
-        let diff = hexora_repeater::ResponseDiff::compare(&before, &before, (100, 4200));
+        let diff = nullhawk_repeater::ResponseDiff::compare(&before, &before, (100, 4200));
         let view = diff_view(diff);
 
         assert_eq!(view.timing_delta_ms, 4100);

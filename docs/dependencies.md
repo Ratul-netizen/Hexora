@@ -1,6 +1,6 @@
 # Dependency policy
 
-Hexora is a security tool. Its own supply chain is part of its threat surface, so
+Nullhawk is a security tool. Its own supply chain is part of its threat surface, so
 dependencies get more scrutiny here than in an ordinary application.
 
 ## Rules
@@ -33,7 +33,7 @@ Any advisory deliberately accepted must be recorded here, with:
 
 - the advisory ID and a link,
 - the dependency and **the path by which it enters the graph** (`cargo tree -i <crate>`),
-- what functionality is affected, and whether Hexora reaches the vulnerable code,
+- what functionality is affected, and whether Nullhawk reaches the vulnerable code,
 - the mitigation, if any,
 - why it cannot currently be fixed,
 - what would let it be removed.
@@ -48,7 +48,7 @@ impls for `VariantStrIter` ([advisory](https://rustsec.org/advisories/RUSTSEC-20
 - **Path in:** `glib 0.18.5` ← `gtk` / `gdk` / `webkit2gtk` ← `tauri`. Linux desktop
   only; the Windows and macOS builds do not link it.
 - **Reached?** No. The unsound code is `glib::VariantStrIter`, part of GVariant
-  handling inside the GTK stack. Hexora calls no `glib` API directly, and nothing in
+  handling inside the GTK stack. Nullhawk calls no `glib` API directly, and nothing in
   the engine, proxy or storage path passes through it. No network input or credential
   ever reaches it.
 - **Mitigation:** none needed beyond not calling it.
@@ -105,7 +105,7 @@ installed locally.
 
 `cargo deny check advisories` (and `cargo-audit`) gate the RustSec database. The IDs below are
 **accepted** in `deny.toml`'s `[advisories] ignore` list: each is an *unmaintained* transitive
-dependency — an informational advisory, not a vulnerability — that Hexora cannot remove without
+dependency — an informational advisory, not a vulnerability — that Nullhawk cannot remove without
 an upstream change. They are listed one by one (rather than downgrading the whole `unmaintained`
 lint) so a newly-unmaintained crate still fails CI and forces a deliberate decision. Re-review
 when Tauri and the rustls stack update.

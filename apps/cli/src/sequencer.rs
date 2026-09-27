@@ -1,4 +1,4 @@
-//! `hexora sequencer` — how unpredictable is this token?
+//! `nullhawk sequencer` — how unpredictable is this token?
 //!
 //! Burp's Sequencer, from samples a tester already has: session ids, CSRF tokens, reset
 //! tokens. Feed it a file of tokens, or pull them from captured traffic (a response header, or a
@@ -7,12 +7,12 @@
 
 use std::path::Path;
 
-use hexora_sequencer::{analyze, Report, Verdict};
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_types::http::Headers;
-use hexora_types::{HexoraError, Result};
+use nullhawk_sequencer::{analyze, Report, Verdict};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_types::http::Headers;
+use nullhawk_types::{NullhawkError, Result};
 
-/// Options for `hexora sequencer`.
+/// Options for `nullhawk sequencer`.
 pub struct Args<'a> {
     pub project: &'a Path,
     /// A file of tokens, one per line — the source when the tokens are already in hand.
@@ -36,7 +36,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
     };
 
     if tokens.is_empty() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "sequencer",
             "no tokens to analyse — check the --file, or the --header/--cookie and --query used \
              to extract them",
@@ -55,7 +55,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
 /// Reads a token-per-line file.
 fn read_file(path: &Path) -> Result<Vec<String>> {
     let text = std::fs::read_to_string(path)
-        .map_err(|e| HexoraError::invalid_input("--file", format!("{}: {e}", path.display())))?;
+        .map_err(|e| NullhawkError::invalid_input("--file", format!("{}: {e}", path.display())))?;
     Ok(text
         .lines()
         .map(|l| l.trim().to_string())
@@ -69,13 +69,13 @@ fn extract_from_traffic(args: &Args<'_>) -> Result<Vec<String>> {
         (Some(h), None) => (h.to_string(), None),
         (None, Some(c)) => ("set-cookie".to_string(), Some(c.to_string())),
         (None, None) => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "sequencer",
                 "give a source: --file <path>, --header <name>, or --cookie <name>",
             ))
         }
         (Some(_), Some(_)) => {
-            return Err(HexoraError::invalid_input(
+            return Err(NullhawkError::invalid_input(
                 "sequencer",
                 "pass --header or --cookie, not both",
             ))
@@ -86,8 +86,8 @@ fn extract_from_traffic(args: &Args<'_>) -> Result<Vec<String>> {
     let store = project.traffic();
     let query = match args.query {
         Some(q) => Some(
-            hexora_query::Query::parse(q)
-                .map_err(|e| HexoraError::invalid_input("--query", e.message))?,
+            nullhawk_query::Query::parse(q)
+                .map_err(|e| NullhawkError::invalid_input("--query", e.message))?,
         ),
         None => None,
     };

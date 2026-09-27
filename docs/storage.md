@@ -32,7 +32,7 @@ megabytes — small enough to stay fast, portable and quick to back up.
 A project is a **directory**, not a single file:
 
 ```text
-engagement.hexora/
+engagement.nullhawk/
 ├── project.db      metadata (SQLite, WAL)
 └── blobs/          content-addressed bodies
     └── ab/
@@ -113,7 +113,7 @@ Rules, in order of importance:
    interrupted upgrade leaves a consistent earlier revision rather than a half-migrated
    database.
 4. **A newer schema is refused, not downgraded.** Opening a project written by a newer
-   Hexora returns `SchemaTooNew`. Applying old code to a newer schema silently corrupts
+   Nullhawk returns `SchemaTooNew`. Applying old code to a newer schema silently corrupts
    engagement evidence, and that is not a recoverable mistake.
 
 Version tracking uses SQLite's `user_version` pragma rather than a bespoke table, so

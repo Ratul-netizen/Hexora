@@ -1,4 +1,4 @@
-//! `hexora ext` — install and manage extensions.
+//! `nullhawk ext` — install and manage extensions.
 //!
 //! An extension is a manifest plus a WASM module. Installing one runs someone else's code inside
 //! a tool that holds a client's traffic and credentials, so the permission model is front and
@@ -9,12 +9,12 @@
 //! `install` validates the manifest, records the exact grant, and captures the WASM module bytes
 //! so the record of what code was permitted travels with the project — it does not run the
 //! module. Running it is the scanner's job: an enabled passive-check extension that holds
-//! `http:read` is executed in the sandbox over each exchange during `hexora scan passive`.
+//! `http:read` is executed in the sandbox over each exchange during `nullhawk scan passive`.
 
 use std::path::Path;
 
-use hexora_ext::{ExtensionKind, InstalledExtension, Manifest};
-use hexora_types::{HexoraError, Result};
+use nullhawk_ext::{ExtensionKind, InstalledExtension, Manifest};
+use nullhawk_types::{NullhawkError, Result};
 
 /// Lists the project's installed extensions.
 pub fn list(project: &Path, json: bool) -> Result<()> {
@@ -25,7 +25,7 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
         return Ok(());
     }
     if extensions.is_empty() {
-        println!("No extensions installed. Add one with `hexora ext install <manifest>`.");
+        println!("No extensions installed. Add one with `nullhawk ext install <manifest>`.");
         return Ok(());
     }
     println!("Installed extensions:");
@@ -52,17 +52,17 @@ pub fn list(project: &Path, json: bool) -> Result<()> {
 /// Installs an extension from a manifest file.
 pub fn install(project: &Path, manifest_path: &Path, grant_all: bool, json: bool) -> Result<()> {
     let bytes = std::fs::read(manifest_path).map_err(|e| {
-        HexoraError::invalid_input("manifest", format!("{}: {e}", manifest_path.display()))
+        NullhawkError::invalid_input("manifest", format!("{}: {e}", manifest_path.display()))
     })?;
     let manifest =
-        Manifest::parse(&bytes).map_err(|e| HexoraError::invalid_input("manifest", e.message))?;
+        Manifest::parse(&bytes).map_err(|e| NullhawkError::invalid_input("manifest", e.message))?;
 
     // Capture the module the manifest points at, so the runtime can execute it without the
     // original files and the record of what code was permitted travels with the project.
     let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let module_path = dir.join(&manifest.entry);
     let module = std::fs::read(&module_path).map_err(|e| {
-        HexoraError::invalid_input("entry", format!("{}: {e}", module_path.display()))
+        NullhawkError::invalid_input("entry", format!("{}: {e}", module_path.display()))
     })?;
 
     // Default: grant only what the extension marks required. `--grant-all` also grants the
@@ -81,7 +81,7 @@ pub fn install(project: &Path, manifest_path: &Path, grant_all: bool, json: bool
         .iter()
         .any(|e| e.manifest.id == installed.manifest.id)
     {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "install",
             format!(
                 "{} is already installed; remove it first",
@@ -123,7 +123,7 @@ pub fn install(project: &Path, manifest_path: &Path, grant_all: bool, json: bool
         println!();
         println!("Installed DISABLED: some required capabilities were not granted. Re-install");
         println!(
-            "with --grant-all, or grant them, then `hexora ext enable {}`.",
+            "with --grant-all, or grant them, then `nullhawk ext enable {}`.",
             installed.manifest.id
         );
     }
@@ -137,7 +137,7 @@ pub fn remove(project: &Path, id: &str, json: bool) -> Result<()> {
     let before = extensions.len();
     extensions.retain(|e| e.manifest.id != id);
     if extensions.len() == before {
-        return Err(HexoraError::not_found("extension", id.to_string()));
+        return Err(NullhawkError::not_found("extension", id.to_string()));
     }
     settings.set_extensions(&extensions)?;
     if json {
@@ -154,7 +154,7 @@ pub fn permissions(project: &Path, id: &str, json: bool) -> Result<()> {
     let ext = extensions
         .iter()
         .find(|e| e.manifest.id == id)
-        .ok_or_else(|| HexoraError::not_found("extension", id.to_string()))?;
+        .ok_or_else(|| NullhawkError::not_found("extension", id.to_string()))?;
 
     if json {
         println!(
@@ -202,12 +202,12 @@ pub fn permissions(project: &Path, id: &str, json: bool) -> Result<()> {
 /// hostile module fails the run rather than the tool.
 pub fn run_extension(manifest_path: &Path, exchange_path: Option<&Path>, json: bool) -> Result<()> {
     let bytes = std::fs::read(manifest_path).map_err(|e| {
-        HexoraError::invalid_input("manifest", format!("{}: {e}", manifest_path.display()))
+        NullhawkError::invalid_input("manifest", format!("{}: {e}", manifest_path.display()))
     })?;
     let manifest =
-        Manifest::parse(&bytes).map_err(|e| HexoraError::invalid_input("manifest", e.message))?;
+        Manifest::parse(&bytes).map_err(|e| NullhawkError::invalid_input("manifest", e.message))?;
     if manifest.kind != ExtensionKind::PassiveCheck {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "kind",
             format!(
                 "only passive-check extensions can be run this way; this is a {}",
@@ -219,18 +219,18 @@ pub fn run_extension(manifest_path: &Path, exchange_path: Option<&Path>, json: b
     let dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let module_path = dir.join(&manifest.entry);
     let module = std::fs::read(&module_path).map_err(|e| {
-        HexoraError::invalid_input("entry", format!("{}: {e}", module_path.display()))
+        NullhawkError::invalid_input("entry", format!("{}: {e}", module_path.display()))
     })?;
 
     let exchange = match exchange_path {
         Some(path) => std::fs::read_to_string(path).map_err(|e| {
-            HexoraError::invalid_input("--exchange", format!("{}: {e}", path.display()))
+            NullhawkError::invalid_input("--exchange", format!("{}: {e}", path.display()))
         })?,
         None => "{}".to_string(),
     };
 
-    let out = hexora_wasm::run_passive(&module, &exchange, &hexora_wasm::Limits::default())
-        .map_err(|e| HexoraError::invalid_input("extension", e.message))?;
+    let out = nullhawk_wasm::run_passive(&module, &exchange, &nullhawk_wasm::Limits::default())
+        .map_err(|e| NullhawkError::invalid_input("extension", e.message))?;
 
     if json {
         println!("{out}");
@@ -248,12 +248,12 @@ pub fn set_enabled(project: &Path, id: &str, enabled: bool, json: bool) -> Resul
     let ext = extensions
         .iter_mut()
         .find(|e| e.manifest.id == id)
-        .ok_or_else(|| HexoraError::not_found("extension", id.to_string()))?;
+        .ok_or_else(|| NullhawkError::not_found("extension", id.to_string()))?;
 
     // An extension cannot be enabled while its required capabilities are unmet — that is the
     // state that would fail unpredictably mid-run.
     if enabled && !ext.requirements_met() {
-        return Err(HexoraError::invalid_input(
+        return Err(NullhawkError::invalid_input(
             "enable",
             format!("{id} is missing required capabilities; re-install with --grant-all"),
         ));

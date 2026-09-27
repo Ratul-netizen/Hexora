@@ -1,6 +1,6 @@
-//! # hexora-http
+//! # nullhawk-http
 //!
-//! Hexora's HTTP/1.x engine.
+//! Nullhawk's HTTP/1.x engine.
 //!
 //! ## What makes this different from an HTTP client
 //!

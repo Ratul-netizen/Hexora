@@ -1,6 +1,6 @@
-//! # hexora-engine
+//! # nullhawk-engine
 //!
-//! The architectural boundaries of the Hexora core, and the places where the security
+//! The architectural boundaries of the Nullhawk core, and the places where the security
 //! invariants are actually enforced.
 //!
 //! There is deliberately no interface here for every future subsystem. A trait earns

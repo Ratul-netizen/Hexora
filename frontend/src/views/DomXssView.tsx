@@ -8,7 +8,7 @@ import {
 } from "../ipc";
 
 /**
- * DOM-based XSS — Hexora's answer to Burp's DOM Invader.
+ * DOM-based XSS — Nullhawk's answer to Burp's DOM Invader.
  *
  * DOM XSS never reaches the server, so captured traffic cannot show it. This drives the user's
  * installed Chrome/Edge over CDP: it wraps the dangerous DOM sinks before the page loads,

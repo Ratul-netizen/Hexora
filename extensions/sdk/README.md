@@ -1,8 +1,8 @@
-# Hexora extension SDK
+# Nullhawk extension SDK
 
 **Status: PLANNED (M10). Nothing here is implemented.**
 
-The TypeScript SDK for Hexora extensions will live here.
+The TypeScript SDK for Nullhawk extensions will live here.
 
 The permission model the SDK will surface *is* implemented and tested today, in
 `core/engine/src/permission.rs`. Extensions declare required and optional capabilities;

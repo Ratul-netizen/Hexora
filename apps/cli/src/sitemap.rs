@@ -1,4 +1,4 @@
-//! `hexora sitemap` — the coverage a project holds, as a host → path tree.
+//! `nullhawk sitemap` — the coverage a project holds, as a host → path tree.
 //!
 //! Read-only, and sends nothing: it reads the traffic already captured, groups it by host
 //! and path, marks what is out of scope, and — with `--forms` — reads the HTML bodies to
@@ -8,16 +8,16 @@
 
 use std::path::PathBuf;
 
-use hexora_crawl::{CapturedPage, SiteMap};
-use hexora_storage::repository::{Cursor, Limit};
-use hexora_storage::{StoredTraffic, TrafficStore};
-use hexora_types::http::HttpService;
-use hexora_types::Result;
+use nullhawk_crawl::{CapturedPage, SiteMap};
+use nullhawk_storage::repository::{Cursor, Limit};
+use nullhawk_storage::{StoredTraffic, TrafficStore};
+use nullhawk_types::http::HttpService;
+use nullhawk_types::Result;
 
 /// History rows read per page.
 const PAGE: u32 = 500;
 
-/// Options for `hexora sitemap`.
+/// Options for `nullhawk sitemap`.
 pub struct Args {
     pub project: PathBuf,
     /// Show only this host (bare host or `host:port`).
@@ -111,7 +111,7 @@ fn print_tree(map: &SiteMap, forms: bool) {
     if map.hosts.is_empty() && map.out_of_scope.is_empty() {
         println!("No traffic captured yet — nothing to map.");
         println!();
-        println!("Capture some through the proxy, or run `hexora crawl <project>`, then");
+        println!("Capture some through the proxy, or run `nullhawk crawl <project>`, then");
         println!("come back here to see what was reached.");
         return;
     }
