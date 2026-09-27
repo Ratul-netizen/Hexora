@@ -276,6 +276,391 @@ pub fn describe(at: &ObjectLocation) -> String {
     }
 }
 
+/// A short name for a location, for a payload label a reader can attribute to a position.
+fn slot_name(at: &ObjectLocation) -> String {
+    match at {
+        ObjectLocation::Query { name, .. } => name.clone(),
+        ObjectLocation::Header { name, .. } => name.clone(),
+        ObjectLocation::PathSegment { index } => format!("path[{index}]"),
+        ObjectLocation::Body { offset } => format!("body@{offset}"),
+        other => format!("{other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-position attacks (Burp Intruder's four modes)
+// ---------------------------------------------------------------------------
+//
+// The single-position `Plan`/`run` above is Sniper with one marker — the case a tester
+// reaches for most. The four named modes generalise it over several positions and, for two
+// of them, several payload lists. Every mode reduces to the same idea: produce an ordered
+// sequence of *placements* — each one a set of (position, value) substitutions plus a label
+// for the row — and send the request once per placement, into the same `Run` the
+// single-position path produces. The reporting, grouping and safety machinery are unchanged.
+
+/// Which Intruder attack shape to run.
+///
+/// The names are Burp's, because that is what a tester already knows; the behaviour is the
+/// behaviour those names have meant for twenty years.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttackMode {
+    /// One payload list, walked through each position in turn while the others stay at the
+    /// request's own value. `positions × payloads` requests.
+    Sniper,
+    /// One payload list, the same value placed in every position at once. `payloads` requests.
+    BatteringRam,
+    /// One payload list per position, advanced in lockstep and stopping at the shortest list.
+    /// `min(list lengths)` requests.
+    Pitchfork,
+    /// One payload list per position, every combination — the Cartesian product.
+    /// `∏ list lengths` requests.
+    ClusterBomb,
+}
+
+impl AttackMode {
+    /// How the mode reads.
+    pub fn label(self) -> &'static str {
+        match self {
+            AttackMode::Sniper => "sniper",
+            AttackMode::BatteringRam => "battering ram",
+            AttackMode::Pitchfork => "pitchfork",
+            AttackMode::ClusterBomb => "cluster bomb",
+        }
+    }
+
+    /// Whether the mode uses one shared payload list (Sniper, Battering ram) rather than one
+    /// list per position (Pitchfork, Cluster bomb).
+    pub fn shares_one_list(self) -> bool {
+        matches!(self, AttackMode::Sniper | AttackMode::BatteringRam)
+    }
+
+    /// Parses a mode from its CLI spelling (hyphen or underscore, any case).
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "sniper" => Some(AttackMode::Sniper),
+            "battering-ram" | "batteringram" | "ram" => Some(AttackMode::BatteringRam),
+            "pitchfork" => Some(AttackMode::Pitchfork),
+            "cluster-bomb" | "clusterbomb" | "cluster" => Some(AttackMode::ClusterBomb),
+            _ => None,
+        }
+    }
+}
+
+/// One request's worth of substitutions, with the label its row will carry.
+#[derive(Debug, Clone)]
+struct Placement {
+    label: String,
+    /// `(position index into the attack's positions, value to place)`.
+    subs: Vec<(usize, String)>,
+}
+
+/// A multi-position attack: the request, where the markers are, the lists, and the shape.
+pub struct Attack<'a> {
+    /// The request to vary.
+    pub draft: &'a hexora_repeater::Draft,
+    /// The marked positions, in order.
+    pub positions: Vec<ObjectLocation>,
+    /// Sniper and Battering ram take exactly one list; Pitchfork and Cluster bomb take one
+    /// per position, in the same order as `positions`.
+    pub payload_lists: Vec<&'a [String]>,
+    /// Which of the four shapes to run.
+    pub mode: AttackMode,
+    /// What the run may do to the target.
+    pub budget: Budget,
+}
+
+impl Attack<'_> {
+    /// Checks the positions and lists are consistent with the mode, before anything is sent.
+    pub fn validate(&self) -> Result<()> {
+        let bad = |why: String| Err(hexora_types::HexoraError::invalid_input("attack", why));
+        if self.positions.is_empty() {
+            return bad("an attack needs at least one marked position".into());
+        }
+        if self.payload_lists.is_empty() || self.payload_lists.iter().any(|list| list.is_empty()) {
+            return bad("every payload list must have at least one value".into());
+        }
+        if self.mode.shares_one_list() {
+            if self.payload_lists.len() != 1 {
+                return bad(format!(
+                    "{} uses one payload list for all positions, but {} were given",
+                    self.mode.label(),
+                    self.payload_lists.len()
+                ));
+            }
+        } else if self.payload_lists.len() != self.positions.len() {
+            return bad(format!(
+                "{} needs one payload list per position: {} position(s), {} list(s)",
+                self.mode.label(),
+                self.positions.len(),
+                self.payload_lists.len()
+            ));
+        }
+        Ok(())
+    }
+
+    /// How many payload placements the full attack is — before the baseline, and before any
+    /// ceiling. Saturating, because a Cluster bomb's product can overflow a `usize` long
+    /// before it could ever be sent.
+    pub fn placements(&self) -> usize {
+        match self.mode {
+            AttackMode::Sniper => self
+                .positions
+                .len()
+                .saturating_mul(self.payload_lists.first().map_or(0, |l| l.len())),
+            AttackMode::BatteringRam => self.payload_lists.first().map_or(0, |l| l.len()),
+            AttackMode::Pitchfork => self
+                .payload_lists
+                .iter()
+                .map(|l| l.len())
+                .min()
+                .unwrap_or(0),
+            AttackMode::ClusterBomb => self
+                .payload_lists
+                .iter()
+                .fold(1usize, |acc, l| acc.saturating_mul(l.len())),
+        }
+    }
+
+    /// The most requests this would send: every placement, plus the baseline.
+    pub fn requests(&self) -> usize {
+        self.placements().saturating_add(1)
+    }
+
+    /// Whether the ceiling would cut the attack short.
+    pub fn exceeds_ceiling(&self) -> bool {
+        self.requests() > self.budget.max_requests
+    }
+
+    /// The attack in the sentences a confirmation prompt needs.
+    pub fn describe(&self, method: &str, url: &str) -> String {
+        let positions: Vec<String> = self.positions.iter().map(describe).collect();
+        let mut lines = vec![
+            format!(
+                "{} {} — {} attack over {} position(s): {}",
+                method,
+                url,
+                self.mode.label(),
+                self.positions.len(),
+                positions.join(", "),
+            ),
+            format!(
+                "{} placement(s), {} request(s) including the baseline",
+                self.placements(),
+                self.requests(),
+            ),
+            format!("Budget: {}", self.budget.describe()),
+        ];
+        if self.exceeds_ceiling() {
+            lines.push(format!(
+                "The ceiling of {} request(s) will stop this before the attack is \
+                 finished, and the result will say so.",
+                self.budget.max_requests
+            ));
+        }
+        lines.join("\n")
+    }
+
+    /// Expands the attack into placements, generating no more than `cap` of them so a large
+    /// Cluster bomb cannot exhaust memory building a list the ceiling would never let it send.
+    fn expand(&self, cap: usize) -> Vec<Placement> {
+        let mut out = Vec::new();
+        match self.mode {
+            AttackMode::Sniper => {
+                let list = self.payload_lists[0];
+                let annotate = self.positions.len() > 1;
+                for (index, position) in self.positions.iter().enumerate() {
+                    for value in list {
+                        if out.len() >= cap {
+                            return out;
+                        }
+                        let label = if annotate {
+                            format!("{}={value}", slot_name(position))
+                        } else {
+                            value.clone()
+                        };
+                        out.push(Placement {
+                            label,
+                            subs: vec![(index, value.clone())],
+                        });
+                    }
+                }
+            }
+            AttackMode::BatteringRam => {
+                let list = self.payload_lists[0];
+                for value in list {
+                    if out.len() >= cap {
+                        return out;
+                    }
+                    out.push(Placement {
+                        label: value.clone(),
+                        subs: (0..self.positions.len())
+                            .map(|i| (i, value.clone()))
+                            .collect(),
+                    });
+                }
+            }
+            AttackMode::Pitchfork => {
+                let length = self.placements();
+                for k in 0..length {
+                    if out.len() >= cap {
+                        return out;
+                    }
+                    let subs: Vec<(usize, String)> = self
+                        .payload_lists
+                        .iter()
+                        .enumerate()
+                        .map(|(i, list)| (i, list[k].clone()))
+                        .collect();
+                    out.push(Placement {
+                        label: subs
+                            .iter()
+                            .map(|(_, v)| v.clone())
+                            .collect::<Vec<_>>()
+                            .join(" / "),
+                        subs,
+                    });
+                }
+            }
+            AttackMode::ClusterBomb => {
+                // A mixed-radix counter over the lists, least-significant last so the last
+                // list varies fastest — the order a tester expects.
+                let lengths: Vec<usize> = self.payload_lists.iter().map(|l| l.len()).collect();
+                let mut cursor = vec![0usize; lengths.len()];
+                loop {
+                    if out.len() >= cap {
+                        return out;
+                    }
+                    let subs: Vec<(usize, String)> = cursor
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &k)| (i, self.payload_lists[i][k].clone()))
+                        .collect();
+                    out.push(Placement {
+                        label: subs
+                            .iter()
+                            .map(|(_, v)| v.clone())
+                            .collect::<Vec<_>>()
+                            .join(" / "),
+                        subs,
+                    });
+                    // Increment the counter from the last position.
+                    let mut carry = lengths.len();
+                    loop {
+                        if carry == 0 {
+                            return out;
+                        }
+                        carry -= 1;
+                        cursor[carry] += 1;
+                        if cursor[carry] < lengths[carry] {
+                            break;
+                        }
+                        cursor[carry] = 0;
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Applies one placement to the draft, substituting each marked position.
+///
+/// Body-offset positions are applied from the highest offset down, so substituting an earlier
+/// one cannot shift the byte offset of a later one. Query and header positions address by name
+/// and occurrence, so their order does not matter.
+fn apply(
+    draft: &hexora_repeater::Draft,
+    positions: &[ObjectLocation],
+    placement: &Placement,
+) -> std::result::Result<hexora_repeater::Draft, String> {
+    let mut ordered: Vec<&(usize, String)> = placement.subs.iter().collect();
+    ordered.sort_by_key(|(index, _)| match &positions[*index] {
+        ObjectLocation::Body { offset } => usize::MAX - offset,
+        _ => 0,
+    });
+    let mut varied = draft.clone();
+    for (index, value) in ordered {
+        varied.request =
+            substitute(&varied.request, &positions[*index], value).map_err(|e| e.to_string())?;
+    }
+    Ok(varied)
+}
+
+/// Runs a multi-position attack, sending the request once per placement.
+///
+/// The baseline goes first, unchanged, exactly as [`run`] does — every row is read against it,
+/// and a target already failing is visible before the attack piles on. The ceiling and the
+/// cancel signal are honoured between placements, and a truncated attack says so.
+pub async fn run_attack(attack: &Attack<'_>, lab: &dyn Lab, cancel: &Cancel) -> Result<Run> {
+    attack.validate()?;
+    attack
+        .budget
+        .check()
+        .map_err(|why| hexora_types::HexoraError::invalid_input("budget", why))?;
+
+    let mut sent = 0usize;
+    let baseline = match send(attack.draft, lab, "(unchanged)").await {
+        Ok(attempt) => {
+            sent += 1;
+            Some(attempt)
+        }
+        Err(e) => Some(failed("(unchanged)", e)),
+    };
+
+    // Generate at most a ceiling's worth: anything beyond it could not be sent anyway, and a
+    // Cluster bomb's product would otherwise build a list large enough to exhaust memory.
+    let placements = attack.expand(attack.budget.max_requests);
+    let full = attack.placements();
+
+    let mut attempts = Vec::with_capacity(placements.len());
+    let mut stopped = None;
+
+    for placement in &placements {
+        if cancel.stopped() {
+            stopped = Some(StoppedBecause::Cancelled);
+            break;
+        }
+        if sent >= attack.budget.max_requests {
+            stopped = Some(StoppedBecause::CeilingReached);
+            break;
+        }
+
+        pause(attack.budget.pause).await;
+
+        let varied = match apply(attack.draft, &attack.positions, placement) {
+            Ok(varied) => varied,
+            Err(e) => {
+                attempts.push(failed(&placement.label, e));
+                continue;
+            }
+        };
+
+        match send(&varied, lab, &placement.label).await {
+            Ok(attempt) => {
+                sent += 1;
+                attempts.push(attempt);
+            }
+            Err(e) => {
+                sent += 1;
+                attempts.push(failed(&placement.label, e));
+            }
+        }
+    }
+
+    // If generation itself was capped below the full size, the attack was not finished even
+    // though the loop ran to the end of what it built.
+    if stopped.is_none() && placements.len() < full {
+        stopped = Some(StoppedBecause::CeilingReached);
+    }
+
+    Ok(Run {
+        baseline,
+        attempts,
+        requests_sent: sent,
+        stopped,
+    })
+}
+
 /// Sends the request once per payload.
 ///
 /// The baseline goes first, unchanged, so every row has something to be read against —
@@ -558,5 +943,174 @@ mod tests {
         assert!(described.contains("50 payload(s)"), "{described}");
         assert!(described.contains("`user` query parameter"), "{described}");
         assert!(described.contains("will stop this before"), "{described}");
+    }
+
+    // ----- multi-position attack modes -----
+
+    fn draft() -> hexora_repeater::Draft {
+        hexora_repeater::Draft::new(hexora_types::http::HttpRequest::get(
+            hexora_types::http::HttpService::new("api.example.com", 443, true),
+            "/login?user=admin&pass=x",
+        ))
+    }
+
+    fn query(name: &str) -> ObjectLocation {
+        ObjectLocation::Query {
+            name: name.into(),
+            occurrence: 0,
+        }
+    }
+
+    fn attack<'a>(
+        d: &'a hexora_repeater::Draft,
+        mode: AttackMode,
+        positions: Vec<ObjectLocation>,
+        lists: Vec<&'a [String]>,
+    ) -> Attack<'a> {
+        Attack {
+            draft: d,
+            positions,
+            payload_lists: lists,
+            mode,
+            budget: Budget {
+                max_requests: 100_000,
+                ..Budget::default()
+            },
+        }
+    }
+
+    #[test]
+    fn each_mode_counts_its_placements() {
+        let d = draft();
+        let one: Vec<String> = vec!["a".into(), "b".into(), "c".into()]; // 3
+        let two: Vec<String> = vec!["1".into(), "2".into()]; // 2
+
+        // Sniper: positions × payloads.
+        let sniper = attack(
+            &d,
+            AttackMode::Sniper,
+            vec![query("user"), query("pass")],
+            vec![&one],
+        );
+        assert_eq!(sniper.placements(), 6);
+
+        // Battering ram: one request per payload, all positions at once.
+        let ram = attack(
+            &d,
+            AttackMode::BatteringRam,
+            vec![query("user"), query("pass")],
+            vec![&one],
+        );
+        assert_eq!(ram.placements(), 3);
+
+        // Pitchfork: lockstep, stops at the shortest list.
+        let pitchfork = attack(
+            &d,
+            AttackMode::Pitchfork,
+            vec![query("user"), query("pass")],
+            vec![&one, &two],
+        );
+        assert_eq!(pitchfork.placements(), 2);
+
+        // Cluster bomb: the Cartesian product.
+        let cluster = attack(
+            &d,
+            AttackMode::ClusterBomb,
+            vec![query("user"), query("pass")],
+            vec![&one, &two],
+        );
+        assert_eq!(cluster.placements(), 6);
+        assert_eq!(cluster.requests(), 7, "the baseline counts");
+    }
+
+    #[test]
+    fn validate_rejects_a_list_count_that_does_not_fit_the_mode() {
+        let d = draft();
+        let one: Vec<String> = vec!["a".into()];
+        let two: Vec<String> = vec!["a".into()];
+
+        // Pitchfork needs one list per position.
+        let bad = attack(
+            &d,
+            AttackMode::Pitchfork,
+            vec![query("user")],
+            vec![&one, &two],
+        );
+        assert!(bad.validate().is_err());
+
+        // Sniper takes exactly one list however many positions there are.
+        let bad_sniper = attack(
+            &d,
+            AttackMode::Sniper,
+            vec![query("user"), query("pass")],
+            vec![&one, &two],
+        );
+        assert!(bad_sniper.validate().is_err());
+
+        // A well-formed sniper is accepted.
+        let good = attack(&d, AttackMode::Sniper, vec![query("user")], vec![&one]);
+        assert!(good.validate().is_ok());
+    }
+
+    #[test]
+    fn sniper_labels_name_the_position_when_there_is_more_than_one() {
+        let d = draft();
+        let list: Vec<String> = vec!["x".into()];
+        let a = attack(
+            &d,
+            AttackMode::Sniper,
+            vec![query("user"), query("pass")],
+            vec![&list],
+        );
+        let placements = a.expand(100);
+        assert_eq!(placements.len(), 2);
+        assert_eq!(placements[0].label, "user=x");
+        assert_eq!(placements[1].label, "pass=x");
+        // Each sniper placement touches exactly one position.
+        assert!(placements.iter().all(|p| p.subs.len() == 1));
+    }
+
+    #[test]
+    fn cluster_bomb_varies_the_last_list_fastest_and_pairs_every_value() {
+        let d = draft();
+        let users: Vec<String> = vec!["u1".into(), "u2".into()];
+        let pins: Vec<String> = vec!["p1".into(), "p2".into()];
+        let a = attack(
+            &d,
+            AttackMode::ClusterBomb,
+            vec![query("user"), query("pass")],
+            vec![&users, &pins],
+        );
+        let labels: Vec<String> = a.expand(100).into_iter().map(|p| p.label).collect();
+        assert_eq!(labels, vec!["u1 / p1", "u1 / p2", "u2 / p1", "u2 / p2"]);
+    }
+
+    #[test]
+    fn expand_stops_at_the_cap_so_a_huge_cluster_bomb_cannot_run_away() {
+        let d = draft();
+        let big: Vec<String> = (0..1000).map(|i| i.to_string()).collect();
+        let a = attack(
+            &d,
+            AttackMode::ClusterBomb,
+            vec![query("user"), query("pass")],
+            vec![&big, &big],
+        );
+        assert_eq!(a.placements(), 1_000_000, "the full product");
+        assert_eq!(
+            a.expand(50).len(),
+            50,
+            "but only a ceiling's worth is built"
+        );
+    }
+
+    #[test]
+    fn a_cluster_bomb_product_that_overflows_usize_saturates_rather_than_panicking() {
+        let d = draft();
+        let big: Vec<String> = (0..100).map(|i| i.to_string()).collect();
+        // Ten lists of a hundred is 100^10, far past usize.
+        let lists: Vec<&[String]> = (0..10).map(|_| big.as_slice()).collect();
+        let positions: Vec<ObjectLocation> = (0..10).map(|i| query(&format!("p{i}"))).collect();
+        let a = attack(&d, AttackMode::ClusterBomb, positions, lists);
+        assert_eq!(a.placements(), usize::MAX, "saturating, not wrapping");
     }
 }

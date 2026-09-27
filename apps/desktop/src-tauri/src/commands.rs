@@ -3404,9 +3404,10 @@ pub struct FuzzRunView {
 pub async fn fuzz_run(
     state: State<'_, AppState>,
     id: String,
-    at: Option<String>,
+    mode: Option<String>,
+    positions: Vec<String>,
     replacing: Option<String>,
-    payloads: Vec<String>,
+    payload_lists: Vec<Vec<String>>,
     delay_ms: Option<u64>,
     max_requests: Option<usize>,
     insecure: bool,
@@ -3420,9 +3421,10 @@ pub async fn fuzz_run(
         fuzz_run_blocking(
             path,
             id,
-            at,
+            mode,
+            positions,
             replacing,
-            payloads,
+            payload_lists,
             delay_ms,
             max_requests,
             insecure,
@@ -3437,28 +3439,43 @@ pub async fn fuzz_run(
 fn fuzz_run_blocking(
     path: PathBuf,
     id: String,
-    at: Option<String>,
+    mode: Option<String>,
+    positions_in: Vec<String>,
     replacing: Option<String>,
-    payloads: Vec<String>,
+    payload_lists_in: Vec<Vec<String>>,
     delay_ms: Option<u64>,
     max_requests: Option<usize>,
     insecure: bool,
 ) -> CommandResult<FuzzRunView> {
     use hexora_active::{Budget, Cancel};
+    use hexora_fuzz::{Attack, AttackMode};
     use hexora_verify::RepeaterLab;
+
+    let mode = match mode.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => AttackMode::parse(m).ok_or_else(|| {
+            format!("{m:?} is not an attack mode (sniper, battering-ram, pitchfork, cluster-bomb)")
+        })?,
+        None => AttackMode::Sniper,
+    };
 
     let project = Project::open(&path).map_err(fail)?;
     let request_id: RequestId = id
         .parse()
         .map_err(|e| format!("{id} is not a request id: {e}"))?;
 
-    let payloads: Vec<String> = payloads
+    // Clean each list: drop trailing carriage returns and blank lines.
+    let lists: Vec<Vec<String>> = payload_lists_in
         .into_iter()
-        .map(|p| p.trim_end_matches('\r').to_string())
-        .filter(|p| !p.is_empty())
+        .map(|list| {
+            list.into_iter()
+                .map(|p| p.trim_end_matches('\r').to_string())
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<String>>()
+        })
+        .filter(|list| !list.is_empty())
         .collect();
-    if payloads.is_empty() {
-        return Err("the payload list is empty, so there is nothing to send".to_string());
+    if lists.is_empty() {
+        return Err("give at least one payload list with a value in it".to_string());
     }
 
     let transport = if insecure {
@@ -3472,24 +3489,35 @@ fn fuzz_run_blocking(
         .attaching(project.settings().attached_headers().map_err(fail)?);
     let draft = repeater.draft_from(request_id).map_err(fail)?;
 
-    let slot = fuzz_slot(&draft.request, at.as_deref(), replacing.as_deref())?;
+    let positions = fuzz_positions(&draft.request, &positions_in, replacing.as_deref())?;
+    let list_refs: Vec<&[String]> = lists.iter().map(Vec::as_slice).collect();
 
     let mut budget = Budget {
-        max_requests: max_requests.unwrap_or(payloads.len() + 1),
+        max_requests: max_requests.unwrap_or(usize::MAX),
         hosts_at_once: 1,
         ..Budget::default()
     };
     if let Some(delay) = delay_ms {
         budget.pause = std::time::Duration::from_millis(delay);
     }
+
+    let attack = Attack {
+        draft: &draft,
+        positions,
+        payload_lists: list_refs,
+        mode,
+        budget: budget.clone(),
+    };
+    attack.validate().map_err(fail)?;
+    if max_requests.is_none() {
+        budget.max_requests = attack.requests();
+    }
+    let attack = Attack {
+        budget: budget.clone(),
+        ..attack
+    };
     budget.check().map_err(fail)?;
 
-    let plan = hexora_fuzz::Plan {
-        draft: &draft,
-        at: slot,
-        payloads: &payloads,
-        budget,
-    };
     let method = draft.request.method.clone();
     let state_changing = hexora_active::is_state_changing(&method);
 
@@ -3500,7 +3528,7 @@ fn fuzz_run_blocking(
     let lab = RepeaterLab::scanner(&repeater);
     let cancel = Cancel::new();
     let run = runtime
-        .block_on(hexora_fuzz::run(&plan, &lab, &cancel))
+        .block_on(hexora_fuzz::run_attack(&attack, &lab, &cancel))
         .map_err(fail)?;
 
     Ok(FuzzRunView {
@@ -3541,39 +3569,52 @@ fn fuzz_run_blocking(
     })
 }
 
-/// Resolves where the payload goes: a `--replacing` value, or an `--at` slot name.
-fn fuzz_slot(
+/// Resolves where the payloads go: a value to replace (a single position), or one or more
+/// slot names.
+fn fuzz_positions(
     request: &hexora_types::http::HttpRequest,
-    at: Option<&str>,
+    names: &[String],
     replacing: Option<&str>,
-) -> CommandResult<ObjectLocation> {
+) -> CommandResult<Vec<ObjectLocation>> {
     if let Some(value) = replacing.map(str::trim).filter(|v| !v.is_empty()) {
-        return hexora_types::inject::locate(request, value)
+        let at = hexora_types::inject::locate(request, value)
             .into_iter()
             .next()
-            .ok_or_else(|| format!("`{value}` does not appear in this request"));
+            .ok_or_else(|| format!("`{value}` does not appear in this request"))?;
+        return Ok(vec![at]);
     }
     let available = hexora_types::inject::inputs(request);
-    let Some(name) = at.map(str::trim).filter(|n| !n.is_empty()) else {
+    let wanted: Vec<&str> = names
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .collect();
+    if wanted.is_empty() {
         return Err(format!(
-            "say where the payload goes: a slot name or a value to replace. This request offers {}",
+            "say where the payloads go: a slot name (or several) or a value to replace. This request offers {}",
             fuzz_slot_list(&available)
         ));
-    };
-    available
-        .into_iter()
-        .find(|slot| match slot {
-            ObjectLocation::Query { name: n, .. } | ObjectLocation::Header { name: n, .. } => {
-                n.eq_ignore_ascii_case(name)
-            }
-            _ => false,
-        })
-        .ok_or_else(|| {
-            format!(
-                "this request has no `{name}` to vary. It offers {}",
-                fuzz_slot_list(&hexora_types::inject::inputs(request))
-            )
-        })
+    }
+    let mut out = Vec::with_capacity(wanted.len());
+    for name in wanted {
+        let found = available
+            .iter()
+            .find(|slot| match slot {
+                ObjectLocation::Query { name: n, .. } | ObjectLocation::Header { name: n, .. } => {
+                    n.eq_ignore_ascii_case(name)
+                }
+                _ => false,
+            })
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "this request has no `{name}` to vary. It offers {}",
+                    fuzz_slot_list(&available)
+                )
+            })?;
+        out.push(found);
+    }
+    Ok(out)
 }
 
 /// A human list of the slots a request offers.

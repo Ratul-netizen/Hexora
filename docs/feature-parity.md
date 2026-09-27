@@ -70,10 +70,10 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Intruder: Sniper | ✅ | ✅ | PLANNED M6 | |
-| Intruder: Battering Ram | ✅ | ✅ | PLANNED M6 | |
-| Intruder: Pitchfork | ✅ | ✅ | PLANNED M6 | |
-| Intruder: Cluster Bomb | ✅ | ✅ | PLANNED M6 | |
+| Intruder: Sniper | ✅ | ✅ | **DONE M6** | `hexora fuzz --mode sniper` (the default); one list walked through each marked position in turn |
+| Intruder: Battering Ram | ✅ | ✅ | **DONE M6** | `--mode battering-ram`; one list, the same value in every position at once |
+| Intruder: Pitchfork | ✅ | ✅ | **DONE M6** | `--mode pitchfork`; one list per position, advanced in lockstep |
+| Intruder: Cluster Bomb | ✅ | ✅ | **DONE M6** | `--mode cluster-bomb`; one list per position, the Cartesian product (memory-bounded to the ceiling) |
 | No throttling on Pro | ✅ | ✅ | PLANNED M6 | Community Burp throttles; this is a real adoption driver |
 | Payload processing pipeline | ✅ | ✅ | PLANNED M6 | |
 | Match/filter on results | ✅ | ✅ | PLANNED M6 | Status, length, regex, JSONPath, similarity, timing |

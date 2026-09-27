@@ -1,23 +1,34 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   describeError,
   fuzzSlots,
+  modeSharesOneList,
   runFuzz,
+  type AttackMode,
   type FuzzRun,
   type FuzzSlot,
   type LicenseStatus,
 } from "../ipc";
 
 /**
- * Intruder / fuzzer: take a request that already works, vary one thing in it, and read the
- * column that does not match.
+ * Intruder / fuzzer with the four Burp attack shapes.
+ *
+ * - **Sniper** — one payload list, walked through each marked position in turn.
+ * - **Battering ram** — one list, the same value in every position at once.
+ * - **Pitchfork** — one list per position, advanced in lockstep.
+ * - **Cluster bomb** — one list per position, every combination.
  *
  * It concludes nothing — a response that differs is a response that differs; whether it
- * matters is the tester's judgement. It will replay a state-changing method, and it says so
- * first. Pick a captured request by its id (copy it from History), choose where the payload
- * goes, and paste a list.
+ * matters is the tester's judgement. It will replay a state-changing method and says so first.
  */
+const MODES: { id: AttackMode; label: string; blurb: string }[] = [
+  { id: "sniper", label: "Sniper", blurb: "one list, each position in turn" },
+  { id: "battering-ram", label: "Battering ram", blurb: "one list, all positions at once" },
+  { id: "pitchfork", label: "Pitchfork", blurb: "one list per position, in lockstep" },
+  { id: "cluster-bomb", label: "Cluster bomb", blurb: "one list per position, every combination" },
+];
+
 export function FuzzerView({
   hasProject,
   requestId,
@@ -29,9 +40,10 @@ export function FuzzerView({
 }) {
   const [id, setId] = useState(requestId ?? "");
   const [slots, setSlots] = useState<FuzzSlot[] | null>(null);
-  const [at, setAt] = useState("");
+  const [mode, setMode] = useState<AttackMode>("sniper");
+  const [positions, setPositions] = useState<string[]>([""]);
   const [replacing, setReplacing] = useState("");
-  const [payloads, setPayloads] = useState("");
+  const [lists, setLists] = useState<string[]>([""]);
   const [delayMs, setDelayMs] = useState("");
   const [maxRequests, setMaxRequests] = useState("");
   const [insecure, setInsecure] = useState(false);
@@ -41,6 +53,19 @@ export function FuzzerView({
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   const free = (license?.tier ?? "Free") === "Free";
+  const oneList = modeSharesOneList(mode);
+
+  // Keep the number of payload boxes in step with the mode and the positions: one shared box
+  // for sniper/battering-ram, one per position for pitchfork/cluster-bomb.
+  useEffect(() => {
+    setLists((prev) => {
+      const want = oneList ? 1 : Math.max(1, positions.length);
+      if (prev.length === want) return prev;
+      const next = prev.slice(0, want);
+      while (next.length < want) next.push("");
+      return next;
+    });
+  }, [oneList, positions.length]);
 
   if (!hasProject) {
     return <p className="placeholder">Open a project, then fuzz one of its captured requests.</p>;
@@ -54,7 +79,9 @@ export function FuzzerView({
       const found = await fuzzSlots(id.trim());
       setSlots(found);
       const first = found[0];
-      if (first && at === "") setAt(first.name);
+      if (first && positions.every((p) => p.trim() === "")) {
+        setPositions([first.name]);
+      }
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -62,19 +89,38 @@ export function FuzzerView({
     }
   }
 
+  function setPositionAt(index: number, value: string) {
+    setPositions((prev) => prev.map((p, i) => (i === index ? value : p)));
+  }
+  function addPosition() {
+    setPositions((prev) => [...prev, ""]);
+  }
+  function removePosition(index: number) {
+    setPositions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  }
+  function setListAt(index: number, value: string) {
+    setLists((prev) => prev.map((l, i) => (i === index ? value : l)));
+  }
+
   async function fuzz() {
     setBusy(true);
     setError(null);
     setRun(null);
     try {
+      const usingReplacing = replacing.trim() !== "";
       const result = await runFuzz({
         id: id.trim(),
-        at: replacing.trim() !== "" ? null : at.trim() === "" ? null : at.trim(),
-        replacing: replacing.trim() === "" ? null : replacing.trim(),
-        payloads: payloads
-          .split("\n")
-          .map((p) => p.replace(/\r$/, ""))
-          .filter((p) => p !== ""),
+        mode,
+        positions: usingReplacing
+          ? []
+          : positions.map((p) => p.trim()).filter((p) => p !== ""),
+        replacing: usingReplacing ? replacing.trim() : null,
+        payloadLists: lists.map((text) =>
+          text
+            .split("\n")
+            .map((p) => p.replace(/\r$/, ""))
+            .filter((p) => p !== ""),
+        ),
         delayMs: delayMs.trim() === "" ? null : Number(delayMs),
         maxRequests: maxRequests.trim() === "" ? null : Number(maxRequests),
         insecure,
@@ -87,13 +133,20 @@ export function FuzzerView({
     }
   }
 
+  const canRun =
+    !busy &&
+    !free &&
+    id.trim() !== "" &&
+    lists.some((l) => l.trim() !== "") &&
+    (replacing.trim() !== "" || positions.some((p) => p.trim() !== ""));
+
   return (
     <div className="fuzzer">
       <section className="card">
         <h2>Fuzz a request</h2>
         <p className="muted">
-          Sends one captured request once per payload, varying a single slot. It concludes
-          nothing — a difference is a difference; what it means is your call.
+          Sends one captured request once per payload placement, in one of the four Intruder
+          shapes. It concludes nothing — a difference is a difference; what it means is your call.
         </p>
 
         <div className="row">
@@ -106,36 +159,90 @@ export function FuzzerView({
               onChange={(e) => setId(e.target.value)}
             />
           </label>
-          <button
-            className="secondary"
-            disabled={loadingSlots || id.trim() === ""}
-            onClick={loadSlots}
-          >
+          <button className="secondary" disabled={loadingSlots || id.trim() === ""} onClick={loadSlots}>
             {loadingSlots ? "Loading…" : "List slots"}
           </button>
         </div>
 
-        {slots && slots.length > 0 && (
-          <label className="field">
-            <span>Vary this slot</span>
-            <select value={at} onChange={(e) => setAt(e.target.value)}>
-              {slots.map((s) => (
-                <option key={`${s.kind}:${s.name}`} value={s.name}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        <label className="field">
+          <span>Attack mode</span>
+          <select value={mode} onChange={(e) => setMode(e.target.value as AttackMode)}>
+            {MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {m.blurb}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* Slot autocomplete from the loaded request. */}
+        {slots && (
+          <datalist id="fuzz-slots">
+            {slots.map((s) => (
+              <option key={`${s.kind}:${s.name}`} value={s.name}>
+                {s.label}
+              </option>
+            ))}
+          </datalist>
         )}
-        {slots && slots.length === 0 && (
-          <p className="muted small">
-            This request has no query parameter or header to address — use “replace a value”
-            below instead.
-          </p>
+
+        {replacing.trim() === "" && (
+          <div className="field">
+            <span>
+              Positions{" "}
+              <span className="muted small">
+                {oneList
+                  ? "— one payload list is shared across all of them"
+                  : "— each has its own payload list below"}
+              </span>
+            </span>
+            {positions.map((name, i) => (
+              <div key={i} className="position-row">
+                <input
+                  type="text"
+                  list="fuzz-slots"
+                  placeholder="query parameter or header name"
+                  value={name}
+                  onChange={(e) => setPositionAt(i, e.target.value)}
+                />
+                {positions.length > 1 && (
+                  <button className="secondary" onClick={() => removePosition(i)} title="remove">
+                    ✕
+                  </button>
+                )}
+                {!oneList && (
+                  <textarea
+                    rows={4}
+                    placeholder={`payloads for ${name.trim() || `position ${i + 1}`} — one per line`}
+                    value={lists[i] ?? ""}
+                    onChange={(e) => setListAt(i, e.target.value)}
+                  />
+                )}
+              </div>
+            ))}
+            <button className="secondary" onClick={addPosition}>
+              + Add position
+            </button>
+          </div>
+        )}
+
+        {replacing.trim() === "" && oneList && (
+          <label className="field">
+            <span>Payloads — one per line, used in every position</span>
+            <textarea
+              rows={5}
+              placeholder={"admin\nadministrator\nroot\noperator"}
+              value={lists[0] ?? ""}
+              onChange={(e) => setListAt(0, e.target.value)}
+            />
+          </label>
         )}
 
         <label className="field">
-          <span>…or replace a value wherever it appears in the request (overrides the slot)</span>
+          <span>
+            …or, for a single position, replace a value wherever it appears (overrides positions;
+            uses the first payload list)
+          </span>
           <input
             type="text"
             placeholder="e.g. the current value of the field"
@@ -143,32 +250,28 @@ export function FuzzerView({
             onChange={(e) => setReplacing(e.target.value)}
           />
         </label>
-
-        <label className="field">
-          <span>Payloads — one per line</span>
-          <textarea
-            rows={5}
-            placeholder={"admin\nadministrator\nroot\noperator"}
-            value={payloads}
-            onChange={(e) => setPayloads(e.target.value)}
-          />
-        </label>
+        {replacing.trim() !== "" && (
+          <label className="field">
+            <span>Payloads — one per line</span>
+            <textarea
+              rows={5}
+              placeholder={"admin\nadministrator\nroot"}
+              value={lists[0] ?? ""}
+              onChange={(e) => setListAt(0, e.target.value)}
+            />
+          </label>
+        )}
 
         <div className="row">
           <label className="field">
             <span>Delay between requests (ms)</span>
-            <input
-              type="text"
-              placeholder="0"
-              value={delayMs}
-              onChange={(e) => setDelayMs(e.target.value)}
-            />
+            <input type="text" placeholder="0" value={delayMs} onChange={(e) => setDelayMs(e.target.value)} />
           </label>
           <label className="field">
             <span>Max requests</span>
             <input
               type="text"
-              placeholder="payloads + 1"
+              placeholder="whole attack"
               value={maxRequests}
               onChange={(e) => setMaxRequests(e.target.value)}
             />
@@ -177,33 +280,24 @@ export function FuzzerView({
 
         <div className="toggles">
           <label className="check">
-            <input
-              type="checkbox"
-              checked={insecure}
-              onChange={(e) => setInsecure(e.target.checked)}
-            />
+            <input type="checkbox" checked={insecure} onChange={(e) => setInsecure(e.target.checked)} />
             Do not verify TLS
           </label>
         </div>
 
         {free && (
           <p className="callout warn">
-            The fuzzer needs the Pro tier. Start a trial or activate a licence on the Licence
-            tab.
+            The fuzzer needs the Pro tier. Start a trial or activate a licence on the Licence tab.
           </p>
         )}
 
         <p className="callout warn">
-          This sends one request per payload to the captured request's host. A state-changing
-          method (POST/PUT/DELETE) will be replayed — the result says so. Only fuzz systems you
-          are authorized to test.
+          This sends one request per placement to the captured request's host. A state-changing
+          method (POST/PUT/DELETE) will be replayed — the result says so. Only fuzz systems you are
+          authorized to test.
         </p>
 
-        <button
-          className="primary"
-          disabled={busy || free || id.trim() === "" || payloads.trim() === ""}
-          onClick={fuzz}
-        >
+        <button className="primary" disabled={!canRun} onClick={fuzz}>
           {busy ? "Sending…" : "Fuzz (sends traffic)"}
         </button>
       </section>
@@ -223,8 +317,7 @@ function FuzzResult({ run }: { run: FuzzRun }) {
 
       {run.state_changing && (
         <p className="callout warn">
-          {run.method} may change data on the target — this run replayed it {run.requests_sent}{" "}
-          time(s).
+          {run.method} may change data on the target — this run replayed it {run.requests_sent} time(s).
         </p>
       )}
       {!run.complete && run.stopped_because && (
@@ -267,7 +360,7 @@ function FuzzResult({ run }: { run: FuzzRun }) {
 
       {run.outliers.length > 0 ? (
         <>
-          <h3>{run.outliers.length} payload(s) did not behave like the rest</h3>
+          <h3>{run.outliers.length} placement(s) did not behave like the rest</h3>
           <table className="grid">
             <thead>
               <tr>
@@ -289,13 +382,12 @@ function FuzzResult({ run }: { run: FuzzRun }) {
             </tbody>
           </table>
           <p className="muted small">
-            Nothing here is a finding: what a difference means is a judgement about this
-            application.
+            Nothing here is a finding: what a difference means is a judgement about this application.
           </p>
         </>
       ) : (
         <p className="muted small">
-          Nothing stood out. Every payload that answered behaved like the others.
+          Nothing stood out. Every placement that answered behaved like the others.
         </p>
       )}
     </section>

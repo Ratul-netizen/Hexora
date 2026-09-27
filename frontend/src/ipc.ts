@@ -156,7 +156,7 @@ export interface TrafficEvent {
  * than misinterpreting its messages. A security tool that quietly shows the wrong
  * request would be worse than one that refuses to start.
  */
-export const EXPECTED_RPC_CONTRACT_VERSION = 14;
+export const EXPECTED_RPC_CONTRACT_VERSION = 15;
 
 export function isContractCompatible(info: EngineInfo): boolean {
   return info.rpc_contract_version === EXPECTED_RPC_CONTRACT_VERSION;
@@ -404,12 +404,30 @@ export interface FuzzRun {
   outliers: FuzzOutlier[];
 }
 
-/** Sends one captured request once per payload, varying one slot. Sends traffic. */
+/** The four Burp Intruder attack shapes. */
+export type AttackMode =
+  | "sniper"
+  | "battering-ram"
+  | "pitchfork"
+  | "cluster-bomb";
+
+/** Whether a mode shares one payload list across all positions (vs one list per position). */
+export const modeSharesOneList = (mode: AttackMode): boolean =>
+  mode === "sniper" || mode === "battering-ram";
+
+/**
+ * Runs one of the four Intruder attack shapes over a captured request. Sends traffic.
+ *
+ * `positions` are query/header names; `replacing` names a single position by value instead.
+ * `payloadLists` holds one list for sniper/battering-ram, or one per position for
+ * pitchfork/cluster-bomb (same order as `positions`).
+ */
 export const runFuzz = (args: {
   id: string;
-  at: string | null;
+  mode: AttackMode;
+  positions: string[];
   replacing: string | null;
-  payloads: string[];
+  payloadLists: string[][];
   delayMs: number | null;
   maxRequests: number | null;
   insecure: boolean;

@@ -23,12 +23,12 @@
 //! has decided. So the method and the request count are printed and confirmed before
 //! anything goes out, which is the same bargain `hexora authz` makes.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hexora_active::{Budget, Cancel};
 use hexora_engine::guard::ScopeGuard;
-use hexora_fuzz::{describe, Plan, Run};
+use hexora_fuzz::{describe, Attack, AttackMode, Run};
 use hexora_http::{TcpTransport, TlsConfig};
 use hexora_repeater::Repeater;
 use hexora_types::ids::RequestId;
@@ -42,12 +42,16 @@ pub struct Args<'a> {
     pub project: &'a Path,
     /// The request to vary.
     pub id: &'a str,
-    /// Where the payload goes: a query parameter or header name.
-    pub at: Option<&'a str>,
-    /// Or: the value in the request to replace, wherever it appears.
+    /// Where each payload goes: query parameter or header names. Repeatable for the
+    /// multi-position modes.
+    pub at: &'a [String],
+    /// Or, for a single position: the value in the request to replace, wherever it appears.
     pub replacing: Option<&'a str>,
-    /// A file of payloads, one per line.
-    pub payloads: Option<&'a Path>,
+    /// Payload files, one per line. One for Sniper/Battering ram; one per position for
+    /// Pitchfork/Cluster bomb.
+    pub payloads: &'a [PathBuf],
+    /// The attack shape: `sniper`, `battering-ram`, `pitchfork` or `cluster-bomb`.
+    pub mode: &'a str,
     /// Milliseconds between requests.
     pub delay_ms: Option<u64>,
     /// The run's request ceiling.
@@ -61,12 +65,22 @@ pub struct Args<'a> {
     pub json: bool,
 }
 
-/// Sends one request once per payload.
+/// Sends one request once per payload placement, in the chosen attack shape.
 pub fn fuzz(args: Args<'_>) -> Result<()> {
     let project = crate::open_project(args.project)?;
     let store = Arc::new(project.traffic());
     let id: RequestId = args.id.parse().map_err(|e| {
         HexoraError::invalid_input("id", format!("{} is not a request id: {e}", args.id))
+    })?;
+
+    let mode = AttackMode::parse(args.mode).ok_or_else(|| {
+        HexoraError::invalid_input(
+            "--mode",
+            format!(
+                "{:?} is not an attack mode. Use sniper, battering-ram, pitchfork or cluster-bomb",
+                args.mode
+            ),
+        )
     })?;
 
     let transport = if args.insecure {
@@ -84,17 +98,13 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
         .attaching(project.settings().attached_headers()?);
     let draft = repeater.draft_from(id)?;
 
-    let at = slot(&draft.request, &args)?;
-    let payloads = payloads(&args)?;
-    if payloads.is_empty() {
-        return Err(HexoraError::invalid_input(
-            "--payloads",
-            "the payload list is empty, so there is nothing to send",
-        ));
-    }
+    let positions = positions(&draft.request, &args)?;
+    let lists = payload_lists(&args)?;
+    let list_refs: Vec<&[String]> = lists.iter().map(Vec::as_slice).collect();
 
+    // The ceiling defaults to the whole attack plus the baseline.
     let mut budget = Budget {
-        max_requests: args.max_requests.unwrap_or(payloads.len() + 1),
+        max_requests: args.max_requests.unwrap_or(usize::MAX),
         // One host, always: every request in a fuzz run goes to the same place, so the
         // concurrency knob would only be a way to hit it harder.
         hosts_at_once: 1,
@@ -103,21 +113,31 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     if let Some(delay) = args.delay_ms {
         budget.pause = std::time::Duration::from_millis(delay);
     }
+
+    let attack = Attack {
+        draft: &draft,
+        positions,
+        payload_lists: list_refs,
+        mode,
+        budget: budget.clone(),
+    };
+    // Say what is wrong with the shape before defaulting the ceiling to its size.
+    attack.validate()?;
+    if args.max_requests.is_none() {
+        budget.max_requests = attack.requests();
+    }
+    let attack = Attack {
+        budget: budget.clone(),
+        ..attack
+    };
     budget
         .check()
         .map_err(|why| HexoraError::invalid_input("budget", why))?;
 
-    let plan = Plan {
-        draft: &draft,
-        at,
-        payloads: &payloads,
-        budget,
-    };
-
     let method = draft.request.method.clone();
     let url = draft.request.url();
     if !args.json {
-        println!("{}", plan.describe(&method, &url));
+        println!("{}", attack.describe(&method, &url));
     }
     if args.dry_run {
         if !args.json {
@@ -139,8 +159,8 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
         if hexora_active::is_state_changing(&method) {
             println!();
             println!(
-                "{method} may change data on the target, and this will send it {} times.",
-                plan.requests()
+                "{method} may change data on the target, and this will send it up to {} times.",
+                attack.requests()
             );
         }
         println!();
@@ -157,7 +177,7 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
 
     let lab = RepeaterLab::scanner(&repeater);
     let cancel = Cancel::new();
-    let run = runtime.block_on(stoppable(&plan, &lab, &cancel))?;
+    let run = runtime.block_on(stoppable(&attack, &lab, &cancel))?;
 
     if args.json {
         print_json(&run);
@@ -167,9 +187,13 @@ pub fn fuzz(args: Args<'_>) -> Result<()> {
     Ok(())
 }
 
-/// Runs the list, with Ctrl-C wired to the run's own stop signal.
-async fn stoppable(plan: &Plan<'_>, lab: &dyn hexora_verify::Lab, cancel: &Cancel) -> Result<Run> {
-    let run = hexora_fuzz::run(plan, lab, cancel);
+/// Runs the attack, with Ctrl-C wired to the run's own stop signal.
+async fn stoppable(
+    attack: &Attack<'_>,
+    lab: &dyn hexora_verify::Lab,
+    cancel: &Cancel,
+) -> Result<Run> {
+    let run = hexora_fuzz::run_attack(attack, lab, cancel);
     tokio::pin!(run);
 
     tokio::select! {
@@ -186,50 +210,60 @@ async fn stoppable(plan: &Plan<'_>, lab: &dyn hexora_verify::Lab, cancel: &Cance
     }
 }
 
-/// Where the payload goes.
+/// Where the payloads go — one or several positions.
 ///
-/// Two ways to say it, and a list of what is available when neither works: a tester who
-/// mistypes a parameter name should be told what the request actually has rather than
-/// left to guess.
-fn slot(request: &hexora_types::http::HttpRequest, args: &Args<'_>) -> Result<ObjectLocation> {
+/// `--replacing` names a single position by value; `--at` names positions by parameter or
+/// header name and may be repeated. A tester who mistypes a name is told what the request
+/// actually has rather than left to guess.
+fn positions(
+    request: &hexora_types::http::HttpRequest,
+    args: &Args<'_>,
+) -> Result<Vec<ObjectLocation>> {
     if let Some(value) = args.replacing {
-        return locate(request, value).into_iter().next().ok_or_else(|| {
+        let at = locate(request, value).into_iter().next().ok_or_else(|| {
             HexoraError::invalid_input(
                 "--replacing",
                 format!("`{value}` does not appear in this request"),
             )
-        });
+        })?;
+        return Ok(vec![at]);
     }
 
-    let available = inputs(request);
-    let Some(name) = args.at else {
+    if args.at.is_empty() {
         return Err(HexoraError::invalid_input(
             "--at",
             format!(
-                "say where the payload goes: --at <name> or --replacing <value>. This \
-                 request offers {}",
-                list(&available)
+                "say where the payloads go: --at <name> (repeatable) or --replacing <value>. \
+                 This request offers {}",
+                list(&inputs(request))
             ),
         ));
-    };
+    }
 
-    available
-        .into_iter()
-        .find(|slot| match slot {
-            ObjectLocation::Query { name: n, .. } | ObjectLocation::Header { name: n, .. } => {
-                n.eq_ignore_ascii_case(name)
-            }
-            _ => false,
-        })
-        .ok_or_else(|| {
-            HexoraError::invalid_input(
-                "--at",
-                format!(
-                    "this request has no `{name}` to vary. It offers {}",
-                    list(&inputs(request))
-                ),
-            )
-        })
+    let available = inputs(request);
+    let mut out = Vec::with_capacity(args.at.len());
+    for name in args.at {
+        let found = available
+            .iter()
+            .find(|slot| match slot {
+                ObjectLocation::Query { name: n, .. } | ObjectLocation::Header { name: n, .. } => {
+                    n.eq_ignore_ascii_case(name)
+                }
+                _ => false,
+            })
+            .cloned()
+            .ok_or_else(|| {
+                HexoraError::invalid_input(
+                    "--at",
+                    format!(
+                        "this request has no `{name}` to vary. It offers {}",
+                        list(&available)
+                    ),
+                )
+            })?;
+        out.push(found);
+    }
+    Ok(out)
 }
 
 fn list(available: &[ObjectLocation]) -> String {
@@ -243,26 +277,39 @@ fn list(available: &[ObjectLocation]) -> String {
         .join(", ")
 }
 
-/// The payload list.
-fn payloads(args: &Args<'_>) -> Result<Vec<String>> {
-    let Some(path) = args.payloads else {
+/// The payload lists, one per `--payloads` file.
+fn payload_lists(args: &Args<'_>) -> Result<Vec<Vec<String>>> {
+    if args.payloads.is_empty() {
         return Err(HexoraError::invalid_input(
             "--payloads",
-            "give a file of payloads, one per line",
+            "give a file of payloads, one per line (one file per position for pitchfork and \
+             cluster-bomb)",
         ));
-    };
+    }
+    args.payloads.iter().map(|path| read_list(path)).collect()
+}
+
+/// Reads one payload file into a list, dropping blank lines and Windows carriage returns.
+fn read_list(path: &Path) -> Result<Vec<String>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         HexoraError::invalid_input(
             "--payloads",
             format!("{} could not be read: {e}", path.display()),
         )
     })?;
-    Ok(text
+    let list: Vec<String> = text
         .lines()
         .map(str::trim_end_matches_carriage)
         .filter(|line| !line.is_empty())
         .map(str::to_string)
-        .collect())
+        .collect();
+    if list.is_empty() {
+        return Err(HexoraError::invalid_input(
+            "--payloads",
+            format!("{} has no payloads in it", path.display()),
+        ));
+    }
+    Ok(list)
 }
 
 /// A newline-split line without its carriage return, for a list written on Windows.

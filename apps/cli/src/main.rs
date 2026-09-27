@@ -502,17 +502,24 @@ enum Command {
         /// The request to vary, from `hexora history`.
         id: String,
 
-        /// Where the payload goes: a query parameter or header name.
+        /// Where a payload goes: a query parameter or header name. Repeat for several
+        /// positions (Intruder's Sniper, Pitchfork and Cluster bomb use more than one).
         #[arg(long, value_name = "NAME")]
-        at: Option<String>,
+        at: Vec<String>,
 
-        /// Or: the value in the request to replace, wherever it appears.
+        /// Or, for a single position: the value in the request to replace, wherever it
+        /// appears. Only for a one-position Sniper attack.
         #[arg(long, value_name = "VALUE", conflicts_with = "at")]
         replacing: Option<String>,
 
-        /// A file of payloads, one per line.
+        /// A file of payloads, one per line. Sniper and Battering ram take one file;
+        /// Pitchfork and Cluster bomb take one per position, in the same order as `--at`.
         #[arg(long, value_name = "FILE")]
-        payloads: Option<PathBuf>,
+        payloads: Vec<PathBuf>,
+
+        /// The attack shape: sniper (default), battering-ram, pitchfork or cluster-bomb.
+        #[arg(long, value_name = "MODE", default_value = "sniper")]
+        mode: String,
 
         /// Milliseconds to wait between requests.
         #[arg(long, value_name = "MS")]
@@ -1691,6 +1698,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             at,
             replacing,
             payloads,
+            mode,
             delay,
             max_requests,
             dry_run,
@@ -1701,9 +1709,10 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             fuzz::fuzz(fuzz::Args {
                 project: path,
                 id,
-                at: at.as_deref(),
+                at,
                 replacing: replacing.as_deref(),
-                payloads: payloads.as_deref(),
+                payloads,
+                mode,
                 delay_ms: *delay,
                 max_requests: *max_requests,
                 dry_run: *dry_run,
