@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use hexora_engine::guard::ScopeGuard;
 use hexora_http::{TcpTransport, TlsConfig};
-use hexora_llm::{test, Target, PROMPT_PLACEHOLDER};
+use hexora_llm::{test, test_leakage, Target, PROMPT_PLACEHOLDER};
 use hexora_types::http::{Header, HttpService};
 use hexora_types::scope::{Scope, ScopeRule};
 use hexora_types::{HexoraError, Result};
@@ -72,9 +72,14 @@ pub fn run(args: Args<'_>) -> Result<()> {
     if !args.json {
         println!("Prompt-injection test");
         println!("  endpoint: {} {}", target.method, args.url);
-        println!("  probes:   {}", hexora_llm::probes().len());
+        let total = hexora_llm::probes().len() + hexora_llm::extraction_probes().len() + 1;
+        println!(
+            "  probes:   {} injection, {} extraction (+1 control)",
+            hexora_llm::probes().len(),
+            hexora_llm::extraction_probes().len()
+        );
         println!();
-        println!("This sends {} requests to the endpoint. Only test systems you are authorized to test.", hexora_llm::probes().len());
+        println!("This sends {total} requests to the endpoint. Only test systems you are authorized to test.");
         if !args.yes && !crate::proxy::confirm("Send these probes?")? {
             println!("Nothing was sent.");
             return Ok(());
@@ -102,11 +107,12 @@ pub fn run(args: Args<'_>) -> Result<()> {
         .build()
         .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
     let report = runtime.block_on(test(&guard, &target));
+    let leak = runtime.block_on(test_leakage(&guard, &target));
 
     if args.json {
-        print_json(args.url, &report);
+        print_json(args.url, &report, &leak);
     } else {
-        print_human(&report);
+        print_human(&report, &leak);
     }
     Ok(())
 }
@@ -122,9 +128,9 @@ fn parse_headers(raw: &[String]) -> Result<Vec<Header>> {
     Ok(out)
 }
 
-fn print_human(report: &hexora_llm::Report) {
+fn print_human(report: &hexora_llm::Report, leak: &hexora_llm::LeakReport) {
     println!();
-    println!("{} probe(s) sent.", report.tested);
+    println!("{} injection probe(s) sent.", report.tested);
     if report.vulnerable() {
         println!();
         println!("PROMPT INJECTION CONFIRMED ({}):", report.injections.len());
@@ -147,22 +153,48 @@ fn print_human(report: &hexora_llm::Report) {
         println!("random token; none came back. This is a refutation of these payloads, not");
         println!("a guarantee the endpoint is safe against all injection.");
     }
-    if !report.errors.is_empty() {
+
+    // System-prompt / data leakage — leads, not confirmations.
+    println!();
+    if leak.any() {
+        println!("POSSIBLE SYSTEM-PROMPT DISCLOSURE ({}) — leads to verify:", leak.disclosures.len());
+        for disclosure in &leak.disclosures {
+            println!(
+                "  [{}] the model returned instruction-like content a benign question did not",
+                disclosure.probe_id
+            );
+            println!("    signals: {}", disclosure.signals.join(", "));
+            println!("    excerpt: {}", disclosure.snippet);
+        }
         println!();
-        println!("Not sent ({}):", report.errors.len());
-        for error in &report.errors {
+        println!("These are heuristic: a model can also invent plausible-looking instructions.");
+        println!("Confirm the excerpt is the endpoint's actual hidden prompt before reporting.");
+    } else {
+        println!("No system-prompt disclosure elicited by the extraction probes.");
+    }
+
+    let errors: Vec<&String> = report.errors.iter().chain(leak.errors.iter()).collect();
+    if !errors.is_empty() {
+        println!();
+        println!("Not sent ({}):", errors.len());
+        for error in &errors {
             println!("  {error}");
         }
     }
 }
 
-fn print_json(url: &str, report: &hexora_llm::Report) {
+fn print_json(url: &str, report: &hexora_llm::Report, leak: &hexora_llm::LeakReport) {
     println!(
         "{}",
         serde_json::json!({
             "endpoint": url,
             "tested": report.tested,
             "vulnerable": report.vulnerable(),
+            "disclosures": leak.disclosures.iter().map(|d| serde_json::json!({
+                "probe": d.probe_id,
+                "signals": d.signals,
+                "excerpt": d.snippet,
+            })).collect::<Vec<_>>(),
             "injections": report.injections.iter().map(|i| serde_json::json!({
                 "probe": i.probe_id,
                 "category": i.category.label(),
