@@ -1603,6 +1603,7 @@ dependencies = [
  "hexora-browser",
  "hexora-crawl",
  "hexora-engine",
+ "hexora-ext",
  "hexora-fuzz",
  "hexora-http",
  "hexora-import",
@@ -1689,6 +1690,16 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "hexora-ext"
+version = "0.1.0"
+dependencies = [
+ "hexora-engine",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]
@@ -1851,6 +1862,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "hexora-ext",
  "hexora-query",
  "hexora-types",
  "r2d2",

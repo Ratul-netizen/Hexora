@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 hexora-types.workspace = true
 hexora-query.workspace = true
+hexora-ext.workspace = true
 rusqlite.workspace = true
 r2d2.workspace = true
 r2d2_sqlite.workspace = true

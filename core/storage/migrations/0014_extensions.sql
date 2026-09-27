@@ -1,0 +1,11 @@
+-- M17: installed extensions.
+--
+-- An extension is a manifest plus a WASM module, installed with exactly the capabilities the
+-- user approved. The manifest and the granted capabilities are stored here as JSON, beside the
+-- scope and the custom checks, so a project file records not just what was tested but what
+-- third-party code was permitted to run against it, and with what reach.
+--
+-- Storing the grant set alongside the manifest is the point: the permission model
+-- (core/engine/src/permission.rs) is only as good as the record of what was granted, and that
+-- record travels with the project.
+ALTER TABLE project ADD COLUMN extensions_json TEXT NOT NULL DEFAULT '[]';

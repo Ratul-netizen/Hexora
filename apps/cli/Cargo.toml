@@ -30,6 +30,7 @@ hexora-query.workspace = true
 hexora-import.workspace = true
 hexora-sequencer.workspace = true
 hexora-browser.workspace = true
+hexora-ext.workspace = true
 hexora-report.workspace = true
 tokio.workspace = true
 bytes.workspace = true

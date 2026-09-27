@@ -70,6 +70,7 @@ exceptions = [
     { name = "hexora-query", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-import", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-sequencer", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-ext", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-report", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-cli", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-desktop", allow = ["AGPL-3.0-or-later"] },

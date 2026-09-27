@@ -20,6 +20,7 @@ mod check;
 mod crawl;
 mod detectors;
 mod domxss;
+mod ext;
 mod findings;
 mod fuzz;
 mod header;
@@ -416,6 +417,10 @@ enum Command {
     /// map instead. Dry-run by default; `--send` fetches the safe operations.
     #[command(subcommand)]
     Import(ImportCommand),
+
+    /// Install and manage extensions — an extension receives only the capabilities you approve.
+    #[command(subcommand)]
+    Ext(ExtCommand),
 
     /// Drive a real browser to find DOM-based XSS — Burp's DOM Invader.
     ///
@@ -1594,6 +1599,56 @@ enum CheckCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ExtCommand {
+    /// List the project's installed extensions.
+    List {
+        /// Project directory.
+        path: PathBuf,
+    },
+    /// Install an extension from a manifest file (JSON or YAML).
+    ///
+    /// Grants only the required capabilities by default; `--grant-all` also grants the ones the
+    /// manifest marks optional. Never grants a capability the manifest did not request.
+    Install {
+        /// Project directory.
+        path: PathBuf,
+        /// The manifest file.
+        manifest: PathBuf,
+        /// Also grant the optional capabilities the manifest requests.
+        #[arg(long)]
+        grant_all: bool,
+    },
+    /// Remove an extension by id.
+    Remove {
+        /// Project directory.
+        path: PathBuf,
+        /// The extension id.
+        id: String,
+    },
+    /// Show what an extension requested and what it was granted.
+    Permissions {
+        /// Project directory.
+        path: PathBuf,
+        /// The extension id.
+        id: String,
+    },
+    /// Switch an extension on (requires its required capabilities be granted).
+    Enable {
+        /// Project directory.
+        path: PathBuf,
+        /// The extension id.
+        id: String,
+    },
+    /// Switch an extension off.
+    Disable {
+        /// Project directory.
+        path: PathBuf,
+        /// The extension id.
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ImportCommand {
     /// Import an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML).
     Openapi {
@@ -2232,6 +2287,18 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 yes: *yes,
                 json: cli.json,
             })
+        }
+        Command::Ext(ExtCommand::List { path }) => ext::list(path, cli.json),
+        Command::Ext(ExtCommand::Install {
+            path,
+            manifest,
+            grant_all,
+        }) => ext::install(path, manifest, *grant_all, cli.json),
+        Command::Ext(ExtCommand::Remove { path, id }) => ext::remove(path, id, cli.json),
+        Command::Ext(ExtCommand::Permissions { path, id }) => ext::permissions(path, id, cli.json),
+        Command::Ext(ExtCommand::Enable { path, id }) => ext::set_enabled(path, id, true, cli.json),
+        Command::Ext(ExtCommand::Disable { path, id }) => {
+            ext::set_enabled(path, id, false, cli.json)
         }
         Command::Run { plan } => plan::run(plan, cli.json),
         Command::Sequencer {

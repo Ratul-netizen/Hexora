@@ -200,7 +200,7 @@ impl GrantSet {
 }
 
 /// What an extension declares it needs, from its manifest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionRequest {
     /// Capabilities without which the extension cannot function.
     #[serde(default)]

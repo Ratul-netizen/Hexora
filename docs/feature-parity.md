@@ -121,8 +121,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Extension API | Montoya (Java) | JS/TS | PLANNED M17 | TypeScript first |
-| Extension store | BApp Store | Plugin store | PLANNED M19 | |
+| Extension API | Montoya (Java) | JS/TS | **IN PROGRESS M17** | The SDK contract and permission-gated registry are done: `hexora-ext` defines the manifest (id, version, api_version, kind, entry, permission request) and `hexora ext install/list/permissions/enable/remove` installs one with exactly the granted capabilities, never wider than requested, disabled if a required one is declined. The WASM sandbox that runs the module is the next milestone (M19). See docs/extensions.md |
+| Extension store | BApp Store | Plugin store | PLANNED M19 | Depends on the WASM runtime |
 | Permission model for extensions | ❌ | ❌ | **DONE M0** | Neither competitor has one |
 | Burp extension compatibility | — | mapping docs | DEFERRED M20+ | Separate subproject; out-of-process JVM |
 

@@ -92,6 +92,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "custom_checks",
         sql: include_str!("../migrations/0013_custom_checks.sql"),
     },
+    Migration {
+        version: 14,
+        name: "extensions",
+        sql: include_str!("../migrations/0014_extensions.sql"),
+    },
 ];
 
 /// The schema version this build expects.
