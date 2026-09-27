@@ -25,12 +25,17 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
 
 /// `hexora oob serve` — run the collaborator, catching HTTP (and optionally DNS) callbacks.
 pub fn serve_cmd(listen: &str, dns: Option<&str>, answer_ip: &str) -> Result<()> {
-    println!("Collaborator listening on {listen} (HTTP). Payloads that call back here are recorded.");
+    println!(
+        "Collaborator listening on {listen} (HTTP). Payloads that call back here are recorded."
+    );
     let runtime = runtime()?;
     match dns {
         Some(dns_addr) => {
             let ip = answer_ip.parse().map_err(|_| {
-                HexoraError::invalid_input("answer-ip", format!("{answer_ip:?} is not an IPv4 address"))
+                HexoraError::invalid_input(
+                    "answer-ip",
+                    format!("{answer_ip:?} is not an IPv4 address"),
+                )
             })?;
             println!("DNS listening on {dns_addr}, answering A queries with {answer_ip}.");
             println!("Mint a subdomain payload with `oob mint --server <domain> --subdomain`; Ctrl-C to stop.");
@@ -73,7 +78,10 @@ pub fn poll_cmd(server: &str, token: &str, json: bool) -> Result<()> {
     let interactions = runtime()?.block_on(poll(server, token))?;
 
     if json {
-        println!("{}", serde_json::to_string(&interactions).unwrap_or_else(|_| "[]".into()));
+        println!(
+            "{}",
+            serde_json::to_string(&interactions).unwrap_or_else(|_| "[]".into())
+        );
         return Ok(());
     }
     if interactions.is_empty() {
@@ -83,7 +91,10 @@ pub fn poll_cmd(server: &str, token: &str, json: bool) -> Result<()> {
         println!("back slowly, or only resolve DNS (not yet caught). Poll again in a moment.");
         return Ok(());
     }
-    println!("{} interaction(s) — the target reached the collaborator:", interactions.len());
+    println!(
+        "{} interaction(s) — the target reached the collaborator:",
+        interactions.len()
+    );
     for interaction in &interactions {
         println!(
             "  {} {} {} from {} at {}",
@@ -136,7 +147,11 @@ pub fn test_cmd(args: TestArgs<'_>) -> Result<()> {
 
     if !args.json {
         println!("Out-of-band parameter test");
-        println!("  target:       {} {}", args.method.unwrap_or("GET"), args.url);
+        println!(
+            "  target:       {} {}",
+            args.method.unwrap_or("GET"),
+            args.url
+        );
         println!("  parameters:   {}", params.join(", "));
         println!("  collaborator: {}", args.server);
         println!();
@@ -213,8 +228,14 @@ pub fn test_cmd(args: TestArgs<'_>) -> Result<()> {
 
     println!();
     if hits.is_empty() {
-        println!("No out-of-band interactions. None of the {} parameter(s) caused a callback", params.len());
-        println!("within {}s. That is not proof of safety — a target may call back more slowly,", args.wait);
+        println!(
+            "No out-of-band interactions. None of the {} parameter(s) caused a callback",
+            params.len()
+        );
+        println!(
+            "within {}s. That is not proof of safety — a target may call back more slowly,",
+            args.wait
+        );
         println!("or only resolve DNS (not yet caught). Raise --wait, or test again.");
     } else {
         println!("OUT-OF-BAND INTERACTION CONFIRMED ({}):", hits.len());

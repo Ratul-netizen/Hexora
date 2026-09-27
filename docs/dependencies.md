@@ -100,3 +100,18 @@ The MSRV is currently `1.88`, which is imposed by the dependency graph rather th
 chosen: `plist`, `serde_with`, `time`, `darling` and the ICU crates all require it, and
 they arrive via Tauri and `url`. Do not raise the MSRV to match whatever compiler is
 installed locally.
+
+## Accepted advisories
+
+`cargo deny check advisories` (and `cargo-audit`) gate the RustSec database. The IDs below are
+**accepted** in `deny.toml`'s `[advisories] ignore` list: each is an *unmaintained* transitive
+dependency — an informational advisory, not a vulnerability — that Hexora cannot remove without
+an upstream change. They are listed one by one (rather than downgrading the whole `unmaintained`
+lint) so a newly-unmaintained crate still fails CI and forces a deliberate decision. Re-review
+when Tauri and the rustls stack update.
+
+| Advisory | Crate | Why it is accepted |
+| -------- | ----- | ------------------ |
+| RUSTSEC-2024-0370 | `proc-macro-error` | Unmaintained; arrives via Tauri's proc-macro dependencies. No direct use. |
+| RUSTSEC-2025-0075 / 0080 / 0081 / 0098 / 0100 | `unic-*` (ICU) | Unmaintained; the ICU/`unic-*` stack arrives via Tauri and `url`. No direct use. |
+| RUSTSEC-2025-0134 | `rustls-pemfile` | Unmaintained, superseded by `rustls-pki-types`; still pulled by the rustls stack. Migrate when the ecosystem does. |

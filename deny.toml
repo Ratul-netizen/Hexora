@@ -11,6 +11,20 @@
 # `cargo deny check` covers everything, and yanked crates are surfaced here.
 yanked = "warn"
 
+# Accepted advisories, each an *unmaintained* transitive dependency — not a vulnerability — that
+# Hexora cannot remediate without an upstream change. Listed explicitly (not blanket-downgraded)
+# so a NEW unmaintained crate still fails here and forces a deliberate decision. Recorded with
+# justification in docs/dependencies.md; re-review when Tauri and the rustls stack update.
+ignore = [
+    "RUSTSEC-2024-0370", # proc-macro-error: unmaintained, via Tauri's proc-macro deps
+    "RUSTSEC-2025-0075", # unic-* (ICU) unmaintained, via Tauri
+    "RUSTSEC-2025-0080", # unic-* (ICU) unmaintained, via Tauri
+    "RUSTSEC-2025-0081", # unic-* (ICU) unmaintained, via Tauri
+    "RUSTSEC-2025-0098", # unic-* (ICU) unmaintained, via Tauri
+    "RUSTSEC-2025-0100", # unic-* (ICU) unmaintained, via Tauri
+    "RUSTSEC-2025-0134", # rustls-pemfile: unmaintained, superseded by rustls-pki-types
+]
+
 [licenses]
 # Anything a dependency is under must be on this list, or carry an explicit exception below.
 # These are the permissive and weak-copyleft licences that can be redistributed inside an
@@ -49,6 +63,10 @@ exceptions = [
     { name = "hexora-active", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-fuzz", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-authz", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-crawl", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-browser", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-llm", allow = ["AGPL-3.0-or-later"] },
+    { name = "hexora-oob", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-report", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-cli", allow = ["AGPL-3.0-or-later"] },
     { name = "hexora-desktop", allow = ["AGPL-3.0-or-later"] },

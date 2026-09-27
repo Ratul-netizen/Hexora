@@ -123,8 +123,7 @@ impl Cdp {
     /// Connects to a DevTools WebSocket URL (`ws://host:port/devtools/browser/…`).
     pub async fn connect(ws_url: &str) -> Result<Cdp> {
         let (service, path) = HttpService::parse_url(ws_url)?;
-        let conn =
-            ws::connect(&service, &path, &TlsConfig::default(), &Limits::default()).await?;
+        let conn = ws::connect(&service, &path, &TlsConfig::default(), &Limits::default()).await?;
         Ok(Cdp {
             conn,
             next_id: 1,
@@ -154,7 +153,9 @@ impl Cdp {
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return Err(malformed(format!("no response to {method} within the timeout")));
+                return Err(malformed(format!(
+                    "no response to {method} within the timeout"
+                )));
             }
             let Some(frame) = self.conn.recv(remaining).await? else {
                 return Err(malformed(format!(
@@ -377,7 +378,10 @@ mod tests {
     fn a_cdp_error_carries_its_message() {
         let error = json!({"code": -32000, "message": "Cannot navigate to invalid URL"});
         let mapped = cdp_error(&error).to_string();
-        assert!(mapped.contains("Cannot navigate to invalid URL"), "{mapped}");
+        assert!(
+            mapped.contains("Cannot navigate to invalid URL"),
+            "{mapped}"
+        );
     }
 
     #[test]

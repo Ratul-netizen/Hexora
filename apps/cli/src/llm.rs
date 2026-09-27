@@ -14,8 +14,7 @@ use hexora_types::scope::{Scope, ScopeRule};
 use hexora_types::{HexoraError, Result};
 
 /// The default request body: an OpenAI-style chat call with the prompt in the user turn.
-const DEFAULT_TEMPLATE: &str =
-    r#"{"messages":[{"role":"user","content":"{{PROMPT}}"}]}"#;
+const DEFAULT_TEMPLATE: &str = r#"{"messages":[{"role":"user","content":"{{PROMPT}}"}]}"#;
 
 /// Options for `hexora llm`.
 pub struct Args<'a> {
@@ -48,8 +47,9 @@ pub fn run(args: Args<'_>) -> Result<()> {
             ))
         }
         (Some(t), None) => t.to_string(),
-        (None, Some(path)) => std::fs::read_to_string(path)
-            .map_err(|e| HexoraError::invalid_input("template-file", format!("{}: {e}", path.display())))?,
+        (None, Some(path)) => std::fs::read_to_string(path).map_err(|e| {
+            HexoraError::invalid_input("template-file", format!("{}: {e}", path.display()))
+        })?,
         (None, None) => DEFAULT_TEMPLATE.to_string(),
     };
     if !template.contains(PROMPT_PLACEHOLDER) {
@@ -162,7 +162,10 @@ fn print_human(
     // System-prompt / data leakage — leads, not confirmations.
     println!();
     if leak.any() {
-        println!("POSSIBLE SYSTEM-PROMPT DISCLOSURE ({}) — leads to verify:", leak.disclosures.len());
+        println!(
+            "POSSIBLE SYSTEM-PROMPT DISCLOSURE ({}) — leads to verify:",
+            leak.disclosures.len()
+        );
         for disclosure in &leak.disclosures {
             println!(
                 "  [{}] the model returned instruction-like content a benign question did not",

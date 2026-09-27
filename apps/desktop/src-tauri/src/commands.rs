@@ -143,7 +143,11 @@ pub fn websocket_messages(
 /// A short, printable preview of a WebSocket payload.
 fn ws_preview(payload: &[u8]) -> String {
     match std::str::from_utf8(payload) {
-        Ok(text) => text.chars().take(200).collect::<String>().replace(['\n', '\r'], " "),
+        Ok(text) => text
+            .chars()
+            .take(200)
+            .collect::<String>()
+            .replace(['\n', '\r'], " "),
         Err(_) => format!("<{} binary bytes>", payload.len()),
     }
 }
@@ -182,9 +186,11 @@ pub fn license_activate(file: String) -> CommandResult<LicenseStatus> {
 
     let g = EntitlementGate::from_license(&bytes, &EMBEDDED_LICENSE_KEY, now);
     if g.entitlements().tier == Tier::Free {
-        return Err("this file did not verify as a Hexora licence signed for this build; \
+        return Err(
+            "this file did not verify as a Hexora licence signed for this build; \
                     it was not installed"
-            .to_string());
+                .to_string(),
+        );
     }
 
     let dest = default_license_path()
@@ -632,14 +638,11 @@ pub async fn repeater_send(
     let mut draft = match (parent_id, target.as_deref()) {
         (Some(id), _) => repeater.draft_from(id).map_err(fail)?,
         (None, Some(url)) => {
-            let (service, path) =
-                hexora_types::http::HttpService::parse_url(url).map_err(fail)?;
+            let (service, path) = hexora_types::http::HttpService::parse_url(url).map_err(fail)?;
             Draft::new(hexora_types::http::HttpRequest::get(service, path))
         }
         (None, None) => {
-            return Err(
-                "a repeater send needs a request to start from or a target URL".to_string(),
-            )
+            return Err("a repeater send needs a request to start from or a target URL".to_string())
         }
     };
     // The window asks for a mode explicitly. A request captured raw is already raw
@@ -2610,7 +2613,11 @@ fn crawl_run_blocking(
     let scope = project.settings().scope().map_err(fail)?;
     let attached = project.settings().attached_headers().map_err(fail)?;
 
-    let identity = match identity_label.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let identity = match identity_label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(who) => Some(resolve_identity(&project.identities(), who)?),
         None => None,
     };
@@ -2684,7 +2691,9 @@ fn crawl_run_blocking(
 
     let mut by_reason: std::collections::BTreeMap<String, usize> = Default::default();
     for skipped in &report.skipped {
-        *by_reason.entry(skip_reason_word(skipped.reason).to_string()).or_insert(0) += 1;
+        *by_reason
+            .entry(skip_reason_word(skipped.reason).to_string())
+            .or_insert(0) += 1;
     }
     let stopped = match report.stopped {
         hexora_crawl::CrawlStop::FrontierEmpty => "frontier_empty",
@@ -2709,7 +2718,9 @@ fn gather_seeds(project: &Project, scope: &Scope) -> CommandResult<Vec<String>> 
     let mut seen = std::collections::HashSet::new();
     let mut cursor: Option<Cursor> = None;
     loop {
-        let page = store.history(cursor.as_ref(), Limit::new(500)).map_err(fail)?;
+        let page = store
+            .history(cursor.as_ref(), Limit::new(500))
+            .map_err(fail)?;
         for item in &page.items {
             if url_in_scope(scope, &item.url) && seen.insert(item.url.clone()) {
                 seeds.push(item.url.clone());
@@ -2803,7 +2814,9 @@ pub fn sitemap_build(
     let mut pages = Vec::new();
     let mut cursor: Option<Cursor> = None;
     loop {
-        let page = store.history(cursor.as_ref(), Limit::new(500)).map_err(fail)?;
+        let page = store
+            .history(cursor.as_ref(), Limit::new(500))
+            .map_err(fail)?;
         for item in &page.items {
             if let Some(want) = &host {
                 if !url_matches_host(&item.url, want) {

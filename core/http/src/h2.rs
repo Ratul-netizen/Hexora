@@ -67,10 +67,7 @@ fn is_dropped_request_header(lower_name: &str) -> bool {
 /// `max_header_list_size` caps the HPACK-decoded header block a server can make us hold,
 /// so a header bomb is refused as it is decoded rather than after. Server push is
 /// disabled outright — Hexora never wants a stream it did not ask for.
-pub async fn handshake<S>(
-    stream: S,
-    limits: &Limits,
-) -> Result<h2::client::SendRequest<Bytes>>
+pub async fn handshake<S>(stream: S, limits: &Limits) -> Result<h2::client::SendRequest<Bytes>>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -233,9 +230,8 @@ pub async fn send_on(
 
 /// Builds the `http` crate request the `h2` API speaks from Hexora's message model.
 fn build_request(request: &HttpRequest) -> Result<http::Request<()>> {
-    let method = http::Method::from_bytes(request.method.as_bytes()).map_err(|e| {
-        HexoraError::invalid_input("method", format!("{:?}: {e}", request.method))
-    })?;
+    let method = http::Method::from_bytes(request.method.as_bytes())
+        .map_err(|e| HexoraError::invalid_input("method", format!("{:?}: {e}", request.method)))?;
 
     let uri: http::Uri = request
         .url()

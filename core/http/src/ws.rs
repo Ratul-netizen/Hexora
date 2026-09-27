@@ -82,7 +82,8 @@ impl Opcode {
 
     /// Whether this is a control frame (close, ping, pong, or a reserved control opcode).
     pub fn is_control(self) -> bool {
-        matches!(self, Opcode::Close | Opcode::Ping | Opcode::Pong) || matches!(self, Opcode::Other(v) if v >= 0x8)
+        matches!(self, Opcode::Close | Opcode::Ping | Opcode::Pong)
+            || matches!(self, Opcode::Other(v) if v >= 0x8)
     }
 }
 
@@ -187,7 +188,12 @@ impl FrameParser {
             if buf.len() < offset + 4 {
                 return Ok(None);
             }
-            let key = [buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]];
+            let key = [
+                buf[offset],
+                buf[offset + 1],
+                buf[offset + 2],
+                buf[offset + 3],
+            ];
             offset += 4;
             Some(key)
         } else {
@@ -396,10 +402,10 @@ impl WsConnection {
             let mut buf = [0u8; 8192];
             let read = tokio::time::timeout(timeout, self.stream.read(&mut buf)).await;
             let n = match read {
-                Ok(Ok(0)) => return Ok(None),        // closed
+                Ok(Ok(0)) => return Ok(None), // closed
                 Ok(Ok(n)) => n,
                 Ok(Err(e)) => return Err(HexoraError::Network(NetworkError::Io(e.to_string()))),
-                Err(_) => return Ok(None),           // timed out: nothing more for now
+                Err(_) => return Ok(None), // timed out: nothing more for now
             };
             self.parser.push(&buf[..n]);
         }
@@ -626,7 +632,10 @@ mod tests {
         let mut parser = FrameParser::new(1 << 20);
 
         parser.push(&bytes[..3]);
-        assert!(parser.next_frame().unwrap().is_none(), "incomplete: need more");
+        assert!(
+            parser.next_frame().unwrap().is_none(),
+            "incomplete: need more"
+        );
         parser.push(&bytes[3..]);
         assert_eq!(parser.next_frame().unwrap().unwrap(), frame);
     }
@@ -655,7 +664,10 @@ mod tests {
         let mut header = vec![0x82, 127];
         header.extend_from_slice(&(1u64 << 40).to_be_bytes());
         parser.push(&header);
-        assert!(parser.next_frame().is_err(), "a huge declared length is refused");
+        assert!(
+            parser.next_frame().is_err(),
+            "a huge declared length is refused"
+        );
     }
 
     /// A local WebSocket echo server: accepts one connection, answers 101, and echoes each
@@ -721,9 +733,14 @@ mod tests {
         let port = ws_echo_server().await;
         let service = HttpService::new("127.0.0.1", port, false);
 
-        let mut connection = connect(&service, "/echo", &TlsConfig::verified(), &Limits::default())
-            .await
-            .expect("the client completes the handshake");
+        let mut connection = connect(
+            &service,
+            "/echo",
+            &TlsConfig::verified(),
+            &Limits::default(),
+        )
+        .await
+        .expect("the client completes the handshake");
 
         connection.send_text("hello over websocket").await.unwrap();
 

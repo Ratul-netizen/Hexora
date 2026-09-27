@@ -27,10 +27,14 @@ async fn main() {
         .expect("discover page target");
     let mut cdp = Cdp::connect(&ws).await.expect("connect CDP");
 
-    cdp.call("Page.enable", json!({})).await.expect("Page.enable");
+    cdp.call("Page.enable", json!({}))
+        .await
+        .expect("Page.enable");
     cdp.call("Runtime.enable", json!({})).await.ok();
     // Reload so each capture starts from a clean mount, deterministic across runs.
-    cdp.call("Page.reload", json!({ "ignoreCache": false })).await.ok();
+    cdp.call("Page.reload", json!({ "ignoreCache": false }))
+        .await
+        .ok();
     // Let the SPA's async boot (the invoke chain) run to completion before capturing.
     tokio::time::sleep(Duration::from_millis(settle_ms)).await;
 
@@ -40,7 +44,10 @@ async fn main() {
             "(()=>{{const b=[...document.querySelectorAll('button.tab')].find(x=>x.textContent.trim()==={label:?});if(b){{b.click();return true}}return false}})()",
         );
         let _ = cdp
-            .call("Runtime.evaluate", json!({ "expression": js, "returnByValue": true }))
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": js, "returnByValue": true }),
+            )
             .await;
         tokio::time::sleep(Duration::from_millis(900)).await;
     }
@@ -49,7 +56,10 @@ async fn main() {
     // input and click a button), then settle before capturing.
     if let Some(expr) = std::env::args().nth(5) {
         let _ = cdp
-            .call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": expr, "returnByValue": true }),
+            )
             .await;
         tokio::time::sleep(Duration::from_millis(1200)).await;
     }

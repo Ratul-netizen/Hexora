@@ -327,7 +327,10 @@ impl RawH2Request {
                 Bytes::from_static(b":authority"),
                 Bytes::from(service.authority().into_bytes()),
             ),
-            (Bytes::from_static(b":path"), Bytes::from(path.as_bytes().to_vec())),
+            (
+                Bytes::from_static(b":path"),
+                Bytes::from(path.as_bytes().to_vec()),
+            ),
         ];
         Self {
             service,
@@ -432,7 +435,10 @@ mod tests {
             .map(|(_, v)| String::from_utf8_lossy(v).into_owned())
             .collect();
         assert_eq!(paths, vec!["/a".to_string(), "/b".to_string()]);
-        assert!(request.headers.iter().any(|(n, _)| n.as_ref() == b"X-Upper"));
+        assert!(request
+            .headers
+            .iter()
+            .any(|(n, _)| n.as_ref() == b"X-Upper"));
         assert_eq!(request.body.as_ref(), b"the body");
 
         // scope_path reads the first :path.

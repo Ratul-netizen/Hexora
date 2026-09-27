@@ -23,7 +23,9 @@ async fn main() {
         Browser::launch_with(&LaunchOptions::through_proxy(proxy)).expect("launch through proxy");
     let mut cdp = browser.connect().await.expect("connect CDP");
 
-    cdp.navigate(&url, Duration::from_secs(20)).await.expect("navigate");
+    cdp.navigate(&url, Duration::from_secs(20))
+        .await
+        .expect("navigate");
     // Let late subresources (XHR, images) finish flowing through the proxy before we quit.
     tokio::time::sleep(Duration::from_millis(settle_ms)).await;
 

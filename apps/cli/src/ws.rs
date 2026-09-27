@@ -144,7 +144,8 @@ pub fn send(
         .map_err(|e| HexoraError::Internal(e.to_string()))?;
 
     runtime.block_on(async move {
-        let mut connection = hexora_http::ws::connect(&service, &path, &tls, &Limits::default()).await?;
+        let mut connection =
+            hexora_http::ws::connect(&service, &path, &tls, &Limits::default()).await?;
         let request_id = record_handshake(&store, &service, &path)?;
 
         if let Some(hex) = raw {
@@ -160,7 +161,12 @@ pub fn send(
             }
         } else if let Some(msg) = message {
             connection.send_text(msg).await?;
-            store.record_ws_message(request_id, WsDirection::ClientToServer, 0x1, msg.as_bytes())?;
+            store.record_ws_message(
+                request_id,
+                WsDirection::ClientToServer,
+                0x1,
+                msg.as_bytes(),
+            )?;
             if !json {
                 println!("→ text   {:>6}B  {}", msg.len(), preview(msg.as_bytes()));
             }
@@ -208,7 +214,10 @@ pub fn send(
                     })
                 })
                 .collect();
-            println!("{}", serde_json::json!({ "sent": message, "received": items }));
+            println!(
+                "{}",
+                serde_json::json!({ "sent": message, "received": items })
+            );
         }
 
         Ok::<(), HexoraError>(())
@@ -345,7 +354,10 @@ mod tests {
 
     #[test]
     fn hex_decoding_round_trips_and_rejects_junk() {
-        assert_eq!(decode_hex("81 04 74 65 73 74").unwrap(), vec![0x81, 0x04, 0x74, 0x65, 0x73, 0x74]);
+        assert_eq!(
+            decode_hex("81 04 74 65 73 74").unwrap(),
+            vec![0x81, 0x04, 0x74, 0x65, 0x73, 0x74]
+        );
         assert!(decode_hex("abc").is_err()); // odd length
         assert!(decode_hex("zz").is_err()); // not hex
     }

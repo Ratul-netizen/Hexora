@@ -29,6 +29,7 @@ use hexora_engine::guard::{ScopeDecision, ScopeGuard};
 use hexora_engine::transport::{Exchange, HttpTransport, Origin, SendOptions};
 use hexora_http::parse::find_head_end;
 use hexora_http::request::{parse_request_head, RequestHead};
+use hexora_http::ws::{encode, Frame, FrameParser};
 use hexora_http::{BodyStream, TcpTransport, TlsConfig};
 use hexora_types::error::{HexoraError, NetworkError, ProtocolError, Result};
 use hexora_types::http::{Header, Headers, HttpRequest, HttpResponse, HttpService, HttpVersion};
@@ -36,7 +37,6 @@ use hexora_types::ids::RequestId;
 use hexora_types::limits::Limits;
 use hexora_types::scope::Scope;
 use hexora_types::ws::WsDirection;
-use hexora_http::ws::{encode, Frame, FrameParser};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -484,7 +484,12 @@ where
                     .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
                 write.flush().await.ok();
                 if let Some(id) = request_id {
-                    observer.observe_websocket_message(id, direction, frame.opcode.as_u8(), &payload);
+                    observer.observe_websocket_message(
+                        id,
+                        direction,
+                        frame.opcode.as_u8(),
+                        &payload,
+                    );
                 }
             }
         } else {
@@ -570,7 +575,8 @@ where
         .map_err(|e| HexoraError::Network(NetworkError::Io(e.to_string())))?;
     upstream.flush().await.ok();
 
-    let (response_head, upstream_prefix) = read_response_head(&mut upstream, &context.limits).await?;
+    let (response_head, upstream_prefix) =
+        read_response_head(&mut upstream, &context.limits).await?;
     let status = parse_status_code(&response_head);
 
     // The server's answer goes back to the client either way — it is what the client's
@@ -643,7 +649,11 @@ where
 /// as hop-by-hop would turn the upgrade into an ordinary request. Only the compression
 /// extension offer is removed.
 fn serialize_ws_handshake(head: &RequestHead) -> Vec<u8> {
-    let path = if head.target.path().is_empty() { "/" } else { head.target.path() };
+    let path = if head.target.path().is_empty() {
+        "/"
+    } else {
+        head.target.path()
+    };
     let mut out = format!("{} {} HTTP/1.1\r\n", head.method, path).into_bytes();
     for header in head.headers.iter() {
         if header.is("Sec-WebSocket-Extensions") || header.is("Proxy-Connection") {
@@ -898,11 +908,7 @@ async fn handle_connect(
 /// is behind an `Arc` so every stream sees the same scope, interceptor and capture. The
 /// exchanges those streams produce are recorded through the observer, whose write path is
 /// already concurrency-safe.
-async fn serve_h2_tunnel<S>(
-    tls: S,
-    service: HttpService,
-    context: ConnectionContext,
-) -> Result<()>
+async fn serve_h2_tunnel<S>(tls: S, service: HttpService, context: ConnectionContext) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -995,7 +1001,10 @@ async fn build_h2_upstream_request(
 
     let mut headers = hexora_types::http::Headers::new();
     for (name, value) in parts.headers.iter() {
-        if HOP_BY_HOP.iter().any(|h| name.as_str().eq_ignore_ascii_case(h)) {
+        if HOP_BY_HOP
+            .iter()
+            .any(|h| name.as_str().eq_ignore_ascii_case(h))
+        {
             continue;
         }
         headers.append(hexora_types::http::Header {
@@ -1013,8 +1022,9 @@ async fn build_h2_upstream_request(
     let mut buf = BytesMut::new();
     let mut truncated = false;
     while let Some(chunk) = body.data().await {
-        let chunk = chunk
-            .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 request body: {e}"))))?;
+        let chunk = chunk.map_err(|e| {
+            HexoraError::Network(NetworkError::Io(format!("http/2 request body: {e}")))
+        })?;
         let _ = body.flow_control().release_capacity(chunk.len());
         let remaining = limits.max_body_bytes.saturating_sub(buf.len() as u64);
         if (chunk.len() as u64) > remaining {
@@ -1066,19 +1076,21 @@ fn send_h2_response(
         }
     }
 
-    let http_response = builder
-        .body(())
-        .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 response head: {e}"))))?;
+    let http_response = builder.body(()).map_err(|e| {
+        HexoraError::Network(NetworkError::Io(format!("http/2 response head: {e}")))
+    })?;
 
     let has_body = !response.body.is_empty();
     let mut stream = responder
         .send_response(http_response, !has_body)
-        .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 send response: {e}"))))?;
+        .map_err(|e| {
+            HexoraError::Network(NetworkError::Io(format!("http/2 send response: {e}")))
+        })?;
 
     if has_body {
-        stream
-            .send_data(response.body.clone(), true)
-            .map_err(|e| HexoraError::Network(NetworkError::Io(format!("http/2 send body: {e}"))))?;
+        stream.send_data(response.body.clone(), true).map_err(|e| {
+            HexoraError::Network(NetworkError::Io(format!("http/2 send body: {e}")))
+        })?;
     }
     Ok(())
 }
@@ -1373,7 +1385,10 @@ mod tests {
         // The relay forwards the client's bytes to the upstream verbatim, mask and all.
         let mut forwarded = vec![0u8; client_frame.len()];
         upstream_test.read_exact(&mut forwarded).await.unwrap();
-        assert_eq!(forwarded, client_frame, "client frame relayed byte for byte");
+        assert_eq!(
+            forwarded, client_frame,
+            "client frame relayed byte for byte"
+        );
 
         // Server → client: an unmasked text frame back.
         let server_frame = encode(
@@ -1397,12 +1412,21 @@ mod tests {
             if recorder.messages.lock().unwrap().len() >= 2 {
                 break;
             }
-            assert!(tokio::time::Instant::now() < deadline, "frames were not captured");
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "frames were not captured"
+            );
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         let messages = recorder.messages.lock().unwrap();
-        assert_eq!(messages[0], (WsDirection::ClientToServer, 0x1, b"hi server".to_vec()));
-        assert_eq!(messages[1], (WsDirection::ServerToClient, 0x1, b"hi client".to_vec()));
+        assert_eq!(
+            messages[0],
+            (WsDirection::ClientToServer, 0x1, b"hi server".to_vec())
+        );
+        assert_eq!(
+            messages[1],
+            (WsDirection::ServerToClient, 0x1, b"hi client".to_vec())
+        );
     }
 
     /// Replaces every client message and drops every server message.
@@ -1473,7 +1497,10 @@ mod tests {
         let n = upstream_test.read(&mut buf).await.unwrap();
         parser.push(&buf[..n]);
         let forwarded = parser.next_frame().unwrap().unwrap();
-        assert_eq!(forwarded.payload, b"EDITED", "the client frame was rewritten");
+        assert_eq!(
+            forwarded.payload, b"EDITED",
+            "the client frame was rewritten"
+        );
         assert!(forwarded.masked, "a re-encoded client frame is re-masked");
 
         // Server sends a frame; it is dropped and never reaches the client.
@@ -1489,12 +1516,14 @@ mod tests {
         );
         upstream_test.write_all(&server_frame).await.unwrap();
 
-        let got =
-            tokio::time::timeout(std::time::Duration::from_millis(250), client_test.read(&mut buf))
-                .await;
+        let got = tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            client_test.read(&mut buf),
+        )
+        .await;
         match got {
-            Err(_) => {}            // timed out: nothing forwarded — the drop worked
-            Ok(Ok(0)) => {}         // closed, also fine
+            Err(_) => {}    // timed out: nothing forwarded — the drop worked
+            Ok(Ok(0)) => {} // closed, also fine
             Ok(Ok(n)) => panic!("a dropped server frame reached the client: {n} bytes"),
             Ok(Err(_)) => {}
         }
@@ -1730,19 +1759,18 @@ mod tests {
 
     #[tokio::test]
     async fn the_proxy_serves_http2_to_the_browser_and_captures_every_stream() {
-        let target =
-            https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello").await;
+        let target = https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello").await;
 
         // The upstream authority is what the proxy connects to; the CONNECT names a host
         // whose leaf the CA can mint and whose name the upstream cert carries.
         let interception = InterceptionPolicy::intercept_all();
         let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any());
-        let (port, recorder, ca) =
-            proxy_with(Scope::new(), interception, Some(transport)).await;
+        let (port, recorder, ca) = proxy_with(Scope::new(), interception, Some(transport)).await;
 
         // The CONNECT authority (localhost:<upstream port>) is where the proxy forwards;
         // the upstream cert is for "localhost", accepted because the transport is accept-any.
-        let responses = through_tunnel_h2(port, &ca, "localhost", target, &["/a", "/b", "/c"]).await;
+        let responses =
+            through_tunnel_h2(port, &ca, "localhost", target, &["/a", "/b", "/c"]).await;
 
         // Every stream got an answer over one h2 connection.
         assert_eq!(responses.len(), 3);
@@ -1759,7 +1787,11 @@ mod tests {
             .all(|(url, status, ..)| url.starts_with("https://") && *status == 200));
         let paths: std::collections::HashSet<_> =
             seen.iter().map(|(url, ..)| url.clone()).collect();
-        assert_eq!(paths.len(), 3, "the three streams are three distinct requests");
+        assert_eq!(
+            paths.len(),
+            3,
+            "the three streams are three distinct requests"
+        );
 
         let _ = target; // upstream handle kept alive for the duration of the test
     }
@@ -1849,8 +1881,12 @@ mod tests {
 
         // Upstream h2 is enabled, as it is for the real proxy since M5.1d.
         let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any()).http2(true);
-        let (port, recorder, ca) =
-            proxy_with(Scope::new(), InterceptionPolicy::intercept_all(), Some(transport)).await;
+        let (port, recorder, ca) = proxy_with(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            Some(transport),
+        )
+        .await;
 
         let responses = through_tunnel_h2(port, &ca, "localhost", target, &["/a"]).await;
         assert_eq!(responses, vec![(200, "hello".to_string())]);
@@ -1870,8 +1906,12 @@ mod tests {
         let target = https_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello").await;
 
         let transport = TcpTransport::with_tls(hexora_http::TlsConfig::accept_any()).http2(true);
-        let (port, recorder, ca) =
-            proxy_with(Scope::new(), InterceptionPolicy::intercept_all(), Some(transport)).await;
+        let (port, recorder, ca) = proxy_with(
+            Scope::new(),
+            InterceptionPolicy::intercept_all(),
+            Some(transport),
+        )
+        .await;
 
         let responses = through_tunnel_h2(port, &ca, "localhost", target, &["/a"]).await;
         assert_eq!(responses, vec![(200, "hello".to_string())]);

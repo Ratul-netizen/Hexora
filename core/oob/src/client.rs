@@ -91,8 +91,9 @@ pub async fn poll(authority: &str, token: &str) -> Result<Vec<Interaction>> {
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .unwrap_or("");
-    serde_json::from_str::<Vec<Interaction>>(body.trim())
-        .map_err(|e| HexoraError::Internal(format!("the collaborator poll response was not valid: {e}")))
+    serde_json::from_str::<Vec<Interaction>>(body.trim()).map_err(|e| {
+        HexoraError::Internal(format!("the collaborator poll response was not valid: {e}"))
+    })
 }
 
 #[cfg(test)]

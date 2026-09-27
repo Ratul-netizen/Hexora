@@ -123,7 +123,10 @@ fn result_for(
     };
 
     let mut properties = Map::new();
-    properties.insert("severity".into(), json!(crate::severity_word(finding.severity)));
+    properties.insert(
+        "severity".into(),
+        json!(crate::severity_word(finding.severity)),
+    );
     properties.insert(
         "confidence".into(),
         json!(crate::confidence_word(finding.confidence)),
@@ -181,7 +184,10 @@ fn rule_for(rule_id: &str, finding: &Finding) -> Value {
     let mut tags = vec![json!("security")];
     if let Some(cwe) = &finding.cwe {
         // The `external/cwe/cwe-639` form is the tag GitHub links to a CWE page.
-        if let Some(number) = cwe.strip_prefix("CWE-").or_else(|| cwe.strip_prefix("cwe-")) {
+        if let Some(number) = cwe
+            .strip_prefix("CWE-")
+            .or_else(|| cwe.strip_prefix("cwe-"))
+        {
             tags.push(json!(format!("external/cwe/cwe-{number}")));
         }
         properties.insert("cwe".into(), json!(cwe));
@@ -195,10 +201,7 @@ fn rule_for(rule_id: &str, finding: &Finding) -> Value {
     let mut descriptor = Map::new();
     descriptor.insert("id".into(), json!(rule_id));
     descriptor.insert("name".into(), json!(rule_name(rule_id)));
-    descriptor.insert(
-        "shortDescription".into(),
-        json!({ "text": finding.title }),
-    );
+    descriptor.insert("shortDescription".into(), json!({ "text": finding.title }));
     // The remediation belongs on the rule, not the result: it is advice about the class
     // of problem, and SARIF renders `help` where a reader looks for "how do I fix this".
     if !finding.remediation.trim().is_empty() {
@@ -209,10 +212,15 @@ fn rule_for(rule_id: &str, finding: &Finding) -> Value {
         json!({ "level": sarif_level(finding.severity) }),
     );
     if let Some(cwe) = &finding.cwe {
-        if let Some(number) = cwe.strip_prefix("CWE-").or_else(|| cwe.strip_prefix("cwe-")) {
+        if let Some(number) = cwe
+            .strip_prefix("CWE-")
+            .or_else(|| cwe.strip_prefix("cwe-"))
+        {
             descriptor.insert(
                 "helpUri".into(),
-                json!(format!("https://cwe.mitre.org/data/definitions/{number}.html")),
+                json!(format!(
+                    "https://cwe.mitre.org/data/definitions/{number}.html"
+                )),
             );
         }
     }
@@ -241,7 +249,11 @@ fn rule_id(source: &FindingSource) -> String {
 /// `active.sqli.error_based` → `Active Sqli Error Based`.
 fn rule_name(rule_id: &str) -> String {
     let mut out = String::new();
-    for (i, word) in rule_id.split(['.', '_']).filter(|s| !s.is_empty()).enumerate() {
+    for (i, word) in rule_id
+        .split(['.', '_'])
+        .filter(|s| !s.is_empty())
+        .enumerate()
+    {
         if i > 0 {
             out.push(' ');
         }

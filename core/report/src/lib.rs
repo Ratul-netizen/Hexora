@@ -1645,7 +1645,11 @@ mod tests {
         let (project, request, target) = project_with_traffic();
         project
             .findings()
-            .save(&finding(target, Confidence::Confirmed, one_exchange(request)))
+            .save(&finding(
+                target,
+                Confidence::Confirmed,
+                one_exchange(request),
+            ))
             .unwrap();
 
         let report = Report::build(&project, &options()).unwrap();
@@ -1676,10 +1680,7 @@ mod tests {
         // The rule links out to the CWE definition.
         let rule = &run["tool"]["driver"]["rules"][0];
         assert_eq!(rule["id"], "authz");
-        assert!(rule["helpUri"]
-            .as_str()
-            .unwrap()
-            .contains("639"));
+        assert!(rule["helpUri"].as_str().unwrap().contains("639"));
     }
 
     #[test]
@@ -1688,15 +1689,18 @@ mod tests {
         // Below Firm, so Report::build files it as a lead rather than a finding.
         project
             .findings()
-            .save(&finding(target, Confidence::Tentative, one_exchange(request)))
+            .save(&finding(
+                target,
+                Confidence::Tentative,
+                one_exchange(request),
+            ))
             .unwrap();
 
         let report = Report::build(&project, &options()).unwrap();
         assert!(report.findings.is_empty(), "a tentative claim is a lead");
         assert_eq!(report.leads.len(), 1);
 
-        let sarif: serde_json::Value =
-            serde_json::from_str(&report.render(Format::Sarif)).unwrap();
+        let sarif: serde_json::Value = serde_json::from_str(&report.render(Format::Sarif)).unwrap();
         let result = &sarif["runs"][0]["results"][0];
         // A lead reaches the security tab so a human sees it, at note level so no
         // pipeline turns red on an unverified claim.

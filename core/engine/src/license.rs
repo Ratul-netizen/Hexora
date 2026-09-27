@@ -448,19 +448,29 @@ fn start_trial_at(path: &Path, now: DateTime<Utc>) -> Result<Entitlements> {
 }
 
 /// Verifies a licence and returns its entitlements, or a short reason it was rejected.
-fn verify(license: &[u8], verifying_key: &[u8], now: DateTime<Utc>) -> std::result::Result<Entitlements, &'static str> {
-    let file: LicenceFile = serde_json::from_slice(license).map_err(|_| "the licence file is not valid JSON")?;
+fn verify(
+    license: &[u8],
+    verifying_key: &[u8],
+    now: DateTime<Utc>,
+) -> std::result::Result<Entitlements, &'static str> {
+    let file: LicenceFile =
+        serde_json::from_slice(license).map_err(|_| "the licence file is not valid JSON")?;
 
     let b64 = base64::engine::general_purpose::STANDARD;
-    let payload = b64.decode(file.payload.trim()).map_err(|_| "the licence payload is not valid base64")?;
-    let signature = b64.decode(file.signature.trim()).map_err(|_| "the licence signature is not valid base64")?;
+    let payload = b64
+        .decode(file.payload.trim())
+        .map_err(|_| "the licence payload is not valid base64")?;
+    let signature = b64
+        .decode(file.signature.trim())
+        .map_err(|_| "the licence signature is not valid base64")?;
 
     // The signature is over the exact payload bytes, against the embedded key.
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, verifying_key)
         .verify(&payload, &signature)
         .map_err(|_| "the licence signature does not verify against Hexora's key")?;
 
-    let claims: Claims = serde_json::from_slice(&payload).map_err(|_| "the licence claims are not valid JSON")?;
+    let claims: Claims =
+        serde_json::from_slice(&payload).map_err(|_| "the licence claims are not valid JSON")?;
     let tier = Tier::parse(&claims.tier).ok_or("the licence names an unknown tier")?;
 
     let expires = match &claims.expires {
@@ -619,7 +629,10 @@ mod tests {
         let error = gate.require(Feature::ActiveScanner).unwrap_err();
         assert_eq!(error.code(), "not_licensed");
         let message = error.to_string();
-        assert!(message.contains("active scanner") && message.contains("Pro"), "{message}");
+        assert!(
+            message.contains("active scanner") && message.contains("Pro"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -631,7 +644,11 @@ mod tests {
         licence[mid] ^= 0x01;
 
         let gate = EntitlementGate::from_license(&licence, &issuer.public_key(), now());
-        assert_eq!(gate.entitlements().tier, Tier::Free, "a tampered licence must not grant a tier");
+        assert_eq!(
+            gate.entitlements().tier,
+            Tier::Free,
+            "a tampered licence must not grant a tier"
+        );
     }
 
     #[test]
@@ -801,7 +818,12 @@ mod tests {
 
     #[test]
     fn garbage_is_free_not_a_crash() {
-        for junk in [b"".as_slice(), b"not json", b"{}", br#"{"payload":"!!","signature":"!!"}"#] {
+        for junk in [
+            b"".as_slice(),
+            b"not json",
+            b"{}",
+            br#"{"payload":"!!","signature":"!!"}"#,
+        ] {
             let gate = EntitlementGate::from_license(junk, &[0u8; 32], now());
             assert_eq!(gate.entitlements().tier, Tier::Free);
         }

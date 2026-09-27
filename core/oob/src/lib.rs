@@ -77,7 +77,11 @@ pub fn fresh_token() -> String {
 /// Path first (`/<token>/…`, the form that works without DNS), then the leftmost host label
 /// (`<token>.domain`, the form a wildcard record enables). `None` when neither carries one.
 pub(crate) fn token_of(path: &str, host: &str) -> Option<String> {
-    let segment = path.trim_start_matches('/').split(['/', '?']).next().unwrap_or("");
+    let segment = path
+        .trim_start_matches('/')
+        .split(['/', '?'])
+        .next()
+        .unwrap_or("");
     if !segment.is_empty() && segment != "_hexora" {
         return Some(segment.to_string());
     }
@@ -106,13 +110,19 @@ mod tests {
     #[test]
     fn a_token_is_read_from_the_path_first() {
         let t = fresh_token();
-        assert_eq!(token_of(&format!("/{t}/x"), "oob.example").as_deref(), Some(t.as_str()));
+        assert_eq!(
+            token_of(&format!("/{t}/x"), "oob.example").as_deref(),
+            Some(t.as_str())
+        );
     }
 
     #[test]
     fn a_token_is_read_from_a_subdomain_when_the_path_has_none() {
         let t = fresh_token();
-        assert_eq!(token_of("/", &format!("{t}.oob.example")).as_deref(), Some(t.as_str()));
+        assert_eq!(
+            token_of("/", &format!("{t}.oob.example")).as_deref(),
+            Some(t.as_str())
+        );
     }
 
     #[test]

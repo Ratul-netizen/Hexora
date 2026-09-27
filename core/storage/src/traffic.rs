@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use hexora_types::http::{HttpRequest, HttpResponse};
-use hexora_types::ids::{RequestId, ResponseId, WsMessageId, TargetId};
+use hexora_types::ids::{RequestId, ResponseId, TargetId, WsMessageId};
 use hexora_types::tls::TlsInfo;
 use hexora_types::ws::WsDirection;
 use rusqlite::{params, OptionalExtension};

@@ -26,8 +26,8 @@ mod identifiers;
 mod identity;
 mod license;
 mod llm;
-mod oob;
 mod object;
+mod oob;
 mod poc;
 mod programme;
 mod project;
@@ -1438,9 +1438,7 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             subdomain,
             https,
         }) => oob::mint_cmd(server, *subdomain, *https, cli.json),
-        Command::Oob(OobCommand::Poll { server, token }) => {
-            oob::poll_cmd(server, token, cli.json)
-        }
+        Command::Oob(OobCommand::Poll { server, token }) => oob::poll_cmd(server, token, cli.json),
         Command::Oob(OobCommand::Test {
             url,
             server,
@@ -1673,18 +1671,18 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
         }) => {
             license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
             active::active(active::Args {
-            project: path,
-            host: host.as_deref(),
-            detector: detector.as_deref(),
-            hosts_at_once: *hosts_at_once,
-            delay_ms: *delay,
-            max_requests: *max_requests,
-            dry_run: *dry_run,
-            yes: *yes,
-            insecure: *insecure,
-            no_save: *no_save,
-            refresh: *refresh,
-            json: cli.json,
+                project: path,
+                host: host.as_deref(),
+                detector: detector.as_deref(),
+                hosts_at_once: *hosts_at_once,
+                delay_ms: *delay,
+                max_requests: *max_requests,
+                dry_run: *dry_run,
+                yes: *yes,
+                insecure: *insecure,
+                no_save: *no_save,
+                refresh: *refresh,
+                json: cli.json,
             })
         }
         Command::Fuzz {

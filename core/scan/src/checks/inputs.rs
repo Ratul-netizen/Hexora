@@ -105,8 +105,12 @@ mod tests {
             let loc = h.location.as_ref().unwrap();
             assert_eq!(loc.part, MessagePart::Query);
         }
-        assert!(raised.iter().any(|h| h.location.as_ref().unwrap().name == "q"));
-        assert!(raised.iter().any(|h| h.location.as_ref().unwrap().name == "sort"));
+        assert!(raised
+            .iter()
+            .any(|h| h.location.as_ref().unwrap().name == "q"));
+        assert!(raised
+            .iter()
+            .any(|h| h.location.as_ref().unwrap().name == "sort"));
     }
 
     #[test]

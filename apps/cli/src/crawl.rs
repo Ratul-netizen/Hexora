@@ -293,10 +293,7 @@ fn print_plan(
     identity: Option<&str>,
 ) {
     println!("Crawl plan");
-    println!(
-        "  as:           {}",
-        identity.unwrap_or("unauthenticated")
-    );
+    println!("  as:           {}", identity.unwrap_or("unauthenticated"));
     println!("  seeds:        {}", seeds.len());
     for seed in seeds.iter().take(5) {
         println!("    {seed}");
@@ -325,7 +322,9 @@ fn print_plan(
         }
     );
     println!();
-    println!("Forms are discovered but never submitted. Out-of-scope links are recorded, not fetched.");
+    println!(
+        "Forms are discovered but never submitted. Out-of-scope links are recorded, not fetched."
+    );
 }
 
 fn print_plan_json(

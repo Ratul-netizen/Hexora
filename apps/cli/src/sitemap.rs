@@ -140,7 +140,10 @@ fn print_tree(map: &SiteMap, forms: bool) {
     }
 
     if !map.out_of_scope.is_empty() {
-        println!("Out of scope ({}) — seen, never part of the map:", map.out_of_scope.len());
+        println!(
+            "Out of scope ({}) — seen, never part of the map:",
+            map.out_of_scope.len()
+        );
         for url in &map.out_of_scope {
             println!("  {url}");
         }
@@ -148,11 +151,7 @@ fn print_tree(map: &SiteMap, forms: bool) {
     }
 
     let form_total: usize = map.hosts.iter().map(|h| h.forms.len()).sum();
-    print!(
-        "{} host(s), {} path(s)",
-        map.hosts.len(),
-        map.path_count()
-    );
+    print!("{} host(s), {} path(s)", map.hosts.len(), map.path_count());
     if forms {
         print!(", {form_total} form(s) found");
     } else {
@@ -201,7 +200,10 @@ mod tests {
     fn content_type_is_read_case_insensitively_from_a_raw_header_block() {
         let raw = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nX: y\r\n";
         assert_eq!(content_type_of(raw), "text/html; charset=utf-8");
-        assert_eq!(content_type_of(b"content-type:application/json\n"), "application/json");
+        assert_eq!(
+            content_type_of(b"content-type:application/json\n"),
+            "application/json"
+        );
         assert_eq!(content_type_of(b"Server: nginx\r\n"), "");
     }
 

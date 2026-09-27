@@ -119,8 +119,8 @@ fn candidate_browsers() -> Vec<(PathBuf, BrowserKind)> {
     #[cfg(target_os = "windows")]
     {
         let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
-        let pf86 = std::env::var("ProgramFiles(x86)")
-            .unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+        let pf86 =
+            std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
         let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
         let chrome = r"Google\Chrome\Application\chrome.exe";
         let edge = r"Microsoft\Edge\Application\msedge.exe";
@@ -328,8 +328,14 @@ mod tests {
     #[test]
     fn classify_reads_the_kind_from_the_path() {
         assert_eq!(classify(Path::new(r"C:\...\msedge.exe")), BrowserKind::Edge);
-        assert_eq!(classify(Path::new("/usr/bin/chromium")), BrowserKind::Chromium);
-        assert_eq!(classify(Path::new("/opt/google/chrome/chrome")), BrowserKind::Chrome);
+        assert_eq!(
+            classify(Path::new("/usr/bin/chromium")),
+            BrowserKind::Chromium
+        );
+        assert_eq!(
+            classify(Path::new("/opt/google/chrome/chrome")),
+            BrowserKind::Chrome
+        );
     }
 
     #[test]
@@ -344,7 +350,11 @@ mod tests {
     #[ignore = "launches a real browser"]
     async fn live_launch_and_version() {
         let browser = Browser::launch().expect("launch a browser");
-        eprintln!("launched {} on port {}", browser.kind().label(), browser.port());
+        eprintln!(
+            "launched {} on port {}",
+            browser.kind().label(),
+            browser.port()
+        );
         let product = browser.version().await.expect("get version");
         assert!(!product.is_empty());
         eprintln!("product: {product}");

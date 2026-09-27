@@ -87,7 +87,12 @@ impl H2Pool {
     /// so a concurrent miss for the same host waits and then finds the connection pooled,
     /// rather than opening a second one.
     pub fn gate(&self, key: &Key) -> Arc<tokio::sync::Mutex<()>> {
-        self.gates.lock().unwrap().entry(key.clone()).or_default().clone()
+        self.gates
+            .lock()
+            .unwrap()
+            .entry(key.clone())
+            .or_default()
+            .clone()
     }
 
     /// Records a freshly established connection for reuse.

@@ -21,7 +21,9 @@ pub(crate) struct Store {
 impl Store {
     pub(crate) fn record(&self, interaction: Interaction) {
         if let Ok(mut map) = self.inner.lock() {
-            map.entry(interaction.token.clone()).or_default().push(interaction);
+            map.entry(interaction.token.clone())
+                .or_default()
+                .push(interaction);
         }
     }
 
@@ -123,7 +125,9 @@ fn request_line(head: &str) -> (&str, String) {
 fn header(head: &str, name: &str) -> Option<String> {
     head.lines().skip(1).find_map(|line| {
         let (key, value) = line.split_once(':')?;
-        key.trim().eq_ignore_ascii_case(name).then(|| value.trim().to_string())
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| value.trim().to_string())
     })
 }
 
@@ -152,7 +156,10 @@ mod tests {
 
     #[test]
     fn a_poll_query_token_is_parsed() {
-        assert_eq!(query_param("/_hexora/poll?token=abc", "token").as_deref(), Some("abc"));
+        assert_eq!(
+            query_param("/_hexora/poll?token=abc", "token").as_deref(),
+            Some("abc")
+        );
         assert_eq!(query_param("/", "token"), None);
     }
 

@@ -222,7 +222,8 @@ impl TcpTransport {
 
         // Boxed so the body stream can own the connection, whichever kind it is.
         if service.secure {
-            let (stream, tls) = crate::tls::handshake(tcp, &service.host, &self.tls, limits).await?;
+            let (stream, tls) =
+                crate::tls::handshake(tcp, &service.host, &self.tls, limits).await?;
             Ok((Box::new(stream), Some(tls)))
         } else {
             Ok((Box::new(tcp), None))
@@ -1501,7 +1502,8 @@ mod tests {
                 }
                 let response = builder.body(()).unwrap();
                 let mut send = responder.send_response(response, false).unwrap();
-                send.send_data(bytes::Bytes::copy_from_slice(body), true).unwrap();
+                send.send_data(bytes::Bytes::copy_from_slice(body), true)
+                    .unwrap();
             }
         });
         port
@@ -1532,7 +1534,9 @@ mod tests {
             Some("h2".to_string())
         );
 
-        let tls = exchange.tls.expect("an https exchange records its handshake");
+        let tls = exchange
+            .tls
+            .expect("an https exchange records its handshake");
         assert_eq!(tls.alpn.as_deref(), Some("h2"), "h2 must have negotiated");
     }
 
@@ -1721,8 +1725,9 @@ mod tests {
 
         // Shared so every task uses the one pool; the gate must collapse the first-connect
         // race to a single connection while the requests themselves multiplex.
-        let transport =
-            std::sync::Arc::new(TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true));
+        let transport = std::sync::Arc::new(
+            TcpTransport::with_tls(crate::tls::TlsConfig::accept_any()).http2(true),
+        );
 
         let mut tasks = Vec::new();
         for _ in 0..8 {
@@ -1821,7 +1826,9 @@ mod tests {
         let error = transport
             .send_raw_h2(request, SendOptions::interactive(Origin::Repeater))
             .await
-            .expect_err("the server must refuse a malformed header the conforming client could not send");
+            .expect_err(
+                "the server must refuse a malformed header the conforming client could not send",
+            );
 
         let message = error.to_string();
         assert!(

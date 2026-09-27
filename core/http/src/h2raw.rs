@@ -73,7 +73,13 @@ where
     out.extend_from_slice(PREFACE);
     write_settings(&mut out);
     // Open the connection-level flow-control window wide for the same reason.
-    write_frame(&mut out, FRAME_WINDOW_UPDATE, 0, 0, &0x3fff_0000u32.to_be_bytes());
+    write_frame(
+        &mut out,
+        FRAME_WINDOW_UPDATE,
+        0,
+        0,
+        &0x3fff_0000u32.to_be_bytes(),
+    );
 
     // The request: one HEADERS frame carrying the tester's block verbatim, then DATA.
     let block = encode_header_block(&request.headers);
@@ -127,14 +133,20 @@ where
                 // advertised is what matters for reading the response.
                 let mut ack = Vec::new();
                 write_frame(&mut ack, FRAME_SETTINGS, FLAG_ACK, 0, &[]);
-                stream.write_all(&ack).await.map_err(|e| io_error("settings ack", e))?;
+                stream
+                    .write_all(&ack)
+                    .await
+                    .map_err(|e| io_error("settings ack", e))?;
             }
             FRAME_SETTINGS => {} // an ACK of ours
             FRAME_WINDOW_UPDATE => {}
             FRAME_PING if flags & FLAG_ACK == 0 => {
                 let mut ack = Vec::new();
                 write_frame(&mut ack, FRAME_PING, FLAG_ACK, 0, &payload);
-                stream.write_all(&ack).await.map_err(|e| io_error("ping ack", e))?;
+                stream
+                    .write_all(&ack)
+                    .await
+                    .map_err(|e| io_error("ping ack", e))?;
             }
             FRAME_PING => {}
             FRAME_GOAWAY => {
@@ -652,10 +664,7 @@ fn static_entry(index: usize) -> Option<(&'static str, &'static str)> {
         ("via", ""),
         ("www-authenticate", ""),
     ];
-    index
-        .checked_sub(1)
-        .and_then(|i| TABLE.get(i))
-        .copied()
+    index.checked_sub(1).and_then(|i| TABLE.get(i)).copied()
 }
 
 #[cfg(test)]
@@ -679,7 +688,10 @@ mod tests {
         // so a block we build reads back field for field — including a `:status`.
         let headers = vec![
             (Bytes::from_static(b":status"), Bytes::from_static(b"418")),
-            (Bytes::from_static(b"content-type"), Bytes::from_static(b"text/plain")),
+            (
+                Bytes::from_static(b"content-type"),
+                Bytes::from_static(b"text/plain"),
+            ),
             (Bytes::from_static(b"x-odd"), Bytes::from_static(b"a b c")),
         ];
         let block = encode_header_block(&headers);
@@ -687,11 +699,17 @@ mod tests {
 
         assert_eq!(decoded.status, Some(418));
         assert_eq!(
-            decoded.headers.get("content-type").map(|h| h.value_lossy().into_owned()),
+            decoded
+                .headers
+                .get("content-type")
+                .map(|h| h.value_lossy().into_owned()),
             Some("text/plain".to_string())
         );
         assert_eq!(
-            decoded.headers.get("x-odd").map(|h| h.value_lossy().into_owned()),
+            decoded
+                .headers
+                .get("x-odd")
+                .map(|h| h.value_lossy().into_owned()),
             Some("a b c".to_string())
         );
     }
@@ -711,7 +729,7 @@ mod tests {
         let mut block = Vec::new();
         block.push(0x00); // literal without indexing, new name
         encode_string(&mut block, b"x-h"); // name, not huffman
-        // value: Huffman flag + length 3 + three arbitrary bytes
+                                           // value: Huffman flag + length 3 + three arbitrary bytes
         block.push(0x83);
         block.extend_from_slice(&[0xff, 0xff, 0xff]);
         // a following, ordinary field must still decode
@@ -721,12 +739,18 @@ mod tests {
 
         let decoded = decode_header_block(&block);
         assert_eq!(
-            decoded.headers.get("x-h").map(|h| h.value_lossy().into_owned()),
+            decoded
+                .headers
+                .get("x-h")
+                .map(|h| h.value_lossy().into_owned()),
             Some("<huffman>".to_string()),
             "an undecoded value is marked, never guessed"
         );
         assert_eq!(
-            decoded.headers.get("after").map(|h| h.value_lossy().into_owned()),
+            decoded
+                .headers
+                .get("after")
+                .map(|h| h.value_lossy().into_owned()),
             Some("here".to_string()),
             "the decoder stayed in sync past the Huffman field"
         );
@@ -745,7 +769,9 @@ mod tests {
         assert_eq!(view.path, "/accounts/7");
         assert_eq!(view.service.host, "example.com");
         assert_eq!(
-            view.headers.get("x-test").map(|h| h.value_lossy().into_owned()),
+            view.headers
+                .get("x-test")
+                .map(|h| h.value_lossy().into_owned()),
             Some("1".to_string())
         );
     }

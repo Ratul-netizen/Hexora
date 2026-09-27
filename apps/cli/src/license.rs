@@ -61,7 +61,11 @@ pub fn show(json: bool) -> Result<()> {
             // Loud before it lapses, not only after — a tester mid-engagement should have
             // warning, and the fall to free afterwards never locks their evidence.
             if days <= 7 {
-                let what = if entitlements.trial { "trial" } else { "licence" };
+                let what = if entitlements.trial {
+                    "trial"
+                } else {
+                    "licence"
+                };
                 println!("  warning: this {what} expires in {days} days; it will fall back to the free tier");
             }
         }
@@ -155,7 +159,9 @@ pub fn trial(json: bool) -> Result<()> {
             "Started a {}-day {} trial{}.",
             hexora_engine::license::TRIAL_DAYS,
             entitlements.tier.label(),
-            expires.map(|at| format!(", through {at}")).unwrap_or_default()
+            expires
+                .map(|at| format!(", through {at}"))
+                .unwrap_or_default()
         );
     }
     Ok(())
@@ -228,9 +234,8 @@ pub struct SignArgs<'a> {
 
 /// `hexora license sign` — mint a signed licence file.
 pub fn sign(args: SignArgs<'_>) -> Result<()> {
-    let private_key = std::fs::read(args.key).map_err(|e| {
-        HexoraError::invalid_input("key", format!("{}: {e}", args.key.display()))
-    })?;
+    let private_key = std::fs::read(args.key)
+        .map_err(|e| HexoraError::invalid_input("key", format!("{}: {e}", args.key.display())))?;
 
     let tier = match args.tier.trim().to_ascii_lowercase().as_str() {
         "pro" => Tier::Pro,
@@ -359,7 +364,11 @@ mod tests {
         // Refused before the licence location is even resolved, so it cannot write anything.
         let dir = tempfile::tempdir().unwrap();
         let bad = dir.path().join("bad.json");
-        std::fs::write(&bad, br#"{"payload":"eyJ0aWVyIjoicHJvIn0=","signature":"AAAA"}"#).unwrap();
+        std::fs::write(
+            &bad,
+            br#"{"payload":"eyJ0aWVyIjoicHJvIn0=","signature":"AAAA"}"#,
+        )
+        .unwrap();
 
         let error = activate(&bad, false).unwrap_err();
         assert_eq!(error.code(), "invalid_input");

@@ -87,7 +87,11 @@ pub fn extract(base_url: &str, content_type: &str, body: &[u8]) -> Vec<Discovere
         }
         if let Some(url) = resolve(base_url, candidate) {
             if seen.insert(url.clone()) {
-                out.push(Discovered { url, source, method });
+                out.push(Discovered {
+                    url,
+                    source,
+                    method,
+                });
             }
         }
     };
@@ -132,7 +136,10 @@ fn resolve(base_url: &str, candidate: &str) -> Option<String> {
     let authority_or_path = candidate.find(['/', '?']).unwrap_or(candidate.len());
     if let Some(colon) = candidate[..authority_or_path].find(':') {
         let scheme = &candidate[..colon];
-        let is_scheme = scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        let is_scheme = scheme
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
             && scheme
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
@@ -156,7 +163,8 @@ fn resolve(base_url: &str, candidate: &str) -> Option<String> {
 
     if let Some(rest) = candidate.strip_prefix("//") {
         // Scheme-relative: keep the base's scheme.
-        let (service, path) = HttpService::parse_url(&format!("{}://{rest}", base.scheme())).ok()?;
+        let (service, path) =
+            HttpService::parse_url(&format!("{}://{rest}", base.scheme())).ok()?;
         return Some(format!("{}{}", service.origin(), path));
     }
     if candidate.starts_with('/') {
@@ -168,7 +176,10 @@ fn resolve(base_url: &str, candidate: &str) -> Option<String> {
         Some((prefix, _)) => prefix,
         None => "",
     };
-    Some(format!("{origin}{}", normalize_path(&format!("{dir}/{candidate}"))))
+    Some(format!(
+        "{origin}{}",
+        normalize_path(&format!("{dir}/{candidate}"))
+    ))
 }
 
 /// Collapses `.` and `..` segments in an absolute path, so a relative link resolves to a real
@@ -276,7 +287,10 @@ fn scan_url_strings(text: &str) -> Vec<String> {
         let Some((start, _)) = next else { break };
         let url: String = text[start..]
             .chars()
-            .take_while(|&c| !c.is_whitespace() && !matches!(c, '"' | '\'' | '<' | '>' | '`' | ')' | '(' | ']' | '['))
+            .take_while(|&c| {
+                !c.is_whitespace()
+                    && !matches!(c, '"' | '\'' | '<' | '>' | '`' | ')' | '(' | ']' | '[')
+            })
             .collect();
         i = start + url.len().max(1);
         if url.len() > "https://".len() {
@@ -341,20 +355,28 @@ mod tests {
     fn a_form_is_recorded_with_its_method() {
         let body = br#"<form action="/login" method="post"><input name="u"></form>"#;
         let found = extract("https://app.test/", "text/html", body);
-        let form = found.iter().find(|d| d.source == LinkSource::FormAction).unwrap();
+        let form = found
+            .iter()
+            .find(|d| d.source == LinkSource::FormAction)
+            .unwrap();
         assert_eq!(form.url, "https://app.test/login");
         assert_eq!(form.method.as_deref(), Some("POST"));
     }
 
     #[test]
     fn a_dotdot_relative_link_is_normalized() {
-        let found = extract("https://app.test/a/b/c.html", "text/html", br#"<a href="../x">"#);
+        let found = extract(
+            "https://app.test/a/b/c.html",
+            "text/html",
+            br#"<a href="../x">"#,
+        );
         assert_eq!(urls(&found), vec!["https://app.test/a/x"]);
     }
 
     #[test]
     fn urls_in_a_script_body_are_found() {
-        let body = br#"const api = "https://api.test/v1/users"; fetch("https://api.test/v1/orders")"#;
+        let body =
+            br#"const api = "https://api.test/v1/users"; fetch("https://api.test/v1/orders")"#;
         let found = extract("https://app.test/app.js", "application/javascript", body);
         let got = urls(&found);
         assert!(got.contains(&"https://api.test/v1/users"));
@@ -365,7 +387,13 @@ mod tests {
     fn results_are_deduplicated() {
         let body = br#"<a href="/x">1</a><a href="/x">2</a><a href="/x">3</a>"#;
         let found = extract("https://app.test/", "text/html", body);
-        assert_eq!(found.iter().filter(|d| d.url == "https://app.test/x").count(), 1);
+        assert_eq!(
+            found
+                .iter()
+                .filter(|d| d.url == "https://app.test/x")
+                .count(),
+            1
+        );
     }
 
     #[test]

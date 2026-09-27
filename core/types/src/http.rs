@@ -282,7 +282,10 @@ impl HttpService {
     pub fn parse_url(url: &str) -> crate::Result<(Self, String)> {
         let trimmed = url.trim();
         if trimmed.is_empty() {
-            return Err(crate::HexoraError::invalid_input("url", "a URL is required"));
+            return Err(crate::HexoraError::invalid_input(
+                "url",
+                "a URL is required",
+            ));
         }
 
         let (secure, rest) = match trimmed.split_once("://") {
@@ -530,7 +533,8 @@ mod tests {
 
     #[test]
     fn parse_url_reads_scheme_host_port_and_path() {
-        let (service, path) = HttpService::parse_url("https://api.example.com/v1/users?q=1").unwrap();
+        let (service, path) =
+            HttpService::parse_url("https://api.example.com/v1/users?q=1").unwrap();
         assert_eq!(service, HttpService::new("api.example.com", 443, true));
         assert_eq!(path, "/v1/users?q=1");
 

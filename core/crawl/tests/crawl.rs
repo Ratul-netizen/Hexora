@@ -32,7 +32,12 @@ impl MockSite {
         }
     }
 
-    fn page(mut self, path: &'static str, content_type: &'static str, body: impl Into<String>) -> Self {
+    fn page(
+        mut self,
+        path: &'static str,
+        content_type: &'static str,
+        body: impl Into<String>,
+    ) -> Self {
         self.pages.insert(path, (content_type, body.into()));
         self
     }
@@ -99,7 +104,11 @@ fn no_delay(budget: CrawlBudget) -> CrawlBudget {
 }
 
 fn fetched_paths(report: &hexora_crawl::CrawlReport) -> Vec<String> {
-    report.fetched.iter().map(|e| e.request.path.clone()).collect()
+    report
+        .fetched
+        .iter()
+        .map(|e| e.request.path.clone())
+        .collect()
 }
 
 #[tokio::test]
@@ -226,9 +235,10 @@ async fn a_destructive_link_is_recorded_not_followed() {
     let paths = fetched_paths(&report);
     assert!(paths.contains(&"/safe".to_string()));
     assert!(!paths.contains(&"/logout".to_string()));
-    assert!(report.skipped.iter().any(|s| {
-        s.reason == SkipReason::LooksDestructive && s.url.ends_with("/logout")
-    }));
+    assert!(report
+        .skipped
+        .iter()
+        .any(|s| { s.reason == SkipReason::LooksDestructive && s.url.ends_with("/logout") }));
 }
 
 #[tokio::test]
@@ -266,16 +276,21 @@ async fn a_form_is_discovered_but_never_auto_submitted() {
         .await;
 
     assert_eq!(fetched_paths(&report), vec!["/"]);
-    assert!(report.skipped.iter().any(|s| {
-        s.reason == SkipReason::Form && s.url.ends_with("/submit")
-    }));
+    assert!(report
+        .skipped
+        .iter()
+        .any(|s| { s.reason == SkipReason::Form && s.url.ends_with("/submit") }));
 }
 
 #[tokio::test]
 async fn robots_disallow_is_respected_by_default() {
     let guard = guard_over(
         MockSite::new()
-            .page("/robots.txt", "text/plain", "User-agent: *\nDisallow: /private")
+            .page(
+                "/robots.txt",
+                "text/plain",
+                "User-agent: *\nDisallow: /private",
+            )
             .page(
                 "/",
                 "text/html",
@@ -293,16 +308,21 @@ async fn robots_disallow_is_respected_by_default() {
     let paths = fetched_paths(&report);
     assert!(paths.contains(&"/public".to_string()));
     assert!(!paths.contains(&"/private/x".to_string()));
-    assert!(report.skipped.iter().any(|s| {
-        s.reason == SkipReason::RobotsDisallowed && s.url.ends_with("/private/x")
-    }));
+    assert!(report
+        .skipped
+        .iter()
+        .any(|s| { s.reason == SkipReason::RobotsDisallowed && s.url.ends_with("/private/x") }));
 }
 
 #[tokio::test]
 async fn robots_can_be_overridden_loudly() {
     let guard = guard_over(
         MockSite::new()
-            .page("/robots.txt", "text/plain", "User-agent: *\nDisallow: /private")
+            .page(
+                "/robots.txt",
+                "text/plain",
+                "User-agent: *\nDisallow: /private",
+            )
             .page("/", "text/html", r#"<a href="/private/x">p</a>"#)
             .page("/private/x", "text/html", "secret"),
     );

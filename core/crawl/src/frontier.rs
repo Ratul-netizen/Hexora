@@ -306,24 +306,23 @@ impl<'a, T: HttpTransport> Crawler<'a, T> {
         let guard = self.guard;
         let options = SendOptions::automated(Origin::Crawler);
 
-    let mut frontier: VecDeque<Pending> = VecDeque::new();
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut per_host: HashMap<String, usize> = HashMap::new();
-    let mut robots_by_host: HashMap<String, Robots> = HashMap::new();
-    let mut fetched: Vec<Exchange> = Vec::new();
-    let mut skipped: Vec<Skipped> = Vec::new();
+        let mut frontier: VecDeque<Pending> = VecDeque::new();
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut per_host: HashMap<String, usize> = HashMap::new();
+        let mut robots_by_host: HashMap<String, Robots> = HashMap::new();
+        let mut fetched: Vec<Exchange> = Vec::new();
+        let mut skipped: Vec<Skipped> = Vec::new();
 
-    // Considers one candidate: dedup, then run every check that can be made without
-    // sending — scope, depth, and (for a *discovered* link) the form and destructive-link
-    // guards — and either enqueue it or record why not. Kept as a closure over the crawl
-    // state so the seeding pass and the per-response discovery pass share one policy.
-    let consider =
-        |url: String,
-         depth: usize,
-         source: Option<LinkSource>,
-         frontier: &mut VecDeque<Pending>,
-         visited: &mut HashSet<String>,
-         skipped: &mut Vec<Skipped>| {
+        // Considers one candidate: dedup, then run every check that can be made without
+        // sending — scope, depth, and (for a *discovered* link) the form and destructive-link
+        // guards — and either enqueue it or record why not. Kept as a closure over the crawl
+        // state so the seeding pass and the per-response discovery pass share one policy.
+        let consider = |url: String,
+                        depth: usize,
+                        source: Option<LinkSource>,
+                        frontier: &mut VecDeque<Pending>,
+                        visited: &mut HashSet<String>,
+                        skipped: &mut Vec<Skipped>| {
             if !visited.insert(url.clone()) {
                 return;
             }
@@ -383,95 +382,95 @@ impl<'a, T: HttpTransport> Crawler<'a, T> {
             frontier.push_back(Pending { request, depth });
         };
 
-    for seed in seeds {
-        consider(
-            seed.into(),
-            0,
-            None,
-            &mut frontier,
-            &mut visited,
-            &mut skipped,
-        );
-    }
-
-    let stopped = loop {
-        // Checked before every fetch, so a cancelled crawl stops promptly and returns what
-        // it has rather than abandoning it.
-        if self.cancel.is_stopped() {
-            break CrawlStop::Cancelled;
+        for seed in seeds {
+            consider(
+                seed.into(),
+                0,
+                None,
+                &mut frontier,
+                &mut visited,
+                &mut skipped,
+            );
         }
-        let Some(item) = frontier.pop_front() else {
-            break CrawlStop::FrontierEmpty;
+
+        let stopped = loop {
+            // Checked before every fetch, so a cancelled crawl stops promptly and returns what
+            // it has rather than abandoning it.
+            if self.cancel.is_stopped() {
+                break CrawlStop::Cancelled;
+            }
+            let Some(item) = frontier.pop_front() else {
+                break CrawlStop::FrontierEmpty;
+            };
+            if fetched.len() >= budget.max_requests {
+                break CrawlStop::RequestCeiling;
+            }
+
+            let service = item.request.service.clone();
+            let host = service.host.clone();
+
+            // Respect robots.txt by default: fetch it once per host (this fetch is overhead, so
+            // it is not counted against the ceiling or the per-host cap), then honour it.
+            if !policy.ignore_robots {
+                if !robots_by_host.contains_key(&host) {
+                    let robots = fetch_robots(guard, &service, &options, attached, identity).await;
+                    robots_by_host.insert(host.clone(), robots);
+                }
+                if let Some(robots) = robots_by_host.get(&host) {
+                    if !robots.allows(&item.request.path) {
+                        skipped.push(Skipped {
+                            url: item.request.url(),
+                            reason: SkipReason::RobotsDisallowed,
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            let count = per_host.entry(host).or_insert(0);
+            if *count >= budget.max_per_host {
+                skipped.push(Skipped {
+                    url: item.request.url(),
+                    reason: SkipReason::PerHostLimit,
+                });
+                continue;
+            }
+            *count += 1;
+
+            let base_url = item.request.url();
+            let child_depth = item.depth + 1;
+            match guard.send(item.request, options.clone()).await {
+                Ok(exchange) => {
+                    let content_type = exchange
+                        .response
+                        .headers
+                        .get("content-type")
+                        .map(|h| h.value_lossy().into_owned())
+                        .unwrap_or_default();
+                    // Feed the response back through CR.a to discover the next ring of links.
+                    for link in extract(&base_url, &content_type, &exchange.response.body) {
+                        consider(
+                            link.url,
+                            child_depth,
+                            Some(link.source),
+                            &mut frontier,
+                            &mut visited,
+                            &mut skipped,
+                        );
+                    }
+                    fetched.push(exchange);
+                }
+                // A transport error on one URL is a coverage gap, not a reason to abandon the
+                // crawl: the site map simply will not include what could not be fetched.
+                Err(error) => {
+                    tracing::debug!(url = %base_url, %error, "crawl fetch failed");
+                }
+            }
+
+            if !budget.delay.is_zero() {
+                tokio::time::sleep(budget.delay).await;
+            }
         };
-        if fetched.len() >= budget.max_requests {
-            break CrawlStop::RequestCeiling;
-        }
-
-        let service = item.request.service.clone();
-        let host = service.host.clone();
-
-        // Respect robots.txt by default: fetch it once per host (this fetch is overhead, so
-        // it is not counted against the ceiling or the per-host cap), then honour it.
-        if !policy.ignore_robots {
-            if !robots_by_host.contains_key(&host) {
-                let robots = fetch_robots(guard, &service, &options, attached, identity).await;
-                robots_by_host.insert(host.clone(), robots);
-            }
-            if let Some(robots) = robots_by_host.get(&host) {
-                if !robots.allows(&item.request.path) {
-                    skipped.push(Skipped {
-                        url: item.request.url(),
-                        reason: SkipReason::RobotsDisallowed,
-                    });
-                    continue;
-                }
-            }
-        }
-
-        let count = per_host.entry(host).or_insert(0);
-        if *count >= budget.max_per_host {
-            skipped.push(Skipped {
-                url: item.request.url(),
-                reason: SkipReason::PerHostLimit,
-            });
-            continue;
-        }
-        *count += 1;
-
-        let base_url = item.request.url();
-        let child_depth = item.depth + 1;
-        match guard.send(item.request, options.clone()).await {
-            Ok(exchange) => {
-                let content_type = exchange
-                    .response
-                    .headers
-                    .get("content-type")
-                    .map(|h| h.value_lossy().into_owned())
-                    .unwrap_or_default();
-                // Feed the response back through CR.a to discover the next ring of links.
-                for link in extract(&base_url, &content_type, &exchange.response.body) {
-                    consider(
-                        link.url,
-                        child_depth,
-                        Some(link.source),
-                        &mut frontier,
-                        &mut visited,
-                        &mut skipped,
-                    );
-                }
-                fetched.push(exchange);
-            }
-            // A transport error on one URL is a coverage gap, not a reason to abandon the
-            // crawl: the site map simply will not include what could not be fetched.
-            Err(error) => {
-                tracing::debug!(url = %base_url, %error, "crawl fetch failed");
-            }
-        }
-
-        if !budget.delay.is_zero() {
-            tokio::time::sleep(budget.delay).await;
-        }
-    };
 
         CrawlReport {
             fetched,
