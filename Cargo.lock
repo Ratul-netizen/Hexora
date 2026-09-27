@@ -1596,6 +1596,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "futures",
  "hexora-active",
  "hexora-authz",
  "hexora-crawl",

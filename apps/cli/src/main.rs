@@ -36,6 +36,7 @@ mod poc;
 mod programme;
 mod project;
 mod proxy;
+mod race;
 mod repeat;
 mod report;
 mod scan;
@@ -414,6 +415,26 @@ enum Command {
     /// map instead. Dry-run by default; `--send` fetches the safe operations.
     #[command(subcommand)]
     Import(ImportCommand),
+
+    /// Send one captured request many times at once, to find a race condition.
+    ///
+    /// A check-then-act with no lock lets two requests both pass the check before either
+    /// commits. This replays a request concurrently and shows the spread of what came back.
+    Race {
+        /// Project directory.
+        path: PathBuf,
+        /// The request to replay, from `hexora history`.
+        id: String,
+        /// How many copies to send at once.
+        #[arg(long, default_value_t = 20)]
+        count: usize,
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+        /// Send without asking.
+        #[arg(long)]
+        yes: bool,
+    },
 
     /// Run a declarative plan file end to end — import, crawl, scan, report — for CI.
     ///
@@ -2156,6 +2177,23 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 send: *send,
                 include_mutations: *include_mutations,
                 max: *max,
+                insecure: *insecure,
+                yes: *yes,
+                json: cli.json,
+            })
+        }
+        Command::Race {
+            path,
+            id,
+            count,
+            insecure,
+            yes,
+        } => {
+            license::gate().require(hexora_engine::license::Feature::Intruder)?;
+            race::run(race::Args {
+                project: path,
+                id,
+                count: *count,
                 insecure: *insecure,
                 yes: *yes,
                 json: cli.json,

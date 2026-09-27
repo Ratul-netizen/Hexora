@@ -58,7 +58,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Repeater | ✅ | ✅ Replay | PLANNED M4 | |
 | Repeater collections/tabs | ✅ | ✅ | PLANNED M4 | |
 | **Request branching with lineage** | ❌ | ❌ | PLANNED M4 | Hexora original — variants keep their parent |
-| Request pipelines (race conditions) | ⚠️ single-packet | ✅ Pipeline | PLANNED M7 | Caido's Pipeline is the reference |
+| Request pipelines (race conditions) | ⚠️ single-packet | ✅ Pipeline | **DONE M7** | `hexora race <request> --count N` replays a captured request N times concurrently and reports the spread; more than one 2xx on a single-use action is the race. Concurrent in-flight sends (HTTP/2 supported); last-byte single-packet synchronisation is a future refinement |
 | Comparer (response diff) | ✅ | ⚠️ | PLANNED M4 | |
 | Decoder | ✅ | ✅ | PLANNED M7 | |
 | Sequencer (token randomness) | ✅ | ❌ | **DONE M9** | `hexora sequencer`: from a file of tokens or extracted from captured traffic by response header or cookie name. Reports per-character Shannon entropy and effective bits/token, and flags predictable ones — a sequential/evenly-spaced counter (which fixed length and charset hide), a tiny alphabet, repeats — with a conservative verdict that says plainly when the sample is too small. Caido has no sequencer |
