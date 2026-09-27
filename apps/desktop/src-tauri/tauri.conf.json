@@ -27,12 +27,32 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Hexora",
+    "homepage": "https://github.com/Ratul-netizen/Hexora",
+    "category": "DeveloperTool",
+    "shortDescription": "The modern offensive security workbench.",
+    "longDescription": "Hexora is a web and API security testing platform for authorized penetration testing and security research: an intercepting proxy, repeater, intruder, evidence-driven scanner, authorization testing, crawler, out-of-band collaborator, LLM and DOM-XSS testing, and a headless CI runner.",
+    "copyright": "Copyright © 2026 Hexora. Licensed under AGPL-3.0-or-later.",
+    "licenseFile": "../../../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/256x256.png",
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "both"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
   }
 }
