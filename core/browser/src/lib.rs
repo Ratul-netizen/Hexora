@@ -33,7 +33,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+pub mod domxss;
 pub mod launch;
+pub use domxss::{DomXssReport, SinkHit, Source};
 pub use launch::{attach, find_browser, Browser, BrowserKind, LaunchOptions};
 
 use hexora_engine::transport::{HttpTransport, Origin, SendOptions};

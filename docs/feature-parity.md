@@ -140,8 +140,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Capability | Burp Pro | Caido | Hexora | Notes |
 | ---------- | :------: | :---: | ------ | ----- |
-| Embedded browser | ✅ Chromium | ⚠️ | PLANNED M18 | **Drive the user's installed Chrome over CDP** rather than shipping a 150 MB Chromium |
-| DOM XSS testing | DOM Invader | ❌ | PLANNED M18 | |
+| Embedded browser | ✅ Chromium | ⚠️ | **DONE M18** | Drives the user's installed Chrome/Edge over CDP (a throwaway profile, killed on drop) rather than shipping a 150 MB Chromium — `core/browser`, used by `hexora domxss` |
+| DOM XSS testing | DOM Invader | ❌ | **DONE M18** | `hexora domxss <url>`: installs sink instrumentation over CDP (innerHTML/outerHTML, insertAdjacentHTML, document.write, eval, string timers), navigates with a canary in `location.hash` and `location.search`, and reports each proven source→sink flow. Caido has none |
 | Pre-configured proxy + cert | ✅ | ✅ | PLANNED M18 | |
 
 ## 8. AI

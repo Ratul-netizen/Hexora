@@ -19,6 +19,7 @@ mod authz;
 mod check;
 mod crawl;
 mod detectors;
+mod domxss;
 mod findings;
 mod fuzz;
 mod header;
@@ -415,6 +416,24 @@ enum Command {
     /// map instead. Dry-run by default; `--send` fetches the safe operations.
     #[command(subcommand)]
     Import(ImportCommand),
+
+    /// Drive a real browser to find DOM-based XSS — Burp's DOM Invader.
+    ///
+    /// DOM XSS never reaches the server, so captured traffic cannot reveal it. This wraps the
+    /// dangerous DOM sinks, navigates with a canary in each source, and reports the flows.
+    Domxss {
+        /// The page URL to test.
+        url: String,
+        /// Show the browser window instead of running headless.
+        #[arg(long)]
+        headed: bool,
+        /// Seconds to wait for each navigation.
+        #[arg(long, default_value_t = 20)]
+        timeout: u64,
+        /// Do not ask before driving the browser.
+        #[arg(long)]
+        yes: bool,
+    },
 
     /// Send one captured request many times at once, to find a race condition.
     ///
@@ -2178,6 +2197,21 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
                 include_mutations: *include_mutations,
                 max: *max,
                 insecure: *insecure,
+                yes: *yes,
+                json: cli.json,
+            })
+        }
+        Command::Domxss {
+            url,
+            headed,
+            timeout,
+            yes,
+        } => {
+            license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            domxss::run(domxss::Args {
+                url,
+                headed: *headed,
+                timeout: *timeout,
                 yes: *yes,
                 json: cli.json,
             })
