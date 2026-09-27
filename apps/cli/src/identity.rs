@@ -7,9 +7,15 @@
 //! exactly why the option does not exist.
 
 use std::path::Path;
+use std::sync::Arc;
 
+use hexora_engine::guard::ScopeGuard;
+use hexora_http::{TcpTransport, TlsConfig};
+use hexora_repeater::{Repeater, SendAs};
 use hexora_storage::IdentityStore;
+use hexora_types::http::Headers;
 use hexora_types::identity::{Credential, Identity, PrivilegeLevel};
+use hexora_types::ids::RequestId;
 use hexora_types::redact::Secret;
 use hexora_types::{Header, HexoraError, Result};
 
@@ -448,6 +454,214 @@ pub fn refresh(args: RefreshArgs<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Options for `hexora identity renew`.
+pub struct RenewArgs<'a> {
+    pub project: &'a Path,
+    /// The identity to update.
+    pub who: &'a str,
+    /// The captured login/refresh request to replay, from `hexora history`.
+    pub from: &'a str,
+    /// Read the new session from this cookie in the response's `Set-Cookie`.
+    pub cookie: Option<&'a str>,
+    /// Or from this response header's value.
+    pub header: Option<&'a str>,
+    /// Or from this dot-path in the response's JSON body (e.g. `data.accessToken`).
+    pub json_field: Option<&'a str>,
+    /// Work out what would happen and send nothing.
+    pub dry_run: bool,
+    pub insecure: bool,
+    pub json: bool,
+}
+
+/// Renews an identity's session by replaying a recorded login and reading the new token out
+/// of *its response*.
+///
+/// This is the complement to `refresh`: `refresh` adopts a credential a browser already sent
+/// through the proxy, and refuses anything Hexora sent itself; `renew` deliberately re-runs a
+/// login or token-refresh request and takes the fresh token from the response. It is for API
+/// token and refresh-endpoint flows — not password logins behind captcha, MFA or SSO, which
+/// this cannot and should not automate. The tester names the request, so the replay is their
+/// decision, and the token is never printed.
+pub fn renew(args: RenewArgs<'_>) -> Result<()> {
+    let project = crate::open_project(args.project)?;
+    let identities = project.identities();
+    let identity = resolve(&identities, args.who)?;
+    let kind = credential_kind_key(&identity.credential)?;
+
+    let request_id: RequestId = args.from.parse().map_err(|e| {
+        HexoraError::invalid_input("--from", format!("{} is not a request id: {e}", args.from))
+    })?;
+
+    let sources = [args.cookie, args.header, args.json_field]
+        .iter()
+        .filter(|s| s.is_some())
+        .count();
+    if sources != 1 {
+        return Err(HexoraError::invalid_input(
+            "source",
+            "say where the new token is in the login response: exactly one of --cookie <name>, \
+             --header <name>, or --json-field <path>",
+        ));
+    }
+
+    let transport = if args.insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let scope = Arc::new(project.settings().scope()?);
+    let store = Arc::new(project.traffic());
+    let repeater = Repeater::new(ScopeGuard::new(transport, scope), store)
+        .attaching(project.settings().attached_headers()?);
+    let draft = repeater.draft_from(request_id)?;
+
+    if args.dry_run {
+        println!(
+            "Would replay {} {} and read the new session from {}.",
+            draft.request.method,
+            draft.request.url(),
+            describe_source(&args)
+        );
+        println!("Nothing was sent.");
+        return Ok(());
+    }
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| HexoraError::Internal(format!("failed to start the async runtime: {e}")))?;
+    let sent = runtime.block_on(repeater.send_as(&draft, SendAs::repeater()))?;
+    let response = &sent.exchange.response;
+
+    let new_value = if let Some(name) = args.cookie {
+        let value = cookie_value(&response.headers, name).ok_or_else(|| {
+            HexoraError::invalid_input(
+                "--cookie",
+                format!(
+                    "the login response set no `{name}` cookie (status {})",
+                    response.status
+                ),
+            )
+        })?;
+        // A Cookie credential is the whole `Cookie:` header; store the pair so it is sent back
+        // as `name=value`. Other credential kinds take the bare value.
+        match kind.as_str() {
+            "cookie" => format!("{name}={value}"),
+            _ => value,
+        }
+    } else if let Some(name) = args.header {
+        response
+            .headers
+            .get(name)
+            .map(|h| h.value_lossy().trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                HexoraError::invalid_input(
+                    "--header",
+                    format!(
+                        "the login response had no `{name}` header (status {})",
+                        response.status
+                    ),
+                )
+            })?
+    } else {
+        let path = args.json_field.unwrap();
+        json_field(response.body.as_ref(), path).ok_or_else(|| {
+            HexoraError::invalid_input(
+                "--json-field",
+                format!(
+                    "the login response body has no string at `{path}` (status {})",
+                    response.status
+                ),
+            )
+        })?
+    };
+
+    let credential = build_credential(&kind, new_value)?;
+    let mut updated = identity.clone();
+    updated.credential = credential;
+    identities.put(&updated)?;
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "renewed": true,
+                "identity": identity.label,
+                "source": sent.id.to_string(),
+                "status": response.status,
+            })
+        );
+    } else {
+        println!(
+            "Renewed the session for `{}` from {} (status {}).",
+            identity.label,
+            describe_source(&args),
+            response.status
+        );
+        println!("The new credential is stored; the token itself is not printed.");
+    }
+    Ok(())
+}
+
+/// The credential kind key for `build_credential`, or an error when there is no session to renew.
+fn credential_kind_key(credential: &Credential) -> Result<String> {
+    match credential {
+        Credential::None => Err(HexoraError::invalid_input(
+            "identity",
+            "this identity is anonymous — there is no session to renew",
+        )),
+        Credential::Bearer { .. } => Ok("bearer".to_string()),
+        Credential::Cookie { .. } => Ok("cookie".to_string()),
+        Credential::Basic { .. } => Err(HexoraError::invalid_input(
+            "identity",
+            "a basic-auth password is not a session; `renew` does not apply to it",
+        )),
+        Credential::Header { name, .. } => Ok(name.clone()),
+    }
+}
+
+/// A named cookie's value from the response's `Set-Cookie` headers.
+fn cookie_value(headers: &Headers, name: &str) -> Option<String> {
+    for header in headers.get_all("set-cookie") {
+        let value = header.value_lossy();
+        let pair = value.split(';').next().unwrap_or("");
+        if let Some((k, v)) = pair.split_once('=') {
+            if k.trim().eq_ignore_ascii_case(name) {
+                return Some(v.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// A string (or number) at a dot-path in a JSON body, e.g. `data.accessToken`.
+fn json_field(body: &[u8], path: &str) -> Option<String> {
+    let root: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let mut current = &root;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    match current {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// How the new token is being read, for messages.
+fn describe_source(args: &RenewArgs<'_>) -> String {
+    if let Some(name) = args.cookie {
+        format!("the `{name}` cookie in the response")
+    } else if let Some(name) = args.header {
+        format!("the `{name}` response header")
+    } else if let Some(path) = args.json_field {
+        format!("`{path}` in the response body")
+    } else {
+        "the response".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,6 +674,50 @@ mod tests {
             Credential::Bearer { token } => assert_eq!(token.expose(), TEST_TOKEN),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_named_cookie_is_read_out_of_set_cookie() {
+        let mut headers = Headers::new();
+        headers.append(Header::new("Set-Cookie", "other=1; Path=/"));
+        headers.append(Header::new(
+            "Set-Cookie",
+            "session=abc123; Path=/; HttpOnly",
+        ));
+        assert_eq!(
+            cookie_value(&headers, "session"),
+            Some("abc123".to_string())
+        );
+        assert_eq!(cookie_value(&headers, "missing"), None);
+    }
+
+    #[test]
+    fn a_json_field_is_read_by_dot_path() {
+        let body = br#"{"data":{"accessToken":"tok-9"},"n":42}"#;
+        assert_eq!(
+            json_field(body, "data.accessToken"),
+            Some("tok-9".to_string())
+        );
+        assert_eq!(json_field(body, "n"), Some("42".to_string()));
+        assert_eq!(json_field(body, "data.missing"), None);
+        assert_eq!(json_field(b"not json", "x"), None);
+    }
+
+    #[test]
+    fn renew_refuses_an_anonymous_or_basic_identity() {
+        assert!(credential_kind_key(&Credential::None).is_err());
+        assert!(credential_kind_key(&Credential::Basic {
+            username: "u".into(),
+            password: "p".to_string().into(),
+        })
+        .is_err());
+        assert_eq!(
+            credential_kind_key(&Credential::Cookie {
+                value: "x".to_string().into()
+            })
+            .unwrap(),
+            "cookie"
+        );
     }
 
     #[test]

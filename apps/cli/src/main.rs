@@ -994,6 +994,44 @@ enum IdentityCommand {
         host: Option<String>,
     },
 
+    /// Renew a session by replaying a recorded login and reading the new token from its response.
+    ///
+    /// The complement to `refresh`: for API token and refresh-endpoint flows, re-run a login
+    /// request you captured and take the fresh token from the response. Say where the token is
+    /// with exactly one of --cookie, --header or --json-field. Not for password logins behind
+    /// captcha, MFA or SSO.
+    Renew {
+        /// Project directory.
+        path: PathBuf,
+
+        /// The identity, by label or id.
+        who: String,
+
+        /// The captured login/refresh request to replay, from `hexora history`.
+        #[arg(long, value_name = "ID")]
+        from: String,
+
+        /// Read the new session from this cookie in the response's Set-Cookie.
+        #[arg(long, value_name = "NAME")]
+        cookie: Option<String>,
+
+        /// Or from this response header's value.
+        #[arg(long, value_name = "NAME", conflicts_with = "cookie")]
+        header: Option<String>,
+
+        /// Or from this dot-path in the response's JSON body (e.g. data.accessToken).
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["cookie", "header"])]
+        json_field: Option<String>,
+
+        /// Work out what would happen and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
+    },
+
     /// Add an identity.
     ///
     /// The credential is read from an environment variable or a file, never from an
@@ -1792,6 +1830,33 @@ fn run(cli: &Cli) -> hexora_types::Result<()> {
             host: host.as_deref(),
             json: cli.json,
         }),
+        Command::Identity(IdentityCommand::Renew {
+            path,
+            who,
+            from,
+            cookie,
+            header,
+            json_field,
+            dry_run,
+            insecure,
+        }) => {
+            // Replaying a login is automated traffic; gate it like the active scanner unless
+            // it is only a dry run.
+            if !*dry_run {
+                license::gate().require(hexora_engine::license::Feature::ActiveScanner)?;
+            }
+            identity::renew(identity::RenewArgs {
+                project: path,
+                who,
+                from,
+                cookie: cookie.as_deref(),
+                header: header.as_deref(),
+                json_field: json_field.as_deref(),
+                dry_run: *dry_run,
+                insecure: *insecure,
+                json: cli.json,
+            })
+        }
         Command::Identity(IdentityCommand::List { path }) => identity::list(path, cli.json),
         Command::Identity(IdentityCommand::Remove { path, who }) => {
             identity::remove(path, who, cli.json)

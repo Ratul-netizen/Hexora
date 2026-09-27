@@ -64,7 +64,7 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Sequencer (token randomness) | ✅ | ❌ | **DONE M9** | `hexora sequencer`: from a file of tokens or extracted from captured traffic by response header or cookie name. Reports per-character Shannon entropy and effective bits/token, and flags predictable ones — a sequential/evenly-spaced counter (which fixed length and charset hide), a tiny alphabet, repeats — with a conservative verdict that says plainly when the sample is too small. Caido has no sequencer |
 | Site map / target tree | ✅ | ✅ Sitemap | PLANNED M5 | |
 | Scope definition | ✅ | ✅ | **DONE M0** | Already enforced, not just represented |
-| Session handling rules / macros | ✅ | ⚠️ | PLANNED M9 | The thing people hate configuring; big UX opportunity |
+| Session handling rules / macros | ✅ | ⚠️ | **DONE M9/M15.2** | Two complementary paths: `identity refresh` adopts a fresh session from prior proxy traffic; `identity renew` replays a recorded login/refresh request and reads the new token out of its response (a Set-Cookie, a response header, or a dot-path in the JSON body) — the API-token / refresh-endpoint case. Both reshape the value into the identity's credential kind and never print it |
 
 ## 3. Automated attack
 
@@ -114,8 +114,8 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Programme terms filter what gets reported | ❌ | ❌ | **IMPLEMENTED M14.3** | `hexora programme exclude`. Bug bounty programmes reject whole finding classes; a run that files forty of them is a run whose output gets skipped. Excluded classes are still looked for and still named in the report |
 
-| Session handling / re-authentication | ✅ | ✅ | **PARTIAL M15.1** | `hexora identity refresh` adopts a session from proxy traffic. Deliberately not a replayed login macro: that stores a password and fails against captcha, MFA and SSO. A recorded renewal sequence for API targets is M15.2 |
-| Login sequence recorder | ✅ | ⚠️ | ❌ | See above — M15.2, and only useful where there is no captcha |
+| Session handling / re-authentication | ✅ | ✅ | **DONE M15.1/M15.2** | `identity refresh` adopts a session from proxy traffic; `identity renew` replays a recorded login/refresh request and takes the fresh token from its response. Two paths, one for browser sessions and one for API tokens |
+| Login sequence recorder | ✅ | ⚠️ | **PARTIAL M15.2** | `identity renew --from <captured login>` replays a single recorded login/refresh request and extracts the new token. A multi-step recorded sequence, and password logins behind captcha/MFA/SSO, remain out of scope by design |
 
 ## 5. Extensibility
 
