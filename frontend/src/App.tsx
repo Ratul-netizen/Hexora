@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AuthzView } from "./views/AuthzView";
+import { DashboardView } from "./views/DashboardView";
 import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
 import { ChecksView } from "./views/ChecksView";
@@ -22,8 +23,12 @@ import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
 import { ScanView } from "./views/ScanView";
 import { SetupView } from "./views/SetupView";
+import { MobileView } from "./views/MobileView";
 import { SnapshotsView } from "./views/SnapshotsView";
+import { ToolkitView } from "./views/ToolkitView";
 import { WebSocketsView } from "./views/WebSocketsView";
+import { TabIcon } from "./components/TabIcon";
+import logoUrl from "./assets/nullhawk.jpg";
 import {
   currentProject,
   describeError,
@@ -45,6 +50,7 @@ type Boot =
   | { status: "error"; message: string };
 
 type Tab =
+  | "dashboard"
   | "setup"
   | "history"
   | "repeater"
@@ -62,6 +68,8 @@ type Tab =
   | "authz"
   | "llm"
   | "oob"
+  | "toolkit"
+  | "mobile"
   | "findings"
   | "crawler"
   | "report"
@@ -70,43 +78,75 @@ type Tab =
   | "programme"
   | "license";
 
-/** The tab strip, in the order the work happens in. */
-const TABS: { id: Tab; label: string }[] = [
-  { id: "setup", label: "Setup" },
-  { id: "history", label: "History" },
-  { id: "repeater", label: "Repeater" },
-  { id: "decoder", label: "Decoder" },
-  { id: "websockets", label: "WebSocket" },
-  { id: "matchreplace", label: "Match & Replace" },
-  { id: "import", label: "Import API" },
-  { id: "identifiers", label: "Identifiers" },
-  { id: "scan", label: "Scan" },
-  { id: "checks", label: "Custom Checks" },
-  { id: "fuzzer", label: "Fuzzer" },
-  { id: "race", label: "Race" },
-  { id: "sequencer", label: "Sequencer" },
-  { id: "domxss", label: "DOM XSS" },
-  { id: "authz", label: "Authorization" },
-  { id: "llm", label: "LLM" },
-  { id: "oob", label: "Collaborator" },
-  { id: "findings", label: "Findings" },
-  { id: "crawler", label: "Crawler" },
-  { id: "sitemap", label: "Site map" },
-  { id: "report", label: "Report" },
-  { id: "snapshots", label: "Snapshots" },
-  { id: "programme", label: "Programme" },
-  { id: "license", label: "Licence" },
+/**
+ * The nav, grouped by the stage of the work rather than run together as one long
+ * list. The order inside a group is the order the work tends to happen in.
+ */
+const GROUPS: { label: string; items: { id: Tab; label: string }[] }[] = [
+  {
+    label: "Overview",
+    items: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "setup", label: "Setup" },
+    ],
+  },
+  {
+    label: "Traffic",
+    items: [
+      { id: "history", label: "History" },
+      { id: "repeater", label: "Repeater" },
+      { id: "websockets", label: "WebSocket" },
+      { id: "matchreplace", label: "Match & Replace" },
+      { id: "decoder", label: "Decoder" },
+    ],
+  },
+  {
+    label: "Discovery",
+    items: [
+      { id: "crawler", label: "Crawler" },
+      { id: "sitemap", label: "Site map" },
+      { id: "import", label: "Import API" },
+      { id: "identifiers", label: "Identifiers" },
+      { id: "toolkit", label: "Toolkit" },
+      { id: "mobile", label: "Mobile" },
+    ],
+  },
+  {
+    label: "Testing",
+    items: [
+      { id: "scan", label: "Scan" },
+      { id: "checks", label: "Custom Checks" },
+      { id: "fuzzer", label: "Fuzzer" },
+      { id: "race", label: "Race" },
+      { id: "sequencer", label: "Sequencer" },
+      { id: "domxss", label: "DOM XSS" },
+      { id: "authz", label: "Authorization" },
+      { id: "llm", label: "LLM" },
+      { id: "oob", label: "Collaborator" },
+    ],
+  },
+  {
+    label: "Results",
+    items: [
+      { id: "findings", label: "Findings" },
+      { id: "report", label: "Report" },
+      { id: "snapshots", label: "Snapshots" },
+      { id: "programme", label: "Programme" },
+      { id: "license", label: "Licence" },
+    ],
+  },
 ];
 
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ status: "loading" });
-  const [tab, setTab] = useState<Tab>("setup");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [proxy, setProxy] = useState<ProxyStatus>({
     running: false,
     address: null,
   });
   const [repeating, setRepeating] = useState<string | null>(null);
+  const [repeaterSeed, setRepeaterSeed] = useState<{ url: string; n: number } | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [openExchange, setOpenExchange] = useState<string | null>(null);
   const [license, setLicense] = useState<LicenseStatus | null>(null);
@@ -160,6 +200,26 @@ export default function App() {
     setTab("authz");
   }, []);
 
+  // Send a captured request on to a tool that takes one as its base. All three read
+  // the same `testing` request id, so this is one setter and a destination tab —
+  // exactly the "send to…" plumbing that otherwise means hand-copying an id.
+  const openFuzzer = useCallback((id: string) => {
+    setTesting(id);
+    setTab("fuzzer");
+  }, []);
+
+  const openRace = useCallback((id: string) => {
+    setTesting(id);
+    setTab("race");
+  }, []);
+
+  // Open a URL (from the site map) as a fresh Repeater draft. The nonce makes a repeat
+  // click on the same path re-seed the editor.
+  const openRepeaterUrl = useCallback((url: string) => {
+    setRepeaterSeed((s) => ({ url, n: (s?.n ?? 0) + 1 }));
+    setTab("repeater");
+  }, []);
+
   // Following a citation out of a finding, or out of a matrix cell, lands in
   // History with that exchange selected. A claim whose evidence cannot be opened is
   // a claim nobody can check.
@@ -176,21 +236,32 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <strong>Nullhawk</strong>
-          <span className="muted small">
-            {boot.info.milestone} · v{boot.info.version}
+          <span className="brand-mark" aria-hidden="true">
+            <img src={logoUrl} alt="" className="brand-logo" />
+          </span>
+          <span className="brand-text">
+            <strong>Nullhawk</strong>
+            <span className="muted small">
+              {boot.info.milestone} · v{boot.info.version}
+            </span>
           </span>
         </div>
 
         <nav>
-          {TABS.map(({ id, label }) => (
-            <button
-              key={id}
-              className={tab === id ? "tab active" : "tab"}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
+          {GROUPS.map((group) => (
+            <div key={group.label} className="nav-group">
+              <div className="nav-group-label">{group.label}</div>
+              {group.items.map(({ id, label }) => (
+                <button
+                  key={id}
+                  className={tab === id ? "tab active" : "tab"}
+                  onClick={() => setTab(id)}
+                >
+                  <TabIcon id={id} />
+                  <span className="tab-label">{label}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       </aside>
@@ -223,6 +294,16 @@ export default function App() {
       </header>
 
       <main>
+        {tab === "dashboard" && (
+          <DashboardView
+            project={project}
+            proxy={proxy}
+            license={license}
+            captureCount={captureCount}
+            findingCount={findingCount}
+            onNavigate={(t) => setTab(t as Tab)}
+          />
+        )}
         {tab === "setup" && (
           <SetupView
             project={project}
@@ -237,12 +318,15 @@ export default function App() {
             refreshToken={captureCount}
             onRepeat={openRepeater}
             onTestAuthorization={openAuthz}
+            onSendToFuzzer={openFuzzer}
+            onSendToRace={openRace}
             select={openExchange}
           />
         )}
         {tab === "repeater" && (
           <RepeaterView
             requestId={repeating}
+            seed={repeaterSeed}
             onCaptured={() => setCaptureCount((n) => n + 1)}
           />
         )}
@@ -296,11 +380,18 @@ export default function App() {
         {tab === "crawler" && (
           <CrawlerView hasProject={project !== null} license={license} />
         )}
-        {tab === "sitemap" && <SitemapView hasProject={project !== null} />}
+        {tab === "sitemap" && (
+          <SitemapView
+            hasProject={project !== null}
+            onOpenInRepeater={openRepeaterUrl}
+          />
+        )}
         {tab === "report" && <ReportView hasProject={project !== null} />}
         {tab === "snapshots" && (
           <SnapshotsView hasProject={project !== null} />
         )}
+        {tab === "toolkit" && <ToolkitView hasProject={project !== null} />}
+        {tab === "mobile" && <MobileView />}
         {tab === "programme" && <ProgrammeView hasProject={project !== null} />}
         {tab === "license" && (
           <LicenseView license={license} onChange={setLicense} />

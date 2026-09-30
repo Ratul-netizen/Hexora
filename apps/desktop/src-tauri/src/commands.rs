@@ -1503,6 +1503,121 @@ fn import_send_blocking(
     })
 }
 
+/// One 403/WAF-bypass candidate the window asks the engine to send. The mutations
+/// themselves are worked out in the window; this is only the request to put on the wire.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BypassCandidateInput {
+    pub technique: String,
+    pub method: String,
+    pub url: String,
+    /// Extra request headers to add, as (name, value) pairs.
+    pub headers: Vec<(String, String)>,
+}
+
+/// What one candidate did: the status and size the server answered with, so the window
+/// can rank the mutations and show which one the 403 did not survive.
+#[derive(Debug, Clone, Serialize)]
+pub struct BypassResultView {
+    pub technique: String,
+    pub status: u16,
+    pub bytes: usize,
+    pub out_of_scope: bool,
+    pub error: Option<String>,
+}
+
+/// Sends each 403/WAF-bypass candidate and reports its status and size.
+///
+/// Human-driven, so it sends as the Repeater does: a candidate that falls outside the
+/// project's scope is sent and flagged rather than refused, because the person pointed at
+/// this URL on purpose. It records nothing — a probe that returns something interesting is
+/// re-sent from the Repeater, where it becomes evidence.
+#[tauri::command]
+pub async fn bypass_run(
+    state: State<'_, AppState>,
+    candidates: Vec<BypassCandidateInput>,
+    insecure: bool,
+) -> CommandResult<Vec<BypassResultView>> {
+    let path = state.project_path().map_err(fail)?;
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        bypass_run_blocking(path, candidates, insecure)
+    })
+    .await;
+    outcome.map_err(fail)?
+}
+
+fn bypass_run_blocking(
+    path: PathBuf,
+    candidates: Vec<BypassCandidateInput>,
+    insecure: bool,
+) -> CommandResult<Vec<BypassResultView>> {
+    use nullhawk_engine::transport::{HttpTransport, Origin, SendOptions};
+
+    let project = Project::open(&path).map_err(fail)?;
+    let scope = Arc::new(project.settings().scope().map_err(fail)?);
+
+    let transport = if insecure {
+        TcpTransport::with_tls(TlsConfig::accept_any())
+    } else {
+        TcpTransport::new()
+    };
+    let guard = ScopeGuard::new(transport, scope);
+    let options = SendOptions::interactive(Origin::Repeater);
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(fail)?;
+
+    let results = runtime.block_on(async {
+        let mut out = Vec::with_capacity(candidates.len());
+        for candidate in &candidates {
+            let (service, req_path) =
+                match nullhawk_types::http::HttpService::parse_url(&candidate.url) {
+                    Ok(parts) => parts,
+                    Err(e) => {
+                        out.push(BypassResultView {
+                            technique: candidate.technique.clone(),
+                            status: 0,
+                            bytes: 0,
+                            out_of_scope: false,
+                            error: Some(e.to_string()),
+                        });
+                        continue;
+                    }
+                };
+            let mut request = nullhawk_types::http::HttpRequest::get(service, req_path);
+            request.method = candidate.method.to_ascii_uppercase();
+            for (name, value) in &candidate.headers {
+                request.headers.set(name, value.clone());
+            }
+            let out_of_scope = matches!(
+                guard.decide(&request, &options),
+                ScopeDecision::AllowedOutOfScope
+            );
+            match guard.send(request, options.clone()).await {
+                Ok(exchange) => out.push(BypassResultView {
+                    technique: candidate.technique.clone(),
+                    status: exchange.response.status,
+                    bytes: exchange.response.body.len(),
+                    out_of_scope,
+                    error: None,
+                }),
+                Err(e) => out.push(BypassResultView {
+                    technique: candidate.technique.clone(),
+                    status: 0,
+                    bytes: 0,
+                    out_of_scope,
+                    error: Some(e.to_string()),
+                }),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
+        out
+    });
+
+    Ok(results)
+}
+
 /// One GraphQL operation an introspection result implies, for the window.
 #[derive(Debug, Clone, Serialize)]
 pub struct GraphqlOpView {

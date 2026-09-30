@@ -40,9 +40,13 @@ type EditMode = RequestMode | "h2";
  */
 export function RepeaterView({
   requestId,
+  seed,
   onCaptured,
 }: {
   requestId: string | null;
+  /** A URL to open as a fresh draft, e.g. from the site map. The nonce re-triggers it
+      when the same URL is opened twice. */
+  seed: { url: string; n: number } | null;
   /** Called after a send, so history can pick up the new exchange. */
   onCaptured: () => void;
 }) {
@@ -100,6 +104,35 @@ export function RepeaterView({
       cancelled = true;
     };
   }, [requestId]);
+
+  // Seeded from elsewhere (the site map): open the given URL as a fresh draft, the same
+  // way the "new request" form's Create does.
+  useEffect(() => {
+    if (!seed) return;
+    let cancelled = false;
+    setError(null);
+    setNewUrl(seed.url);
+    newDraft(seed.url, "GET")
+      .then((draft) => {
+        if (cancelled) return;
+        setRaw(draft.raw);
+        setUrl(draft.url);
+        setWarnings(draft.warnings);
+        setMode(draft.mode);
+        setParent(null);
+        setTarget(seed.url);
+        setResult(null);
+        setBranches([]);
+        setReady(true);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(describeError(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.n]);
 
   async function create() {
     setError(null);

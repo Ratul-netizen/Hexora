@@ -5,6 +5,7 @@ import {
   listDetectors,
   scanActivePlan,
   scanActiveRun,
+  scanActiveRunning,
   scanActiveStop,
   scanPassive,
   type ActiveRunView,
@@ -282,11 +283,36 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
+  // A run this view did not start but the engine reports as live — begun on an earlier
+  // visit to this tab, then left behind when it unmounted. Re-discovered on mount.
+  const [runningElsewhere, setRunningElsewhere] = useState(false);
 
   const maxRequests = () => {
     const parsed = Number.parseInt(ceiling, 10);
     return Number.isFinite(parsed) ? parsed : null;
   };
+
+  // On mount, ask the engine whether a scan is already running and, if so, watch it
+  // until it finishes so the screen reflects the live run instead of looking idle.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const running = await scanActiveRunning();
+        if (cancelled) return;
+        setRunningElsewhere(running && !busy);
+        if (running) timer = window.setTimeout(poll, 2000);
+      } catch {
+        /* the engine will be asked again on the next mount */
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [busy]);
 
   async function preview() {
     setBusy(true);
@@ -348,6 +374,24 @@ function ActivePass({ onOpenExchange }: { onOpenExchange: (id: string) => void }
           {busy ? "Working…" : "Show me what it would send"}
         </button>
       </div>
+
+      {runningElsewhere && !busy && (
+        <div className="notice warn active-resumed">
+          <span>
+            An active scan started earlier is still running. Its result will land in the
+            project when it finishes.
+          </span>
+          <button
+            className="danger"
+            onClick={() => {
+              void stop();
+              setRunningElsewhere(false);
+            }}
+          >
+            Stop it
+          </button>
+        </div>
+      )}
 
       {error && <p className="notice warn">{error}</p>}
 

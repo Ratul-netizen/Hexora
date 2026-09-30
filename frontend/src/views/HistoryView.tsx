@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { MessagePane } from "../components/MessagePane";
+import { formatRequest, type CopyFormat } from "../lib/httpexport";
+import { extractInputs, findReflections } from "../lib/reflect";
 import {
   describeError,
   exchangeDetail,
@@ -23,6 +25,8 @@ export function HistoryView({
   refreshToken,
   onRepeat,
   onTestAuthorization,
+  onSendToFuzzer,
+  onSendToRace,
   select,
 }: {
   hasProject: boolean;
@@ -30,6 +34,8 @@ export function HistoryView({
   refreshToken: number;
   onRepeat: (id: string) => void;
   onTestAuthorization: (id: string) => void;
+  onSendToFuzzer: (id: string) => void;
+  onSendToRace: (id: string) => void;
   /** An exchange to open, set when arriving from a finding or a matrix cell. */
   select: string | null;
 }) {
@@ -227,11 +233,18 @@ export function HistoryView({
                 raw
               </span>
             )}
-            <button onClick={() => onRepeat(detail.id)}>Send to repeater</button>
-            <button onClick={() => onTestAuthorization(detail.id)}>
-              Test authorization
-            </button>
+            <div className="send-to">
+              <span className="muted small">Send to</span>
+              <button onClick={() => onRepeat(detail.id)}>Repeater</button>
+              <button onClick={() => onSendToFuzzer(detail.id)}>Fuzzer</button>
+              <button onClick={() => onSendToRace(detail.id)}>Race</button>
+              <button onClick={() => onTestAuthorization(detail.id)}>
+                Authorization
+              </button>
+            </div>
+            <CopyAs detail={detail} />
           </header>
+          <Reflections detail={detail} />
           <div className="panes">
             <MessagePane
               title="Request"
@@ -246,6 +259,65 @@ export function HistoryView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Values this request carried that came back in the response — XSS/injection leads. */
+function Reflections({ detail }: { detail: ExchangeDetail }) {
+  const reflections = (() => {
+    if (detail.response_body.rendering !== "text") return [];
+    const inputs = extractInputs(detail.request_head, detail.request_body.content);
+    return findReflections(inputs, detail.response_body.content);
+  })();
+
+  if (reflections.length === 0) return null;
+
+  return (
+    <div className="reflections">
+      <span className="muted small">
+        {reflections.length} reflected value{reflections.length === 1 ? "" : "s"}
+      </span>
+      {reflections.map((r) => (
+        <span key={r.value} className="reflection" title={`${r.source} · ${r.name} · ×${r.count}`}>
+          <code>{r.name}</code>
+          {r.contexts.map((c) => (
+            <span key={c} className={`reflect-ctx ctx-${c}`}>
+              {c}
+            </span>
+          ))}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** "Copy as …" for the selected exchange — a runnable curl / Python / fetch snippet. */
+function CopyAs({ detail }: { detail: ExchangeDetail }) {
+  const [done, setDone] = useState<CopyFormat | null>(null);
+  const formats: { id: CopyFormat; label: string }[] = [
+    { id: "curl", label: "curl" },
+    { id: "python", label: "Python" },
+    { id: "fetch", label: "fetch" },
+  ];
+  const run = (fmt: CopyFormat) => {
+    const snippet = formatRequest(fmt, detail.url, detail.request_head, detail.request_body.content);
+    navigator.clipboard?.writeText(snippet).then(
+      () => {
+        setDone(fmt);
+        window.setTimeout(() => setDone(null), 1200);
+      },
+      () => undefined,
+    );
+  };
+  return (
+    <div className="copy-as">
+      <span className="muted small">Copy as</span>
+      {formats.map((f) => (
+        <button key={f.id} className="chip-btn" onClick={() => run(f.id)}>
+          {done === f.id ? "Copied" : f.label}
+        </button>
+      ))}
     </div>
   );
 }
