@@ -22,12 +22,15 @@ export interface SecretHit {
 export interface LibraryHit {
   name: string;
   version: string;
+  /** A known-vulnerability note when the version is below a safe threshold. */
+  advisory?: string;
 }
 
 export interface MineResult {
   endpoints: Endpoint[];
   secrets: SecretHit[];
   libraries: LibraryHit[];
+  parameters: string[];
 }
 
 const SECRET_PATTERNS: { type: string; re: RegExp }[] = [
@@ -57,6 +60,51 @@ const LIBRARY_PATTERNS: { name: string; re: RegExp }[] = [
   { name: "Bootstrap", re: /bootstrap[.@-]v?(\d+\.\d+(?:\.\d+)?)/i },
   { name: "Moment.js", re: /moment[.@-]v?(\d+\.\d+(?:\.\d+)?)/i },
 ];
+
+// A pragmatic retire.js: the version at or below which a library has a known advisory.
+const ADVISORIES: Record<string, { below: string; note: string }[]> = {
+  jQuery: [{ below: "3.5.0", note: "XSS via jQuery.htmlPrefilter (CVE-2020-11022/11023)" }],
+  AngularJS: [{ below: "999", note: "End-of-life since 2022 — unpatched; several known XSS/sandbox escapes" }],
+  Lodash: [{ below: "4.17.21", note: "Prototype pollution / command injection (CVE-2019-10744, 2021-23337)" }],
+  Bootstrap: [{ below: "4.3.1", note: "XSS in data-target / tooltip (CVE-2019-8331 and earlier)" }],
+  "Moment.js": [{ below: "2.29.4", note: "Path traversal / ReDoS (CVE-2022-31129, 2022-24785)" }],
+};
+
+/** Compare dotted versions: negative if a<b, 0 if equal, positive if a>b. */
+function cmpVersion(a: string, b: string): number {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+function advisoryFor(name: string, version: string): string | undefined {
+  for (const a of ADVISORIES[name] ?? []) {
+    if (cmpVersion(version, a.below) < 0) return a.note;
+  }
+  return undefined;
+}
+
+/** Parameter names worth fuzzing — query keys, form field names, JSON keys. */
+function extractParameters(text: string): string[] {
+  const names = new Set<string>();
+  // query-string keys in any URL or path
+  for (const m of text.matchAll(/[?&]([A-Za-z_][\w.-]{0,40})=/g)) {
+    if (m[1]) names.add(m[1]);
+  }
+  // HTML form field names
+  for (const m of text.matchAll(/\bname\s*=\s*["']([A-Za-z_][\w.-]{0,40})["']/g)) {
+    if (m[1]) names.add(m[1]);
+  }
+  // JSON / object keys
+  for (const m of text.matchAll(/["']([A-Za-z_][\w.-]{0,40})["']\s*:/g)) {
+    if (m[1]) names.add(m[1]);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
 
 /** Redact the middle of a long match so the report does not leak the whole secret. */
 function redact(s: string): string {
@@ -106,7 +154,8 @@ export function mine(text: string): MineResult {
     const m = re.exec(text);
     if (m && m[1] && !seenLib.has(name)) {
       seenLib.add(name);
-      libraries.push({ name, version: m[1] });
+      const advisory = advisoryFor(name, m[1]);
+      libraries.push(advisory ? { name, version: m[1], advisory } : { name, version: m[1] });
     }
   }
 
@@ -114,5 +163,6 @@ export function mine(text: string): MineResult {
     endpoints: [...endpointSet.values()].sort((a, b) => a.value.localeCompare(b.value)),
     secrets,
     libraries,
+    parameters: extractParameters(text),
   };
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   analyzeJwt,
@@ -10,15 +10,17 @@ import {
 } from "../lib/jwt";
 import { mine, type MineResult } from "../lib/miner";
 import { generateBypasses, type BypassCandidate } from "../lib/bypass";
+import { TRANSFORMS, runPipeline, transformById } from "../lib/transforms";
+import { convert, detectFormat, type BodyFormat } from "../lib/convert";
 
 /**
  * The toolkit: the standalone power tools a tester reaches for that do not need the
- * engine — a JWT workbench, a body miner, and a 403/WAF bypass generator. Each reads
- * what you give it and reports; the forging and the sending are deliberate, separate
- * acts you take with the result.
+ * engine — a JWT workbench, a body miner, a transform pipeline, a content-type
+ * converter and a 403/WAF bypass generator. Each reads what you give it and reports;
+ * the forging and the sending are deliberate, separate acts you take with the result.
  */
 
-type Tool = "jwt" | "miner" | "bypass";
+type Tool = "jwt" | "miner" | "transforms" | "convert" | "bypass";
 
 export function ToolkitView() {
   const [tool, setTool] = useState<Tool>("jwt");
@@ -38,6 +40,18 @@ export function ToolkitView() {
           Secret &amp; endpoint miner
         </button>
         <button
+          className={tool === "transforms" ? "seg-btn on" : "seg-btn"}
+          onClick={() => setTool("transforms")}
+        >
+          Transforms
+        </button>
+        <button
+          className={tool === "convert" ? "seg-btn on" : "seg-btn"}
+          onClick={() => setTool("convert")}
+        >
+          Content-type
+        </button>
+        <button
           className={tool === "bypass" ? "seg-btn on" : "seg-btn"}
           onClick={() => setTool("bypass")}
         >
@@ -46,6 +60,8 @@ export function ToolkitView() {
       </div>
       {tool === "jwt" && <JwtPanel />}
       {tool === "miner" && <MinerPanel />}
+      {tool === "transforms" && <TransformsPanel />}
+      {tool === "convert" && <ConvertPanel />}
       {tool === "bypass" && <BypassPanel />}
     </div>
   );
@@ -181,6 +197,156 @@ function JwtPanel() {
             )}
           </section>
         </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Transforms
+
+function TransformsPanel() {
+  const [input, setInput] = useState("");
+  const [pipeline, setPipeline] = useState<string[]>([]);
+  const [steps, setSteps] = useState<string[]>([]);
+  const [pick, setPick] = useState(TRANSFORMS[0]?.id ?? "");
+
+  // Re-run the whole chain whenever the input or the pipeline changes.
+  useEffect(() => {
+    let live = true;
+    void runPipeline(input, pipeline).then((s) => {
+      if (live) setSteps(s);
+    });
+    return () => {
+      live = false;
+    };
+  }, [input, pipeline]);
+
+  const output = steps[steps.length - 1] ?? input;
+
+  return (
+    <div className="transforms">
+      <section className="card">
+        <h2>Transforms</h2>
+        <p className="muted">
+          Stack decode, encode and hash steps and watch the value change at each one —
+          the way a triple-encoded payload comes apart one layer at a time.
+        </p>
+        <textarea
+          className="jwt-input mono"
+          value={input}
+          spellCheck={false}
+          placeholder="Paste a value to transform…"
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <div className="row">
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            {(["decode", "encode", "hash", "text"] as const).map((g) => (
+              <optgroup key={g} label={g}>
+                {TRANSFORMS.filter((t) => t.group === g).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <button onClick={() => pick && setPipeline((p) => [...p, pick])}>Add step</button>
+          {pipeline.length > 0 && (
+            <button className="secondary" onClick={() => setPipeline([])}>
+              Clear
+            </button>
+          )}
+        </div>
+      </section>
+
+      {pipeline.length > 0 && (
+        <section className="card">
+          <h3>Pipeline</h3>
+          <ol className="pipeline">
+            {pipeline.map((id, i) => (
+              <li key={i}>
+                <span className="tag">{transformById(id)?.label ?? id}</span>
+                <pre className="code-body mono step-out">{steps[i] ?? ""}</pre>
+                <button
+                  className="chip-btn"
+                  onClick={() => setPipeline((p) => p.filter((_, j) => j !== i))}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      <section className="card">
+        <div className="card-title-row">
+          <h3>Output</h3>
+          <button className="chip-btn" onClick={() => copy(output)}>
+            Copy
+          </button>
+        </div>
+        <pre className="code-body mono variant-token">{output}</pre>
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Content-type
+
+function ConvertPanel() {
+  const [input, setInput] = useState("");
+  const [to, setTo] = useState<BodyFormat>("json");
+  const detected = useMemo(() => detectFormat(input), [input]);
+  const result = useMemo(() => {
+    if (input.trim() === "") return null;
+    try {
+      return { text: convert(input, to) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not convert." };
+    }
+  }, [input, to]);
+  const converted = result && "text" in result ? result.text : null;
+  const convertError = result && "error" in result ? result.error : null;
+
+  return (
+    <div className="convert">
+      <section className="card">
+        <h2>Content-type converter</h2>
+        <p className="muted">
+          Re-express a body as JSON, XML or form-urlencoded to find parser-differential
+          bugs — an endpoint that authorizes one content type but parses another.
+        </p>
+        <textarea
+          className="miner-input mono"
+          value={input}
+          spellCheck={false}
+          placeholder='{"user":"admin","roles":["a","b"]}'
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <div className="row">
+          <span className="muted small">
+            Detected: {detected ?? "—"} → convert to
+          </span>
+          <select value={to} onChange={(e) => setTo(e.target.value as BodyFormat)}>
+            <option value="json">JSON</option>
+            <option value="xml">XML</option>
+            <option value="form">form-urlencoded</option>
+          </select>
+        </div>
+      </section>
+
+      {convertError && <p className="error-text">{convertError}</p>}
+      {converted !== null && (
+        <section className="card">
+          <div className="card-title-row">
+            <h3>Result</h3>
+            <button className="chip-btn" onClick={() => copy(converted)}>
+              Copy
+            </button>
+          </div>
+          <pre className="code-body mono variant-token">{converted}</pre>
+        </section>
       )}
     </div>
   );
@@ -377,14 +543,37 @@ function MinerPanel() {
               <ul className="mine-list">
                 {result.libraries.map((l) => (
                   <li key={l.name}>
+                    {l.advisory && <span className="tag insecure">vuln</span>}
                     <strong>{l.name}</strong>
                     <code>{l.version}</code>
                     <span className="muted small">
-                      cross-check against known CVEs for this version
+                      {l.advisory ?? "cross-check against known CVEs for this version"}
                     </span>
                   </li>
                 ))}
               </ul>
+            )}
+          </section>
+
+          <section className="card">
+            <div className="card-title-row">
+              <h3>Parameters ({result.parameters.length})</h3>
+              {result.parameters.length > 0 && (
+                <button className="chip-btn" onClick={() => copy(result.parameters.join("\n"))}>
+                  Copy as wordlist
+                </button>
+              )}
+            </div>
+            {result.parameters.length === 0 ? (
+              <p className="muted">None found.</p>
+            ) : (
+              <div className="param-chips">
+                {result.parameters.map((p) => (
+                  <code key={p} className="param-chip">
+                    {p}
+                  </code>
+                ))}
+              </div>
             )}
           </section>
         </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { MessagePane } from "../components/MessagePane";
 import { formatRequest, type CopyFormat } from "../lib/httpexport";
+import { extractInputs, findReflections } from "../lib/reflect";
 import {
   describeError,
   exchangeDetail,
@@ -243,6 +244,7 @@ export function HistoryView({
             </div>
             <CopyAs detail={detail} />
           </header>
+          <Reflections detail={detail} />
           <div className="panes">
             <MessagePane
               title="Request"
@@ -257,6 +259,35 @@ export function HistoryView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Values this request carried that came back in the response — XSS/injection leads. */
+function Reflections({ detail }: { detail: ExchangeDetail }) {
+  const reflections = (() => {
+    if (detail.response_body.rendering !== "text") return [];
+    const inputs = extractInputs(detail.request_head, detail.request_body.content);
+    return findReflections(inputs, detail.response_body.content);
+  })();
+
+  if (reflections.length === 0) return null;
+
+  return (
+    <div className="reflections">
+      <span className="muted small">
+        {reflections.length} reflected value{reflections.length === 1 ? "" : "s"}
+      </span>
+      {reflections.map((r) => (
+        <span key={r.value} className="reflection" title={`${r.source} · ${r.name} · ×${r.count}`}>
+          <code>{r.name}</code>
+          {r.contexts.map((c) => (
+            <span key={c} className={`reflect-ctx ctx-${c}`}>
+              {c}
+            </span>
+          ))}
+        </span>
+      ))}
     </div>
   );
 }
