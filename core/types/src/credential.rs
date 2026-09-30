@@ -181,6 +181,50 @@ impl Credential {
             what,
         }
     }
+
+    /// The same JWT re-forged to `alg: none`.
+    ///
+    /// The header is replaced with `{"alg":"none"}`, the payload is left byte-identical,
+    /// and the signature is emptied. This tests a different door from [`tamper`]: a server
+    /// can verify a signature correctly — and so reject a *broken* one — while still
+    /// accepting an *unsigned* token, because it skips verification when the header says
+    /// there is nothing to verify. No correct implementation does; the two probes together
+    /// separate "checks the signature" from "checks that there is one".
+    ///
+    /// Returns `None` when the value is not a signed JWT, so the caller can say it had
+    /// nothing to forge rather than send a token-shaped nonsense.
+    ///
+    /// [`tamper`]: Credential::tamper
+    pub fn forge_alg_none(&self) -> Option<Tampered> {
+        let parts: Vec<&str> = self.value.split('.').collect();
+        // A signed JWT is three non-empty parts whose header is base64url JSON — which
+        // always begins `eyJ`, the encoding of `{"`.
+        if parts.len() != 3 || parts[0].is_empty() || parts[1].is_empty() {
+            return None;
+        }
+        if !parts[0].starts_with("eyJ") {
+            return None;
+        }
+
+        // `{"alg":"none"}` as base64url, a fixed header, then the original payload and an
+        // empty signature.
+        let forged = format!("eyJhbGciOiJub25lIn0.{}.", parts[1]);
+        let value = match (&self.scheme, &self.cookie) {
+            (Some(scheme), _) => format!("{scheme} {forged}"),
+            (None, Some(cookie)) => {
+                let mut pairs = vec![format!("{cookie}={forged}")];
+                pairs.extend(self.rest.iter().map(|(k, v)| format!("{k}={v}")));
+                pairs.join("; ")
+            }
+            (None, None) => forged,
+        };
+
+        Some(Tampered {
+            name: self.name.clone(),
+            value,
+            what: What::JwtAlgNone,
+        })
+    }
 }
 
 /// The shortest value worth breaking.
@@ -214,6 +258,8 @@ impl std::fmt::Debug for Tampered {
 pub enum What {
     /// One character of a JWT's signature. Header and payload are untouched.
     JwtSignature,
+    /// A JWT re-forged to `alg: none`: header replaced, payload identical, no signature.
+    JwtAlgNone,
     /// One character at the end of an opaque value.
     LastCharacter,
 }
@@ -238,6 +284,12 @@ impl Tampered {
             What::JwtSignature => format!(
                 "the captured `{}` credential with one character of its JWT signature \
                  changed — the header and payload are byte-identical to the real one",
+                self.name
+            ),
+            What::JwtAlgNone => format!(
+                "the captured `{}` credential re-forged to an unsigned `alg: none` token — \
+                 the payload byte-identical, the header claiming no algorithm, the \
+                 signature empty",
                 self.name
             ),
             What::LastCharacter => format!(
@@ -413,6 +465,44 @@ mod tests {
             sent.starts_with("Bearer aaaaaaaa.bbbbbbbb."),
             "the signed material changed: {sent}"
         );
+    }
+
+    #[test]
+    fn a_jwt_is_forged_to_alg_none_keeping_the_payload() {
+        // The other door: the signature is verified, but is an unsigned token refused?
+        // The forge keeps the payload byte-identical so acceptance means "does not
+        // require a signature", not "accepted different claims".
+        //
+        // The fixture is built from its readable JSON rather than pasted as a token
+        // literal — a full `eyJ….eyJ….sig` string is indistinguishable from a live
+        // credential to a secret scanner, and to a reviewer scrolling a diff. See the
+        // secret-scanning note in docs/dependencies.md.
+        use base64::Engine;
+        let b64 = |json: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json);
+        let header_seg = b64(r#"{"alg":"HS256"}"#);
+        let payload_seg = b64(r#"{"sub":"12345"}"#);
+        let jwt = format!("{header_seg}.{payload_seg}.FIXTUREsignatureNOTaSECRET");
+
+        let credential =
+            Credential::read(&header("Authorization", &format!("Bearer {jwt}"))).unwrap();
+        let forged = credential
+            .forge_alg_none()
+            .expect("a signed jwt can be forged");
+        assert_eq!(forged.what, What::JwtAlgNone);
+
+        // The header is replaced with `{"alg":"none"}`, the payload carried through
+        // untouched, the signature dropped.
+        let none_header = b64(r#"{"alg":"none"}"#);
+        assert_eq!(
+            forged.expose_value(),
+            format!("Bearer {none_header}.{payload_seg}.")
+        );
+    }
+
+    #[test]
+    fn a_non_jwt_credential_has_no_alg_none_to_forge() {
+        let opaque = Credential::read(&header("X-Api-Key", "abcdefghijklmnop")).unwrap();
+        assert!(opaque.forge_alg_none().is_none());
     }
 
     #[test]

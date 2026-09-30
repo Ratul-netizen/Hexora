@@ -2623,6 +2623,7 @@ dependencies = [
 name = "nullhawk-types"
 version = "0.1.0"
 dependencies = [
+ "base64 0.21.7",
  "bytes",
  "chrono",
  "proptest",
