@@ -9,6 +9,7 @@ pub mod auth;
 pub mod cache;
 pub mod cache_poison;
 pub mod cmdi;
+pub mod crlf;
 pub mod crossid;
 pub mod echo;
 pub mod redirect;

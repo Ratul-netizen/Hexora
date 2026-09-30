@@ -95,7 +95,7 @@ work.
 | Reflected-input verification: which characters survived, and whether they landed in markup, script or data | **IMPLEMENTED** |
 | Redirect verification: the `Location` header resolved the way a browser resolves it, and never followed | **IMPLEMENTED** |
 | Authentication enforcement: whether an endpoint needs a session, whether it verifies the one it is given, and — for a JWT — whether it accepts an unsigned `alg: none` forgery of that session | **IMPLEMENTED** |
-| Injected-input verification: SQL injection (error-, boolean- and time-based blind), path traversal, server-side template injection, SSRF and OS command injection, each confirmed against a control rather than a signature match alone | **IMPLEMENTED** |
+| Injected-input verification: SQL injection (error-, boolean- and time-based blind), path traversal, server-side template injection, SSRF, OS command injection and CRLF header injection, each confirmed against a control rather than a signature match alone | **IMPLEMENTED** |
 | Out-of-band detection: a `Lab` can mint collaborator canaries and poll for callbacks, so a blind SSRF or blind OS command injection that reveals nothing in its response is confirmed by the interaction it provokes (`scan active --collaborator`) | **IMPLEMENTED** |
 | Cached-response exposure: replays an authenticated request with its session removed and confirms a shared cache is serving one identity's declared data to a caller with none | **IMPLEMENTED** |
 | Web cache poisoning: probes unkeyed request headers behind a unique cache-buster and confirms an injected value is stored and served back to a request that never sent it | **IMPLEMENTED** |
