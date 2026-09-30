@@ -31,6 +31,7 @@ use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
+/// The check.
 pub struct PathTraversal;
 
 const SETTLES: &str = "input.traversal";
@@ -315,6 +316,7 @@ fn path_of(url: &str) -> &str {
         .unwrap_or("/")
 }
 
+/// Raises one suspicion per input — a work item at `Info`, settled by an experiment.
 pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
     inputs_in(&exchange.path, &exchange.request_headers)
         .into_iter()

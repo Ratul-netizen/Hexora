@@ -32,6 +32,7 @@ use nullhawk_verify::Lab;
 
 use crate::{ActiveCheck, Budget, Subject};
 
+/// The check.
 pub struct TemplateInjection;
 
 const SETTLES: &str = "input.ssti";
@@ -97,9 +98,8 @@ impl ActiveCheck for TemplateInjection {
                 break;
             }
             let first_payload = format!("{base}{open}{A}*{B1}{close}");
-            let first = match probe(subject, lab, &slot, &first_payload).await {
-                Attempt::Answered(a) => a,
-                Attempt::Failed(_) => continue,
+            let Some(first) = probe(subject, lab, &slot, &first_payload).await else {
+                continue;
             };
             sent += 1;
             let literal = format!("{open}{A}*{B1}{close}");
@@ -111,8 +111,7 @@ impl ActiveCheck for TemplateInjection {
             // Confirm: a different sum. A page that happened to contain the first product
             // will not contain the second one too.
             let second_payload = format!("{base}{open}{A}*{B2}{close}");
-            let Attempt::Answered(second) = probe(subject, lab, &slot, &second_payload).await
-            else {
+            let Some(second) = probe(subject, lab, &slot, &second_payload).await else {
                 return Ok(Verification::Supported {
                     support: Support::Distinctive,
                     note: format!(
@@ -124,7 +123,6 @@ impl ActiveCheck for TemplateInjection {
                     evidence: vec![from_exchange(subject), answered(&first, &first_payload)],
                 });
             };
-            sent += 1;
 
             if second.body_has(&product2) {
                 return Ok(Verification::Reproduced {
@@ -252,25 +250,18 @@ impl Answer {
     }
 }
 
-enum Attempt {
-    Answered(Answer),
-    Failed(String),
-}
-
-async fn probe(subject: &Subject, lab: &dyn Lab, slot: &ObjectLocation, value: &str) -> Attempt {
+/// Places a payload and returns what came back, or nothing if it could not be sent —
+/// the reason is not needed here, because a failed probe just moves on to the next
+/// delimiter family rather than settling anything.
+async fn probe(subject: &Subject, lab: &dyn Lab, slot: &ObjectLocation, value: &str) -> Option<Answer> {
     let mut draft = subject.draft.clone();
-    draft.request = match substitute(&draft.request, slot, value) {
-        Ok(request) => request,
-        Err(e) => return Attempt::Failed(format!("the payload could not be placed: {e}")),
-    };
-    match lab.experiment(&draft, None).await {
-        Ok(sent) => Attempt::Answered(Answer {
-            request: sent.id,
-            status: sent.exchange.response.status,
-            body: sent.exchange.response.body.to_vec(),
-        }),
-        Err(e) => Attempt::Failed(e.to_string()),
-    }
+    draft.request = substitute(&draft.request, slot, value).ok()?;
+    let sent = lab.experiment(&draft, None).await.ok()?;
+    Some(Answer {
+        request: sent.id,
+        status: sent.exchange.response.status,
+        body: sent.exchange.response.body.to_vec(),
+    })
 }
 
 fn answered(answer: &Answer, payload: &str) -> Evidence {
@@ -336,6 +327,7 @@ fn path_of(url: &str) -> &str {
         .unwrap_or("/")
 }
 
+/// Raises one suspicion per input — a work item at `Info`, settled by an experiment.
 pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
     inputs_in(&exchange.path, &exchange.request_headers)
         .into_iter()
