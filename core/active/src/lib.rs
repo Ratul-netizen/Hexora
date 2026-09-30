@@ -326,6 +326,7 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
         Box::new(checks::traversal::PathTraversal),
         Box::new(checks::ssti::TemplateInjection),
         Box::new(checks::ssrf::ServerSideRequestForgery),
+        Box::new(checks::cmdi::OsCommandInjection),
     ]
 }
 

@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod cache;
+pub mod cmdi;
 pub mod crossid;
 pub mod echo;
 pub mod redirect;
