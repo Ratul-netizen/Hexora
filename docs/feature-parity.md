@@ -14,7 +14,17 @@ Three competitors, lopsided in three different directions:
 | Burp Enterprise (DAST) | n/a | best | good | good | **$13,600+/yr** |
 | Caido | **best in class** | **none at all** | good | thin | free / $200/yr / $30 user/mo |
 | ZAP | worst | good | **best in class** | good (SARIF) | **free**, Apache 2.0 |
+| HCL AppScan | scan-and-report (no proxy) | good — SAST+DAST+IAST+SCA, ML triage | good | good (enterprise dashboards) | quote-only, ~$25K–$1M/yr |
+| Invicti (ex-Netsparker) | **none** (no proxy/Repeater) | **best in class — proof-based** | good | good | quote-only, ~$20K–$37K/yr |
+| Acunetix (by Invicti) | scan-and-report | strong — same engine + OAST | adequate | thin | quote-only, ~$4.5K–$37K/yr |
 | **Nullhawk target** | Caido-class | evidence-driven | ZAP-class | **best in class** | TBD |
+
+The table above is the "attacker's toolkit" axis (manual UX first). The three rows added
+below it — **HCL AppScan, Invicti, Acunetix** — are a different animal: enterprise DAST
+platforms that scan-and-report at scale and are measured on *scanner accuracy*, not manual
+UX. They matter here because their whole pitch is the thing Nullhawk is built on — *"is this
+finding real?"* — and they charge enterprise money for it. See
+[§4a](#4a-the-enterprise-dast-tier) for the detail.
 
 **Nobody holds all four columns.** That is the position worth attacking, and it is more
 defensible than price.
@@ -86,12 +96,12 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Passive checks | ✅ | ❌ | **IMPLEMENTED M13.2** | Six checks: security headers, cookie attributes, CORS, technology disclosure, cache directives on authenticated responses, recorded TLS. Each result is a *lead* — a passive check cannot state anything more firmly |
 | Passive check catalogue size | large | — | **six** | Deliberately small. The differentiator is what a result means, not how many there are |
 | Scanner says which checks ran | ⚠️ | — | **IMPLEMENTED M13.2** | A run records every detector and version, including the ones that raised nothing — so "clean" can be told from "never ran" |
-| Active scanner | ✅ | ❌ | PLANNED M13.3–M13.7 | |
+| Active scanner | ✅ | ❌ | **IMPLEMENTED M13.3+** | An evidence-driven scanner across the common web-vulnerability classes — see the per-class rows below. Every finding is a verified result, not a signature match; Caido ships no active scanner at all |
 | Crawler | ✅ | ❌ | PLANNED M13.8 | Scoped in `roadmap.md` as CR.a–f: a static extractor + a scheduled, scope-guarded frontier, GET-only and never auto-submitting, feeding the scanner's project; JS-rendered discovery merges with browser integration (M18) |
 | **Caido ships no active scanner at all** | — | — | — | Strong evidence the market adopts on manual quality first |
 | Custom scan checks | BChecks | ❌ | **DONE M15.5** | `nullhawk check`: a check is a saved query (the `nullhawk-query` language) plus a finding template; it runs in the passive scanner and files a lead when it matches. Matches on metadata and headers (body fields refused at add time). By construction it can only ever raise a lead capped at `Confidence::Reported` — never an actionable finding, never an active hypothesis — so a user-written check cannot overclaim. Caido has no check DSL at all |
 | Evidence-verified findings | ⚠️ | ⚠️ | **IMPLEMENTED M13.1** | The store accepts only a `Verified`, which only a verification produces — a detector's suspicion does not compile into a finding |
-| OAST / Collaborator | ✅ | ⚠️ hosted | PLANNED M16 | Self-hostable is a selling point |
+| OAST / Collaborator | ✅ | ⚠️ hosted | **IMPLEMENTED** | Self-hosted HTTP+DNS collaborator (`nullhawk oob serve`) wired into the verification lab: blind SSRF, blind OS command injection and out-of-band SQLi confirm through a callback bearing an unguessable token. No third-party service — the whole point Burp's hosted Collaborator cannot make |
 | Findings with Markdown + export | ⚠️ | ✅ | **IMPLEMENTED M12.3** | |
 | Finding says which check and version produced it | ⚠️ | — | **IMPLEMENTED M13.2** | Printed in the report, and what lets a retest tell a fix from a rewritten check |
 | Runnable proof of concept generated from evidence | ⚠️ manual | ⚠️ manual | **IMPLEMENTED M12.9** | Built from the stored exchanges, with credentials as named placeholders. `curl` where curl can express the request, and a stated reason where it cannot |
@@ -106,6 +116,18 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 | Scanner refuses to replay state-changing requests | ⚠️ | ⚠️ | **IMPLEMENTED M13.6** | Invariant 18, enforced by the scheduler rather than by each check |
 | Cross-identity access tested across captured traffic | ⚠️ | ⚠️ | **IMPLEMENTED M13.7** | Owner inferred from the captured credential by exact match, never guessed. Same `replay_once` and confidence ladder as the on-demand matrix |
 | Correctly-scoped endpoints are cleared without a declaration | ❌ | ❌ | **IMPLEMENTED M13.7** | Every value differing is the shape of per-caller data; an IDOR returns the owner's values, not different ones |
+| SQL injection — error, boolean, time-based **and out-of-band** | ✅ | ❌ | **IMPLEMENTED** | Error- and boolean-differential; then a time-based test that requires the delay to scale from D to 2D (not merely "was slow"); then an OOB path (MSSQL `xp_dirtree`, Oracle `UTL_INADDR`/`UTL_HTTP`) confirmed by a collaborator callback. Reproduced before it is named |
+| OS command injection (in-band + **blind via OAST**) | ✅ | ❌ | **IMPLEMENTED** | Proven by the shell evaluating an arithmetic expansion, confirmed by a second sum; where output is not reflected, a payload made to fetch the collaborator confirms the blind case |
+| Path traversal | ✅ | ❌ | **IMPLEMENTED** | Confirmed by file-content signatures from outside the application root, not a reflected path |
+| Server-side template injection | ✅ | ❌ | **IMPLEMENTED** | The engine computes an arithmetic result the input carried, confirmed by a second product; names the engine family (Jinja/Twig, Freemarker/EL, ERB…) rather than guessing |
+| SSRF (cloud-metadata + **blind via OAST**) | ✅ | ❌ | **IMPLEMENTED** | Metadata contents returned from an internal address versus a benign control; a blind fetch that reveals nothing is caught by a collaborator callback |
+| Reflected XSS **confirmed in a real browser** | ✅ | ❌ | **IMPLEMENTED** | A reflecting input — a query parameter or a reflected request header (`User-Agent`, `Referer`) — is loaded headless, and filed only when a marker-setting payload actually executes; a value that reflects but is encoded is refuted, not reported as XSS |
+| Stored XSS **confirmed in a real browser** | ✅ | ❌ | **IMPLEMENTED** | A payload stored through a GET input, then a clean, payload-free load in the browser; execution on a request that never carried the payload is what separates stored from reflected. POST-body stores are out of reach by the same rule that forbids replaying POST |
+| DOM-based XSS (sink tracing) | ✅ DOM Invader | ❌ | **IMPLEMENTED** | Drives a browser with `innerHTML`/`eval`/`document.write` instrumented and files only when a URL source (`location.hash`/`search`) is seen reaching a sink — a flow the server, and any WAF, never sees |
+| CRLF / HTTP header injection | ✅ | ❌ | **IMPLEMENTED** | An encoded line break in an input that adds a marker header to the response, confirmed by a second random token; refuted when the break is stripped |
+| Sensitive-response caching / exposure | ⚠️ | ❌ | **IMPLEMENTED** | Confirms a shared cache serves one identity's authenticated response to a caller with no session, gated on a declared owned identifier so a public page is not mistaken for a leak |
+| Web cache poisoning | ⚠️ (Param Miner ext) | ❌ | **IMPLEMENTED** | An unkeyed header behind a unique cache-buster, confirmed served back to a request that never sent it; the buster means it never poisons a key a real user shares |
+| Host header injection (reset poisoning) | ⚠️ | ❌ | **IMPLEMENTED** | Confirms an absolute URL (a reset link, a redirect) is built from a spoofable `X-Forwarded-Host`; the marker must land inside a URL, not merely reflect as text |
 | Intruder / payload iteration | ✅ | ✅ | **IMPLEMENTED M14.1** | `nullhawk fuzz`. Responses grouped by `(status, length)` so the outlier is one short row; concludes nothing, because what a difference means is the tester's judgement |
 | Payload iteration is rate-limited and stoppable | ⚠️ | ⚠️ | **IMPLEMENTED M14.1** | Reuses the scheduler's budget, pause and Ctrl-C. A truncated list says so rather than reading as "nothing stood out" |
 
@@ -116,6 +138,90 @@ Nothing is marked DONE before it works. As of M0, everything below is PLANNED.
 
 | Session handling / re-authentication | ✅ | ✅ | **DONE M15.1/M15.2** | `identity refresh` adopts a session from proxy traffic; `identity renew` replays a recorded login/refresh request and takes the fresh token from its response. Two paths, one for browser sessions and one for API tokens |
 | Login sequence recorder | ✅ | ⚠️ | **PARTIAL M15.2** | `identity renew --from <captured login>` replays a single recorded login/refresh request and extracts the new token. A multi-step recorded sequence, and password logins behind captcha/MFA/SSO, remain out of scope by design |
+
+## 4a. The enterprise DAST tier
+
+A different competitive set from Burp/Caido/ZAP: enterprise **DAST platforms** that crawl
+and scan at scale, report into governance dashboards, and are bought by AppSec teams rather
+than hands-on testers. They are named here because their headline feature is the one
+Nullhawk is architected around — *proof that a finding is real* — sold at enterprise prices.
+
+**Corporate note.** **Invicti Security owns both Invicti and Acunetix.** The company was
+**Netsparker**, acquired **Acunetix**, and rebranded Netsparker to **Invicti** in 2021.
+Today they are deliberately tiered siblings: **Invicti = enterprise** (what was "Acunetix
+360" / "Netsparker Cloud" is now **Invicti Enterprise**), **Acunetix = SMB / hands-on**.
+The naming is a trap — "Acunetix 360" is effectively Invicti Enterprise, not a separate
+Acunetix product. ([invicti.com](https://www.invicti.com/vulnerability-scanner-comparison/invicti-vs-acunetix))
+
+### HCL AppScan
+
+Legacy enterprise AppSec suite (originally IBM AppScan, now HCLSoftware). One of the few
+vendors bundling **SAST + DAST + IAST + SCA + API** in one platform, FIPS 140-3 certified,
+with centralised governance — bought by large/regulated/government orgs, on-prem
+(Enterprise/Standard) or SaaS (AppScan 360°). Accuracy play is **Intelligent Finding
+Analytics (IFA)**: ML that clusters and triages findings, claiming **up to ~98% false-
+positive reduction**. **No Burp-style proxy / Repeater / Intruder** — it has a
+manual-explore step to guide the crawler, but it is scan-and-report, not an interactive
+bench. Pricing is quote-only and among the highest in the market: third-party estimates put
+DAST at **~$25K–$100K+/yr** and full-platform enterprise deals at **$500K–$1M+**. Criticisms:
+dated/cumbersome UI, steep learning curve, slow scans on large sites.
+([IFA docs](https://help.hcl-software.com/appscan/ASoC/appseccloud_DAST_IFA.html),
+[pricing](https://beaglesecurity.com/blog/article/hcl-appscan-pricing.html))
+
+### Invicti (formerly Netsparker)
+
+Enterprise DAST/ASPM platform, SaaS or on-prem, for teams scanning many apps/APIs at scale.
+Its signature is **Proof-Based Scanning**: after the scanner flags a candidate, the engine
+**safely, read-only re-exploits it to produce demonstrable evidence** — for suspected SQLi
+it runs a benign query returning the DB version; for file inclusion it reads a known system
+file — and tags confirmed findings distinctly from unconfirmed. Claims **~99.98% accuracy**
+and that **>94% of direct-impact vulns are auto-confirmed**. DAST+IAST (server agent),
+out-of-band detection, REST/SOAP/GraphQL API scanning, SPA/DOM crawling, broad auth. But it
+is **automation-first, not a manual bench**: a request builder and encoder helpers, but **no
+intercepting proxy, no Repeater/Intruder/Sequencer, no extension ecosystem** — the opposite
+of Burp. Pricing quote-based, third-party data ~**$20K–$37K/yr**. Criticisms: residual false
+positives on framework-protected XSS, weaker complex-auth handling, resource-heavy scans.
+([Proof-Based Scanning](https://www.invicti.com/blog/web-security/cutting-through-uncertainty-proof-based-scanning-announcing-white-paper),
+[manual tools](https://www.invicti.com/features/advanced-manual-scanning-tools))
+
+### Acunetix (by Invicti)
+
+The **SMB / hands-on sibling** — same core engine and proof-of-exploit philosophy, lighter
+and faster, single-instance (Standard) up to multi-user (Premium). Known for **AcuMonitor**
+(its **OAST / out-of-band** service catching blind, async and second-order vulns via
+callback) and the **AcuSensor** agent for gray-box DAST+IAST. Crawls SPA/JS, scans
+REST/SOAP/GraphQL. Again **scan-and-report** — bundles some free standalone manual utilities
+(HTTP editor, subdomain scanner) but is not an interactive proxy suite. Pricing quote-based,
+~**$4.5K–$37K/yr** by target count. Same criticisms as Invicti, and explicitly *"not a
+stand-in for human pentesting."*
+([API/OAST](https://www.acunetix.com/product/api-security/),
+[pricing](https://pentest.ae/blog/acunetix-pricing-2026/))
+
+### Where Nullhawk stands against this tier
+
+- **Evidence-first is exactly what they monetise — gated behind enterprise licensing.**
+  Invicti/Acunetix's Proof-Based Scanning and HCL's ML triage both answer *"is this real?"*.
+  Nullhawk answers it structurally — the store accepts only a verified result, and every
+  finding compiles a runnable PoC — at practitioner scale, not $20K–$1M/yr.
+- **They are scan-and-report engines; none has a manual bench.** Invicti openly has no proxy
+  or extension ecosystem; AppScan and Acunetix are scan-and-report. Nullhawk couples
+  automated evidence generation *with* a first-class manual toolkit (Repeater, Intruder,
+  match-and-replace, sequencer) — the divide none of them cross.
+- **Proof-based confirmation only reaches "directly exploitable" classes.** Invicti itself
+  auto-confirms ~94% of *direct-impact* vulns; business-logic, auth/authorization
+  (IDOR/BOLA) and chained flaws fall back to ML triage or manual review. Nullhawk's
+  cross-identity engine confirms exactly the authorization classes their automated proofs
+  do not reach — the owner is inferred from the captured credential, never guessed.
+- **Their accuracy numbers are vendor claims with a standing asterisk** — reviewers keep
+  citing edge-case false positives (framework XSS) and complex-auth friction. Nullhawk's
+  browser-confirmed XSS refutes a reflected-but-encoded value instead of filing it, and its
+  OAST is self-hosted rather than a vendor service.
+- **All three are quote-only, target-metered, multi-year enterprise licensing.** The wedge
+  is the same as against Burp/ZAP: a transparent, practitioner-oriented tool that is
+  evidence-first *without* the enterprise weight and price.
+
+> Accuracy stats (Invicti 99.98%/94%, HCL ~98% FP reduction) are vendor claims; all pricing
+> is third-party/reseller estimate, not a vendor price list — treat as ballpark.
 
 ## 5. Extensibility
 
