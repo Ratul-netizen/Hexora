@@ -51,6 +51,7 @@ interface DashboardData {
   severities: Record<string, number>;
   findingsTotal: number;
   recent: HistoryRow[];
+  requestsTotal: number;
   scope: { included: number; excluded: number };
 }
 
@@ -59,6 +60,7 @@ const EMPTY: DashboardData = {
   severities: {},
   findingsTotal: 0,
   recent: [],
+  requestsTotal: 0,
   scope: { included: 0, excluded: 0 },
 };
 
@@ -115,6 +117,10 @@ export function DashboardView({
         severities,
         findingsTotal,
         recent: history.status === "fulfilled" ? history.value.rows : [],
+        // The live captured count, re-read on every refresh — the project summary's
+        // request count is a snapshot from when the project was opened and goes stale
+        // the moment traffic is captured.
+        requestsTotal: history.status === "fulfilled" ? history.value.total : 0,
         scope:
           scope.status === "fulfilled"
             ? {
@@ -141,7 +147,7 @@ export function DashboardView({
     return Array.from(counts.entries());
   }, [nodes]);
 
-  const requests = project?.requests ?? 0;
+  const requests = Math.max(data.requestsTotal, project?.requests ?? 0);
   const hostCount = isSample ? 0 : data.hosts.length;
 
   return (
@@ -310,6 +316,10 @@ function StatTile({
 function classify(host: string): { type: DeviceType; zone: string } {
   const h = host.toLowerCase();
   const isPrivate =
+    /^127\./.test(h) ||
+    h.startsWith("localhost") ||
+    h.startsWith("[::1]") ||
+    h.startsWith("::1") ||
     /^10\./.test(h) ||
     /^192\.168\./.test(h) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
