@@ -159,21 +159,24 @@ export function DashboardView({
       : topologyFromHosts(data.hosts, data.signals);
   }, [isSample, data.hosts, data.signals, graphMode]);
 
-  // Detected backend tech per host, for the "Backend" panel.
+  // Detected backend tech per host, for the "Backend" panel. Every host is listed —
+  // one that discloses nothing is said to, rather than hidden.
   const backends = useMemo(
     () =>
-      data.hosts
-        .map((h) => ({ host: h.host, tech: classifyDevice(h.host, data.signals.get(h.host)).tech }))
-        .filter((b) => b.tech),
+      data.hosts.map((h) => ({
+        host: h.host,
+        tech: classifyDevice(h.host, data.signals.get(h.host)).tech,
+      })),
     [data.hosts, data.signals],
   );
 
   const zones = useMemo(() => {
     const counts = new Map<string, number>();
-    // Count devices (hosts), not the endpoint leaves fanned out around them, so the
-    // number matches the Hosts tile.
+    // Count the real nodes only: not the endpoint leaves fanned out in the infra view
+    // (id has "#"), and not the host roots in the app view (id starts "host:"), so an
+    // infra count is devices and an app count is endpoints.
     for (const n of nodes) {
-      if (n.type === "endpoint" && n.id.includes("#")) continue;
+      if (n.id.includes("#") || n.id.startsWith("host:")) continue;
       counts.set(n.zone, (counts.get(n.zone) ?? 0) + 1);
     }
     return Array.from(counts.entries());
@@ -304,12 +307,14 @@ export function DashboardView({
           </section>
 
           <section className="card">
-            <h2>Zones</h2>
+            <h2>{graphMode === "app" ? "Endpoints by host" : "Zones"}</h2>
             <ul className="zone-list">
               {zones.map(([zone, count]) => (
                 <li key={zone}>
                   <span>{zone}</span>
-                  <span className="muted">{count} devices</span>
+                  <span className="muted">
+                    {count} {graphMode === "app" ? "endpoints" : "devices"}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -322,7 +327,11 @@ export function DashboardView({
                 {backends.map((b) => (
                   <li key={b.host}>
                     <span className="backend-host mono">{b.host}</span>
-                    <span className="backend-tech">{b.tech}</span>
+                    {b.tech ? (
+                      <span className="backend-tech">{b.tech}</span>
+                    ) : (
+                      <span className="backend-tech muted">not disclosed</span>
+                    )}
                   </li>
                 ))}
               </ul>

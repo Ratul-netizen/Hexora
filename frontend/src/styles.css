@@ -3048,3 +3048,5 @@ table.grid td code {
 .legend-shape.dev-asset { color: var(--dev-unknown); }
 .legend-shape.dev-form { color: var(--dev-router); }
 .legend-shape.dev-redirect { color: var(--dev-endpoint); }
+
+.backend-tech.muted { color: var(--text-muted); font-style: italic; }
