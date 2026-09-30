@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   buildSitemap,
+  exchangeDetail,
   listFindings,
   listHistory,
   listScope,
@@ -17,6 +18,13 @@ import {
   type TopoLink,
   type TopoNode,
 } from "../components/TopologyGraph";
+import {
+  APP_LEGEND,
+  buildAppGraph,
+  classifyDevice,
+  parseSignals,
+  type HostSignals,
+} from "../lib/appgraph";
 
 /**
  * The opening screen: where the engagement stands at a glance, and a rotating map of
@@ -52,6 +60,7 @@ interface DashboardData {
   findingsTotal: number;
   recent: HistoryRow[];
   requestsTotal: number;
+  signals: Map<string, HostSignals>;
   scope: { included: number; excluded: number };
 }
 
@@ -61,6 +70,7 @@ const EMPTY: DashboardData = {
   findingsTotal: 0,
   recent: [],
   requestsTotal: 0,
+  signals: new Map(),
   scope: { included: 0, excluded: 0 },
 };
 
@@ -80,6 +90,7 @@ export function DashboardView({
   onNavigate: (tab: string) => void;
 }) {
   const [data, setData] = useState<DashboardData>(EMPTY);
+  const [graphMode, setGraphMode] = useState<"infra" | "app">("infra");
 
   useEffect(() => {
     if (!project) {
@@ -97,7 +108,7 @@ export function DashboardView({
           after: null,
           limit: 200,
         }),
-        listHistory(null, 8),
+        listHistory(null, 200),
         listScope(),
       ]);
       if (!live) return;
@@ -112,11 +123,16 @@ export function DashboardView({
         }
       }
 
+      const rows = history.status === "fulfilled" ? history.value.rows : [];
+      const signals = await fetchHostSignals(rows);
+      if (!live) return;
+
       setData({
         hosts: sitemap.status === "fulfilled" ? sitemap.value.hosts : [],
         severities,
         findingsTotal,
-        recent: history.status === "fulfilled" ? history.value.rows : [],
+        recent: rows.slice(0, 6),
+        signals,
         // The live captured count, re-read on every refresh — the project summary's
         // request count is a snapshot from when the project was opened and goes stale
         // the moment traffic is captured.
@@ -136,9 +152,20 @@ export function DashboardView({
   }, [project, captureCount, findingCount]);
 
   const isSample = data.hosts.length === 0;
-  const { nodes, links } = useMemo(
-    () => (isSample ? SAMPLE_TOPOLOGY : topologyFromHosts(data.hosts)),
-    [isSample, data.hosts],
+  const { nodes, links } = useMemo(() => {
+    if (isSample) return SAMPLE_TOPOLOGY;
+    return graphMode === "app"
+      ? buildAppGraph(data.hosts, data.signals)
+      : topologyFromHosts(data.hosts, data.signals);
+  }, [isSample, data.hosts, data.signals, graphMode]);
+
+  // Detected backend tech per host, for the "Backend" panel.
+  const backends = useMemo(
+    () =>
+      data.hosts
+        .map((h) => ({ host: h.host, tech: classifyDevice(h.host, data.signals.get(h.host)).tech }))
+        .filter((b) => b.tech),
+    [data.hosts, data.signals],
   );
 
   const zones = useMemo(() => {
@@ -206,14 +233,32 @@ export function DashboardView({
       <div className="dash-grid">
         <section className="card topo-card">
           <div className="card-title-row">
-            <h2>Network &amp; system topology</h2>
-            <span className="muted small">
-              {isSample ? "Sample — capture traffic to populate" : "drag to orbit"}
-            </span>
+            <h2>
+              {graphMode === "app" ? "Application structure" : "Network & system topology"}
+            </h2>
+            <div className="topo-head-right">
+              <div className="seg topo-mode">
+                <button
+                  className={graphMode === "infra" ? "seg-btn on" : "seg-btn"}
+                  onClick={() => setGraphMode("infra")}
+                >
+                  Infrastructure
+                </button>
+                <button
+                  className={graphMode === "app" ? "seg-btn on" : "seg-btn"}
+                  onClick={() => setGraphMode("app")}
+                >
+                  Application
+                </button>
+              </div>
+              <span className="muted small">
+                {isSample ? "sample" : "drag to orbit · scroll to zoom"}
+              </span>
+            </div>
           </div>
           <TopologyGraph nodes={nodes} links={links} height={430} />
           <div className="topo-legend">
-            {DEVICE_LEGEND.map((d) => (
+            {(graphMode === "app" ? APP_LEGEND : DEVICE_LEGEND).map((d) => (
               <span key={d.type} className="legend-item">
                 <LegendShape type={d.type} />
                 {d.label}
@@ -269,6 +314,20 @@ export function DashboardView({
               ))}
             </ul>
           </section>
+
+          {backends.length > 0 && (
+            <section className="card">
+              <h2>Backend</h2>
+              <ul className="backend-list">
+                {backends.map((b) => (
+                  <li key={b.host}>
+                    <span className="backend-host mono">{b.host}</span>
+                    <span className="backend-tech">{b.tech}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="card">
             <h2>Recent traffic</h2>
@@ -328,6 +387,11 @@ function LegendShape({ type }: { type: DeviceType }) {
     cloud: <path d="M8 1.5l5.2 3v6.5L8 14.5 2.8 11V4.5z" />,
     firewall: <path d="M8 2l6 11H2z" />,
     unknown: <circle cx="8" cy="8" r="5" />,
+    page: <circle cx="8" cy="8" r="5" />,
+    api: <path d="M8 1.5l5.2 3v6.5L8 14.5 2.8 11V4.5z" />,
+    asset: <rect x="3" y="3" width="10" height="10" rx="2.5" />,
+    form: <path d="M8 2l6 11H2z" />,
+    redirect: <path d="M8 2l6 6-6 6-6-6z" />,
   };
   return (
     <svg
@@ -345,33 +409,48 @@ function LegendShape({ type }: { type: DeviceType }) {
 
 // ------------------------------------------------------------------ derivation
 
-function classify(host: string): { type: DeviceType; zone: string } {
-  const h = host.toLowerCase();
-  const isPrivate =
-    /^127\./.test(h) ||
-    h.startsWith("localhost") ||
-    h.startsWith("[::1]") ||
-    h.startsWith("::1") ||
-    /^10\./.test(h) ||
-    /^192\.168\./.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /\b(internal|intranet|corp|local|lan)\b/.test(h);
-
-  if (/\b(fw|firewall|waf)\b/.test(h)) return { type: "firewall", zone: "Edge" };
-  if (/\b(gw|gateway|proxy|router|edge|ingress|lb|balancer)\b/.test(h))
-    return { type: "router", zone: "Edge" };
-  if (/\b(db|sql|postgres|mysql|mongo|redis|oracle|mariadb)\b/.test(h))
-    return { type: "database", zone: "Internal" };
-  if (/\b(cdn|s3|storage|blob|bucket|cloud|aws|azure|gcp|fastly|akamai)\b/.test(h))
-    return { type: "cloud", zone: "Cloud" };
-  if (isPrivate) return { type: "endpoint", zone: "Internal" };
-  return { type: "server", zone: "External" };
+/**
+ * Read a representative response per host and parse its signals. One exchange per host is
+ * enough to see the Server banner and framework; capped so a large capture stays cheap.
+ */
+async function fetchHostSignals(rows: HistoryRow[]): Promise<Map<string, HostSignals>> {
+  const firstByHost = new Map<string, { id: string; secure: boolean }>();
+  for (const row of rows) {
+    const host = hostOf(row.url);
+    if (host && !firstByHost.has(host)) {
+      firstByHost.set(host, { id: row.id, secure: row.secure });
+    }
+  }
+  const out = new Map<string, HostSignals>();
+  const entries = Array.from(firstByHost.entries()).slice(0, 16);
+  await Promise.all(
+    entries.map(async ([host, { id, secure }]) => {
+      try {
+        const detail = await exchangeDetail(id);
+        out.set(host, { ...parseSignals(detail.response_head), secure });
+      } catch {
+        /* a host we could not fingerprint stays on hostname heuristics */
+      }
+    }),
+  );
+  return out;
 }
 
-function topologyFromHosts(hosts: SitemapHost[]): { nodes: TopoNode[]; links: TopoLink[] } {
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+function topologyFromHosts(
+  hosts: SitemapHost[],
+  signals: Map<string, HostSignals>,
+): { nodes: TopoNode[]; links: TopoLink[] } {
   const maxPaths = Math.max(1, ...hosts.map((h) => h.paths.length));
   const nodes: TopoNode[] = hosts.map((h) => {
-    const { type, zone } = classify(h.host);
+    const { type, zone } = classifyDevice(h.host, signals.get(h.host));
     return {
       id: h.host,
       label: h.host,
@@ -388,7 +467,7 @@ function topologyFromHosts(hosts: SitemapHost[]): { nodes: TopoNode[]; links: To
   if (hosts.length <= 4) {
     const perHost = Math.max(4, Math.floor(28 / Math.max(1, hosts.length)));
     for (const h of hosts) {
-      const { zone } = classify(h.host);
+      const { zone } = classifyDevice(h.host, signals.get(h.host));
       h.paths.slice(0, perHost).forEach((p, i) => {
         const id = `${h.host}${p.path}#${i}`;
         nodes.push({

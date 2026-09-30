@@ -3006,3 +3006,45 @@ table.grid td code {
 .legend-shape.dev-endpoint { color: var(--dev-endpoint); }
 .legend-shape.dev-cloud { color: var(--dev-cloud); }
 .legend-shape.dev-firewall { color: var(--dev-firewall); }
+
+/* ---- dashboard graph mode toggle + backend panel ---- */
+.topo-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.topo-mode .seg-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+.backend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.backend-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.backend-host {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backend-tech {
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
+/* application-graph legend shape colours */
+.legend-shape.dev-page { color: var(--dev-server); }
+.legend-shape.dev-api { color: var(--dev-database); }
+.legend-shape.dev-asset { color: var(--dev-unknown); }
+.legend-shape.dev-form { color: var(--dev-router); }
+.legend-shape.dev-redirect { color: var(--dev-endpoint); }

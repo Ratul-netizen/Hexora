@@ -19,7 +19,13 @@ export type DeviceType =
   | "endpoint"
   | "cloud"
   | "firewall"
-  | "unknown";
+  | "unknown"
+  // Application-graph node kinds (share the renderer with device kinds).
+  | "page"
+  | "api"
+  | "asset"
+  | "form"
+  | "redirect";
 
 export interface TopoNode {
   id: string;
@@ -49,6 +55,12 @@ const TYPE_FALLBACK: Record<DeviceType, string> = {
   cloud: "#b48ad6",
   firewall: "#e0917a",
   unknown: "#8a93a3",
+  // application-graph kinds
+  page: "#5bb5aa",
+  api: "#8098d9",
+  asset: "#8a93a3",
+  form: "#d9b061",
+  redirect: "#7fa8c9",
 };
 
 /** Resolve a CSS custom property to a concrete colour, with a fallback. */
@@ -153,14 +165,14 @@ export function TopologyGraph({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const accent = cssVar("--accent", TYPE_FALLBACK.server);
+    const accent2 = cssVar("--accent-2", TYPE_FALLBACK.database);
     const colors = {
-      server: cssVar("--accent", TYPE_FALLBACK.server),
-      database: cssVar("--accent-2", TYPE_FALLBACK.database),
-      router: TYPE_FALLBACK.router,
-      endpoint: TYPE_FALLBACK.endpoint,
-      cloud: TYPE_FALLBACK.cloud,
-      firewall: TYPE_FALLBACK.firewall,
-      unknown: TYPE_FALLBACK.unknown,
+      ...TYPE_FALLBACK,
+      server: accent,
+      database: accent2,
+      page: accent,
+      api: accent2,
     } as Record<DeviceType, string>;
 
     const reduced =
@@ -370,14 +382,16 @@ function drawShape(
 ) {
   ctx.beginPath();
   switch (type) {
-    case "endpoint": {
+    case "endpoint":
+    case "asset": {
       // rounded square
       const s = r * 1.7;
       const rad = Math.min(3, s * 0.25);
       roundRect(ctx, cx - s / 2, cy - s / 2, s, s, rad);
       break;
     }
-    case "router": {
+    case "router":
+    case "redirect": {
       // diamond
       const d = r * 1.4;
       ctx.moveTo(cx, cy - d);
@@ -387,8 +401,9 @@ function drawShape(
       ctx.closePath();
       break;
     }
-    case "firewall": {
-      // triangle (shield-ish)
+    case "firewall":
+    case "form": {
+      // triangle (shield / input)
       const t = r * 1.5;
       ctx.moveTo(cx, cy - t);
       ctx.lineTo(cx + t * 0.9, cy + t * 0.7);
@@ -408,7 +423,8 @@ function drawShape(
       ctx.ellipse(cx, cy - h + ey, w, ey, 0, 0, Math.PI * 2);
       break;
     }
-    case "cloud": {
+    case "cloud":
+    case "api": {
       // hexagon
       const hr = r * 1.5;
       for (let i = 0; i < 6; i++) {
