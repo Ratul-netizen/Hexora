@@ -2967,3 +2967,42 @@ table.grid td code {
 .sitemap .tree tr:hover td.sitemap-actions .chip-btn {
   opacity: 1;
 }
+
+/* ---- topology zoom controls ---- */
+.topo-zoom {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 2;
+}
+.topo-zoom button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 7px;
+  background: rgba(20, 24, 30, 0.7);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  backdrop-filter: blur(6px);
+}
+.topo-zoom button:hover {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: var(--text-bright);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+/* legend shapes carry the device colour */
+.legend-item svg { flex: 0 0 auto; }
+.legend-shape.dev-server { color: var(--dev-server); }
+.legend-shape.dev-database { color: var(--dev-database); }
+.legend-shape.dev-router { color: var(--dev-router); }
+.legend-shape.dev-endpoint { color: var(--dev-endpoint); }
+.legend-shape.dev-cloud { color: var(--dev-cloud); }
+.legend-shape.dev-firewall { color: var(--dev-firewall); }

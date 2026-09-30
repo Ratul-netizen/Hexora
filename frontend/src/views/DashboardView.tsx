@@ -215,7 +215,7 @@ export function DashboardView({
           <div className="topo-legend">
             {DEVICE_LEGEND.map((d) => (
               <span key={d.type} className="legend-item">
-                <i className={`legend-dot dev-${d.type}`} />
+                <LegendShape type={d.type} />
                 {d.label}
               </span>
             ))}
@@ -313,6 +313,33 @@ function StatTile({
       <span className="stat-value">{value}</span>
       {sub ? <span className="stat-sub muted">{sub}</span> : null}
     </div>
+  );
+}
+
+/** A small shape matching the topology's device glyphs, coloured by type. */
+function LegendShape({ type }: { type: DeviceType }) {
+  const shapes: Record<DeviceType, JSX.Element> = {
+    server: <circle cx="8" cy="8" r="5" />,
+    database: (
+      <path d="M3 4.5c0-1.4 2.2-2.5 5-2.5s5 1.1 5 2.5v7c0 1.4-2.2 2.5-5 2.5s-5-1.1-5-2.5zM3 4.5c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    ),
+    router: <path d="M8 2l6 6-6 6-6-6z" />,
+    endpoint: <rect x="3" y="3" width="10" height="10" rx="2.5" />,
+    cloud: <path d="M8 1.5l5.2 3v6.5L8 14.5 2.8 11V4.5z" />,
+    firewall: <path d="M8 2l6 11H2z" />,
+    unknown: <circle cx="8" cy="8" r="5" />,
+  };
+  return (
+    <svg
+      className={`legend-shape dev-${type}`}
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      {shapes[type]}
+    </svg>
   );
 }
 

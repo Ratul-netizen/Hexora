@@ -134,6 +134,14 @@ export function TopologyGraph({
   const autoRef = useRef(true);
   const dataRef = useRef<{ placed: Placed[]; links: TopoLink[] }>({ placed: [], links: [] });
   const hoverRef = useRef<string | null>(null);
+  const zoomRef = useRef(1);
+  const nudgeZoom = (factor: number) => {
+    zoomRef.current = Math.max(0.4, Math.min(3, zoomRef.current * factor));
+  };
+  const resetView = () => {
+    zoomRef.current = 1;
+    rot.current = { x: -0.35, y: 0.5 };
+  };
 
   useEffect(() => {
     dataRef.current = { placed: layout(nodes), links };
@@ -188,9 +196,10 @@ export function TopologyGraph({
       const z2 = p.y * sinX + z1 * cosX;
       const fov = 620;
       const f = fov / (fov + z2 + 260);
+      const z = zoomRef.current;
       return {
-        sx: width / 2 + x1 * f,
-        sy: height / 2 + y1 * f,
+        sx: width / 2 + x1 * f * z,
+        sy: height / 2 + y1 * f * z,
         depth: z2,
         f,
       };
@@ -226,10 +235,11 @@ export function TopologyGraph({
       const order = [...placed].sort(
         (m, n) => (pts.get(m.id)!.depth ?? 0) - (pts.get(n.id)!.depth ?? 0),
       );
+      const zoom = zoomRef.current;
       for (const n of order) {
         const p = pts.get(n.id)!;
         const base = 3.2 + (n.weight ?? 0.3) * 6;
-        const r = Math.max(1.6, base * p.f);
+        const r = Math.max(1.6, base * p.f * Math.sqrt(zoom));
         const color = colors[n.type] ?? colors.unknown;
         const alpha = 0.45 + p.f * 0.55;
         const hovered = hoverRef.current === n.id;
@@ -240,9 +250,8 @@ export function TopologyGraph({
         ctx.fillStyle = withAlpha(color, hovered ? 0.28 : 0.12 * p.f);
         ctx.fill();
 
-        // core
-        ctx.beginPath();
-        ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2);
+        // core — a shape per device type, so the kind reads without the legend
+        drawShape(ctx, n.type, p.sx, p.sy, r);
         ctx.fillStyle = withAlpha(color, alpha);
         ctx.fill();
         ctx.lineWidth = 1;
@@ -310,11 +319,17 @@ export function TopologyGraph({
       hoverRef.current = null;
     };
 
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomRef.current = Math.max(0.4, Math.min(3, zoomRef.current * (e.deltaY < 0 ? 1.1 : 0.9)));
+    };
+
     canvas.style.cursor = "grab";
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointerleave", onLeave);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
 
     return () => {
       cancelAnimationFrame(raf);
@@ -323,14 +338,109 @@ export function TopologyGraph({
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointerleave", onLeave);
+      canvas.removeEventListener("wheel", onWheel);
     };
   }, [height]);
 
   return (
     <div ref={wrapRef} className="topo-canvas" style={{ height }}>
       <canvas ref={canvasRef} />
+      <div className="topo-zoom">
+        <button type="button" aria-label="Zoom in" onClick={() => nudgeZoom(1.2)}>
+          +
+        </button>
+        <button type="button" aria-label="Zoom out" onClick={() => nudgeZoom(1 / 1.2)}>
+          −
+        </button>
+        <button type="button" aria-label="Reset view" title="Reset view" onClick={resetView}>
+          ⟳
+        </button>
+      </div>
     </div>
   );
+}
+
+/** Trace the outline of a device shape centred at (cx, cy). Caller fills and strokes. */
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  type: DeviceType,
+  cx: number,
+  cy: number,
+  r: number,
+) {
+  ctx.beginPath();
+  switch (type) {
+    case "endpoint": {
+      // rounded square
+      const s = r * 1.7;
+      const rad = Math.min(3, s * 0.25);
+      roundRect(ctx, cx - s / 2, cy - s / 2, s, s, rad);
+      break;
+    }
+    case "router": {
+      // diamond
+      const d = r * 1.4;
+      ctx.moveTo(cx, cy - d);
+      ctx.lineTo(cx + d, cy);
+      ctx.lineTo(cx, cy + d);
+      ctx.lineTo(cx - d, cy);
+      ctx.closePath();
+      break;
+    }
+    case "firewall": {
+      // triangle (shield-ish)
+      const t = r * 1.5;
+      ctx.moveTo(cx, cy - t);
+      ctx.lineTo(cx + t * 0.9, cy + t * 0.7);
+      ctx.lineTo(cx - t * 0.9, cy + t * 0.7);
+      ctx.closePath();
+      break;
+    }
+    case "database": {
+      // cylinder: top ellipse, body, bottom curve
+      const w = r * 1.3;
+      const h = r * 1.6;
+      const ey = h * 0.28;
+      ctx.moveTo(cx - w, cy - h + ey);
+      ctx.lineTo(cx - w, cy + h - ey);
+      ctx.ellipse(cx, cy + h - ey, w, ey, 0, Math.PI, 0, true);
+      ctx.lineTo(cx + w, cy - h + ey);
+      ctx.ellipse(cx, cy - h + ey, w, ey, 0, 0, Math.PI * 2);
+      break;
+    }
+    case "cloud": {
+      // hexagon
+      const hr = r * 1.5;
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6;
+        const px = cx + hr * Math.cos(a);
+        const py = cy + hr * Math.sin(a);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      break;
+    }
+    default:
+      // server / unknown: circle
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  }
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 /** Blend a hex or already-rgba colour with an alpha, tolerant of `#rgb`/`#rrggbb`. */
