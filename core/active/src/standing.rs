@@ -136,7 +136,8 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
             .chain(crate::checks::cache_poison::suspect(exchange))
             .chain(crate::checks::crlf::suspect(exchange))
             .chain(crate::checks::xss::suspect(exchange))
-            .chain(crate::checks::host_header::suspect(exchange));
+            .chain(crate::checks::host_header::suspect(exchange))
+            .chain(crate::checks::stored_xss::suspect(exchange));
 
         for hypothesis in raised_here {
             if is_ours(&hypothesis, &ours) {
@@ -223,7 +224,7 @@ mod tests {
             .map(|h| h.claim.as_str())
             .collect();
 
-        assert_eq!(claims.len(), 26, "{claims:#?}");
+        assert_eq!(claims.len(), 29, "{claims:#?}");
     }
 
     #[test]
@@ -235,7 +236,7 @@ mod tests {
         }
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 9, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 10, "{:#?}", standing.hypotheses);
     }
 
     #[test]
@@ -246,7 +247,7 @@ mod tests {
         capture(&project, "/search?q=hats");
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 9, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 10, "{:#?}", standing.hypotheses);
     }
 
     #[test]
@@ -291,7 +292,7 @@ mod tests {
         capture_as(&project, "/search?q=typed", "repeater");
         assert_eq!(
             standing(&project, &everything()).unwrap().hypotheses.len(),
-            9
+            10
         );
     }
 
@@ -304,7 +305,7 @@ mod tests {
         capture_as(&project, "/search?q=hxa3f9probe", "scanner");
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 9, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 10, "{:#?}", standing.hypotheses);
         assert!(
             standing.hypotheses[0].claim.contains("/search"),
             "{}",
@@ -368,6 +369,6 @@ mod tests {
         // The default selection reads in-scope traffic only, and nothing is in scope.
         let standing = standing(&project, &Selection::default()).unwrap();
         assert!(standing.hypotheses.is_empty());
-        assert_eq!(standing.out_of_scope, 9);
+        assert_eq!(standing.out_of_scope, 10);
     }
 }
