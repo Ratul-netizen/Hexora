@@ -97,6 +97,7 @@ work.
 | Authentication enforcement: whether an endpoint needs a session, whether it verifies the one it is given, and — for a JWT — whether it accepts an unsigned `alg: none` forgery of that session | **IMPLEMENTED** |
 | Injected-input verification: SQL injection (error- and boolean-based), path traversal, server-side template injection, SSRF and OS command injection, each confirmed against a control rather than a signature match alone | **IMPLEMENTED** |
 | Cached-response exposure: replays an authenticated request with its session removed and confirms a shared cache is serving one identity's declared data to a caller with none | **IMPLEMENTED** |
+| Web cache poisoning: probes unkeyed request headers behind a unique cache-buster and confirms an injected value is stored and served back to a request that never sent it | **IMPLEMENTED** |
 | Cross-identity access, scheduled: every authenticated endpoint replayed as every other identity, owner inferred from the captured credential | **IMPLEMENTED** |
 | Intruder: one request, a payload list, and responses grouped by behaviour so the outlier is one short row (`nullhawk fuzz`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |
