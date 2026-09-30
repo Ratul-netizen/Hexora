@@ -11,6 +11,7 @@ repository.workspace = true
 nullhawk-types.workspace = true
 nullhawk-engine.workspace = true
 nullhawk-repeater.workspace = true
+nullhawk-oob.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 

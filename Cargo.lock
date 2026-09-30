@@ -2281,6 +2281,7 @@ dependencies = [
  "nullhawk-authz",
  "nullhawk-engine",
  "nullhawk-http",
+ "nullhawk-oob",
  "nullhawk-repeater",
  "nullhawk-scan",
  "nullhawk-storage",
@@ -2640,6 +2641,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "nullhawk-engine",
+ "nullhawk-oob",
  "nullhawk-repeater",
  "nullhawk-types",
  "tokio",

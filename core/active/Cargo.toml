@@ -14,6 +14,7 @@ nullhawk-verify.workspace = true
 nullhawk-repeater.workspace = true
 nullhawk-scan.workspace = true
 nullhawk-authz.workspace = true
+nullhawk-oob.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 chrono.workspace = true
