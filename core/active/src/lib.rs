@@ -328,6 +328,7 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
         Box::new(checks::ssrf::ServerSideRequestForgery),
         Box::new(checks::cmdi::OsCommandInjection),
         Box::new(checks::cache_poison::CachePoisoning),
+        Box::new(checks::crlf::CrlfInjection),
     ]
 }
 
