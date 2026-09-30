@@ -2552,3 +2552,28 @@ table.grid td code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---- send-to actions on the exchange detail header ---- */
+.send-to {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.send-to .muted {
+  margin-right: 2px;
+}
+.send-to button {
+  padding: 4px 10px;
+}
+
+/* ---- a scan re-discovered as still running ---- */
+.active-resumed {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+.active-resumed button {
+  flex: 0 0 auto;
+}

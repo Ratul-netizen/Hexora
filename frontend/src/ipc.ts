@@ -1245,6 +1245,16 @@ export const scanActiveRun = (
 export const scanActiveStop = (): Promise<boolean> =>
   invoke<boolean>("scan_active_stop");
 
+/**
+ * Whether an active scan is in progress right now, according to the engine.
+ *
+ * The engine is the source of truth: a run started from one visit to the Scan tab
+ * keeps going on the backend after the view unmounts, so this is how a later visit
+ * re-discovers it rather than showing an idle screen over a live run.
+ */
+export const scanActiveRunning = (): Promise<boolean> =>
+  invoke<boolean>("scan_active_running");
+
 /* ------------------------------------------------------------------ *
  * Engagement snapshots
  * ------------------------------------------------------------------ */

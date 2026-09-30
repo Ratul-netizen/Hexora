@@ -23,6 +23,8 @@ export function HistoryView({
   refreshToken,
   onRepeat,
   onTestAuthorization,
+  onSendToFuzzer,
+  onSendToRace,
   select,
 }: {
   hasProject: boolean;
@@ -30,6 +32,8 @@ export function HistoryView({
   refreshToken: number;
   onRepeat: (id: string) => void;
   onTestAuthorization: (id: string) => void;
+  onSendToFuzzer: (id: string) => void;
+  onSendToRace: (id: string) => void;
   /** An exchange to open, set when arriving from a finding or a matrix cell. */
   select: string | null;
 }) {
@@ -227,10 +231,15 @@ export function HistoryView({
                 raw
               </span>
             )}
-            <button onClick={() => onRepeat(detail.id)}>Send to repeater</button>
-            <button onClick={() => onTestAuthorization(detail.id)}>
-              Test authorization
-            </button>
+            <div className="send-to">
+              <span className="muted small">Send to</span>
+              <button onClick={() => onRepeat(detail.id)}>Repeater</button>
+              <button onClick={() => onSendToFuzzer(detail.id)}>Fuzzer</button>
+              <button onClick={() => onSendToRace(detail.id)}>Race</button>
+              <button onClick={() => onTestAuthorization(detail.id)}>
+                Authorization
+              </button>
+            </div>
           </header>
           <div className="panes">
             <MessagePane

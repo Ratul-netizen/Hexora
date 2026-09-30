@@ -192,6 +192,19 @@ export default function App() {
     setTab("authz");
   }, []);
 
+  // Send a captured request on to a tool that takes one as its base. All three read
+  // the same `testing` request id, so this is one setter and a destination tab —
+  // exactly the "send to…" plumbing that otherwise means hand-copying an id.
+  const openFuzzer = useCallback((id: string) => {
+    setTesting(id);
+    setTab("fuzzer");
+  }, []);
+
+  const openRace = useCallback((id: string) => {
+    setTesting(id);
+    setTab("race");
+  }, []);
+
   // Following a citation out of a finding, or out of a matrix cell, lands in
   // History with that exchange selected. A claim whose evidence cannot be opened is
   // a claim nobody can check.
@@ -304,6 +317,8 @@ export default function App() {
             refreshToken={captureCount}
             onRepeat={openRepeater}
             onTestAuthorization={openAuthz}
+            onSendToFuzzer={openFuzzer}
+            onSendToRace={openRace}
             select={openExchange}
           />
         )}
