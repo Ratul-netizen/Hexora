@@ -10,3 +10,4 @@ pub mod crossid;
 pub mod echo;
 pub mod redirect;
 pub mod reflection;
+pub mod sqli;
