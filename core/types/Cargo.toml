@@ -22,3 +22,6 @@ bytes.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# Test-only: build JWT fixtures from readable JSON rather than embedding a token
+# literal a secret scanner cannot tell from a live one (docs/dependencies.md).
+base64.workspace = true

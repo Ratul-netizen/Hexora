@@ -59,7 +59,7 @@ const SETTLES: &str = "auth.unverified";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("auth.enforcement"),
     name: "Authentication enforcement",
-    version: "1.0.0",
+    version: "1.1.0",
     about: "whether an endpoint requires a session, and whether it checks the one it is given",
     mode: DetectorMode::Active,
     observes: false,
@@ -169,6 +169,22 @@ impl ActiveCheck for AuthEnforcement {
         let how = answered(&baseline, &broken, &tampered);
         if how != Answered::Refused {
             return Ok(unverified(subject, &baseline, &broken, tampered, how));
+        }
+
+        // The signature is checked — a broken one was refused. `alg: none` is a different
+        // door: a server can verify a signature and still accept an *unsigned* token,
+        // because it skips verification when the header says there is nothing to verify.
+        // Worth the request only when a JWT is what got broken; forge_alg_none says so.
+        if budget.per_hypothesis >= 4 {
+            if let Attempt::Answered(forged) = send(subject, lab, Probe::WithForgedAlgNone).await {
+                if !forged.skipped {
+                    let diff = compare(&baseline, &forged);
+                    let how = answered(&baseline, &forged, &diff);
+                    if how != Answered::Refused {
+                        return Ok(unverified(subject, &baseline, &forged, diff, how));
+                    }
+                }
+            }
         }
 
         Ok(Verification::Refuted {
@@ -512,6 +528,9 @@ enum Probe {
     WithoutCredential,
     /// The credential kept, with one character changed.
     WithBrokenCredential,
+    /// A JWT credential re-forged to `alg: none`, payload unchanged. Skipped when the
+    /// credential is not a JWT.
+    WithForgedAlgNone,
 }
 
 /// One request and what came back.
@@ -576,6 +595,22 @@ async fn send(subject: &Subject, lab: &dyn Lab, probe: Probe) -> Attempt {
                 .headers
                 .set(tampered.header(), tampered.expose_value());
             tampered.describe()
+        }
+        Probe::WithForgedAlgNone => {
+            let Some(credential) = draft.request.headers.iter().find_map(Credential::read) else {
+                return Attempt::Answered(skipped());
+            };
+            let Some(forged) = credential.forge_alg_none() else {
+                // Not a JWT: there is no unsigned form of an opaque token.
+                return Attempt::Answered(skipped());
+            };
+            let desc = forged.describe();
+            what = Some(desc.clone());
+            draft
+                .request
+                .headers
+                .set(forged.header(), forged.expose_value());
+            desc
         }
     };
 
