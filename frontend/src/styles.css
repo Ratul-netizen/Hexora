@@ -2922,3 +2922,27 @@ table.grid td code {
 .payload-out {
   max-height: 320px;
 }
+
+/* ---- 403 bypass live results ---- */
+.status-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 5px;
+  min-width: 34px;
+  text-align: center;
+}
+.status-badge.s2 { color: #0c1512; background: var(--ok); }
+.status-badge.s3 { color: #0c1017; background: var(--info); }
+.status-badge.s4 { color: var(--warn); background: rgba(217, 176, 97, 0.16); border: 1px solid rgba(217, 176, 97, 0.4); }
+.status-badge.s5 { color: #1a0c0c; background: var(--danger); }
+.status-badge.s-err { color: var(--text-muted); background: rgba(255, 255, 255, 0.06); }
+.bypass-hit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.bypass-hit:last-child { border-bottom: none; }

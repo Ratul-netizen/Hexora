@@ -1255,6 +1255,33 @@ export const scanActiveStop = (): Promise<boolean> =>
 export const scanActiveRunning = (): Promise<boolean> =>
   invoke<boolean>("scan_active_running");
 
+/** One 403/WAF-bypass candidate to send: a method, URL and any extra headers. */
+export interface BypassCandidateInput {
+  technique: string;
+  method: string;
+  url: string;
+  headers: [string, string][];
+}
+
+/** What a bypass candidate returned. status 0 with an error means it never sent. */
+export interface BypassResult {
+  technique: string;
+  status: number;
+  bytes: number;
+  out_of_scope: boolean;
+  error: string | null;
+}
+
+/**
+ * Sends each bypass candidate and reports its status and size. Human-driven (sends as
+ * the Repeater), records nothing. Needs an open project for its scope.
+ */
+export const bypassRun = (
+  candidates: BypassCandidateInput[],
+  insecure: boolean,
+): Promise<BypassResult[]> =>
+  invoke<BypassResult[]>("bypass_run", { candidates, insecure });
+
 /* ------------------------------------------------------------------ *
  * Engagement snapshots
  * ------------------------------------------------------------------ */

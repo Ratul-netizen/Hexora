@@ -62,6 +62,7 @@ pub fn run() {
             commands::oob_test,
             commands::fuzz_slots,
             commands::fuzz_run,
+            commands::bypass_run,
             commands::websocket_sessions,
             commands::websocket_messages,
             commands::repeater_draft,

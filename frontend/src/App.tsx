@@ -373,7 +373,7 @@ export default function App() {
         {tab === "snapshots" && (
           <SnapshotsView hasProject={project !== null} />
         )}
-        {tab === "toolkit" && <ToolkitView />}
+        {tab === "toolkit" && <ToolkitView hasProject={project !== null} />}
         {tab === "programme" && <ProgrammeView hasProject={project !== null} />}
         {tab === "license" && (
           <LicenseView license={license} onChange={setLicense} />

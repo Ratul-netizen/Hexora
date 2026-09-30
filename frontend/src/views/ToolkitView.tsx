@@ -10,6 +10,7 @@ import {
 } from "../lib/jwt";
 import { mine, type MineResult } from "../lib/miner";
 import { generateBypasses, type BypassCandidate } from "../lib/bypass";
+import { bypassRun, describeError, type BypassResult } from "../ipc";
 import { TRANSFORMS, runPipeline, transformById } from "../lib/transforms";
 import { convert, detectFormat, type BodyFormat } from "../lib/convert";
 import {
@@ -30,7 +31,7 @@ import {
 
 type Tool = "jwt" | "miner" | "transforms" | "convert" | "payloads" | "bypass";
 
-export function ToolkitView() {
+export function ToolkitView({ hasProject }: { hasProject: boolean }) {
   const [tool, setTool] = useState<Tool>("jwt");
   return (
     <div className="toolkit">
@@ -77,7 +78,7 @@ export function ToolkitView() {
       {tool === "transforms" && <TransformsPanel />}
       {tool === "convert" && <ConvertPanel />}
       {tool === "payloads" && <PayloadsPanel />}
-      {tool === "bypass" && <BypassPanel />}
+      {tool === "bypass" && <BypassPanel hasProject={hasProject} />}
     </div>
   );
 }
@@ -546,19 +547,46 @@ function PayloadsPanel() {
 
 // ---------------------------------------------------------------- 403 / WAF bypass
 
-function BypassPanel() {
+function BypassPanel({ hasProject }: { hasProject: boolean }) {
   const [url, setUrl] = useState("");
   const [method, setMethod] = useState("GET");
   const [candidates, setCandidates] = useState<BypassCandidate[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<Map<string, BypassResult> | null>(null);
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   function generate() {
     setError(null);
+    setResults(null);
+    setRunError(null);
     try {
       setCandidates(generateBypasses(url, method));
     } catch (e) {
       setCandidates(null);
       setError(e instanceof Error ? e.message : "Could not parse the URL.");
+    }
+  }
+
+  async function runLive() {
+    if (!candidates) return;
+    setRunning(true);
+    setRunError(null);
+    try {
+      const rows = await bypassRun(
+        candidates.map((c) => ({
+          technique: c.technique,
+          method: c.method,
+          url: c.url,
+          headers: c.headers,
+        })),
+        false,
+      );
+      setResults(new Map(rows.map((r) => [r.technique, r])));
+    } catch (e) {
+      setRunError(describeError(e));
+    } finally {
+      setRunning(false);
     }
   }
 
@@ -569,15 +597,24 @@ function BypassPanel() {
     method: "Method changes",
   };
 
+  // A candidate whose status is neither the original forbidden pair nor an error is a
+  // lead: the server answered it differently from a 401/403.
+  const interesting = results
+    ? [...results.values()].filter(
+        (r) => r.error === null && r.status !== 0 && r.status !== 401 && r.status !== 403,
+      )
+    : [];
+
   return (
     <div className="bypass">
       <section className="card">
         <h2>403 / WAF bypass</h2>
         <p className="muted">
           Give a forbidden URL and get the known mutations to try — path rewriting,
-          header-driven auth spoofing, method changes. For authorized testing only.
-          Nothing is sent: copy a candidate as curl, or paste it into the Repeater, and a
-          bypass counts only when the server returns what the 403 withheld.
+          header-driven auth spoofing, method changes. For authorized testing only. Copy a
+          candidate as curl, or <strong>Run all</strong> to send them through the engine
+          and rank by status — a bypass counts when the server returns what the 403
+          withheld.
         </p>
         <div className="row">
           <select value={method} onChange={(e) => setMethod(e.target.value)}>
@@ -612,12 +649,56 @@ function BypassPanel() {
               {candidates.length} candidate{candidates.length === 1 ? "" : "s"}
             </span>
             <button
+              className="primary"
+              disabled={!hasProject || running}
+              onClick={() => void runLive()}
+              title={hasProject ? "" : "Open a project first — the runner uses its scope"}
+            >
+              {running ? "Running…" : "Run all"}
+            </button>
+            <button
               className="chip-btn"
               onClick={() => copy(candidates.map((c) => c.curl).join("\n\n"))}
             >
               Copy all as curl
             </button>
+            {!hasProject && (
+              <span className="muted small">Open a project to run live.</span>
+            )}
           </div>
+
+          {runError && <p className="error-text">{runError}</p>}
+
+          {results && (
+            <section className="card">
+              <h3>
+                {interesting.length > 0
+                  ? `${interesting.length} candidate(s) answered differently from 403`
+                  : "Nothing bypassed the control"}
+              </h3>
+              {interesting.length > 0 ? (
+                <ul className="bypass-list">
+                  {interesting
+                    .sort((a, b) => a.status - b.status)
+                    .map((r) => (
+                      <li key={r.technique} className="bypass-hit">
+                        <span className={statusBadge(r.status)}>{r.status}</span>
+                        <span className="tag">{r.technique}</span>
+                        <span className="muted small">
+                          {r.bytes.toLocaleString()} bytes
+                          {r.out_of_scope ? " · out of scope" : ""}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="muted small">
+                  Every candidate returned 401/403 or failed. The control held.
+                </p>
+              )}
+            </section>
+          )}
+
           {groups.map((g) => {
             const rows = candidates.filter((c) => c.group === g);
             if (rows.length === 0) return null;
@@ -627,25 +708,36 @@ function BypassPanel() {
                   {label[g]} ({rows.length})
                 </h3>
                 <ul className="bypass-list">
-                  {rows.map((c, i) => (
-                    <li key={`${g}-${i}`}>
-                      <div className="bypass-head">
-                        <span className="tag">{c.technique}</span>
-                        <span className="mono small bypass-target">
-                          {c.method} {displayTarget(c)}
-                        </span>
-                        <button className="chip-btn" onClick={() => copy(c.curl)}>
-                          Copy curl
-                        </button>
-                      </div>
-                      {c.headers.length > 0 && (
-                        <div className="mono small muted">
-                          {c.headers.map(([n, v]) => `${n}: ${v}`).join("  ·  ")}
+                  {rows.map((c, i) => {
+                    const r = results?.get(c.technique);
+                    return (
+                      <li key={`${g}-${i}`}>
+                        <div className="bypass-head">
+                          {r && (
+                            <span className={statusBadge(r.status)}>
+                              {r.error ? "err" : r.status}
+                            </span>
+                          )}
+                          <span className="tag">{c.technique}</span>
+                          <span className="mono small bypass-target">
+                            {c.method} {displayTarget(c)}
+                          </span>
+                          {r && !r.error && (
+                            <span className="muted small">{r.bytes.toLocaleString()} B</span>
+                          )}
+                          <button className="chip-btn" onClick={() => copy(c.curl)}>
+                            Copy curl
+                          </button>
                         </div>
-                      )}
-                      <div className="muted small">{c.note}</div>
-                    </li>
-                  ))}
+                        {c.headers.length > 0 && (
+                          <div className="mono small muted">
+                            {c.headers.map(([n, v]) => `${n}: ${v}`).join("  ·  ")}
+                          </div>
+                        )}
+                        <div className="muted small">{r?.error ?? c.note}</div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             );
@@ -654,6 +746,15 @@ function BypassPanel() {
       )}
     </div>
   );
+}
+
+/** Colour a status like the History table: 2xx ok, 3xx info, 4xx warn, 5xx danger. */
+function statusBadge(status: number): string {
+  if (status === 0) return "status-badge s-err";
+  if (status >= 500) return "status-badge s5";
+  if (status >= 400) return "status-badge s4";
+  if (status >= 300) return "status-badge s3";
+  return "status-badge s2";
 }
 
 function displayTarget(c: BypassCandidate): string {
