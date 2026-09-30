@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { MessagePane } from "../components/MessagePane";
+import { formatRequest, type CopyFormat } from "../lib/httpexport";
 import {
   describeError,
   exchangeDetail,
@@ -240,6 +241,7 @@ export function HistoryView({
                 Authorization
               </button>
             </div>
+            <CopyAs detail={detail} />
           </header>
           <div className="panes">
             <MessagePane
@@ -255,6 +257,36 @@ export function HistoryView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "Copy as …" for the selected exchange — a runnable curl / Python / fetch snippet. */
+function CopyAs({ detail }: { detail: ExchangeDetail }) {
+  const [done, setDone] = useState<CopyFormat | null>(null);
+  const formats: { id: CopyFormat; label: string }[] = [
+    { id: "curl", label: "curl" },
+    { id: "python", label: "Python" },
+    { id: "fetch", label: "fetch" },
+  ];
+  const run = (fmt: CopyFormat) => {
+    const snippet = formatRequest(fmt, detail.url, detail.request_head, detail.request_body.content);
+    navigator.clipboard?.writeText(snippet).then(
+      () => {
+        setDone(fmt);
+        window.setTimeout(() => setDone(null), 1200);
+      },
+      () => undefined,
+    );
+  };
+  return (
+    <div className="copy-as">
+      <span className="muted small">Copy as</span>
+      {formats.map((f) => (
+        <button key={f.id} className="chip-btn" onClick={() => run(f.id)}>
+          {done === f.id ? "Copied" : f.label}
+        </button>
+      ))}
     </div>
   );
 }

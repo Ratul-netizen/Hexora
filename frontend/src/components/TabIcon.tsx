@@ -184,6 +184,11 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M16 5l3 3" />
     </>
   ),
+  toolkit: (
+    <>
+      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8 6.2 21l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.2-2.2 2.6-2.6z" />
+    </>
+  ),
 };
 
 export function TabIcon({ id }: { id: string }) {

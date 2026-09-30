@@ -24,6 +24,7 @@ import { ReportView } from "./views/ReportView";
 import { ScanView } from "./views/ScanView";
 import { SetupView } from "./views/SetupView";
 import { SnapshotsView } from "./views/SnapshotsView";
+import { ToolkitView } from "./views/ToolkitView";
 import { WebSocketsView } from "./views/WebSocketsView";
 import { TabIcon } from "./components/TabIcon";
 import {
@@ -65,6 +66,7 @@ type Tab =
   | "authz"
   | "llm"
   | "oob"
+  | "toolkit"
   | "findings"
   | "crawler"
   | "report"
@@ -102,6 +104,7 @@ const GROUPS: { label: string; items: { id: Tab; label: string }[] }[] = [
       { id: "sitemap", label: "Site map" },
       { id: "import", label: "Import API" },
       { id: "identifiers", label: "Identifiers" },
+      { id: "toolkit", label: "Toolkit" },
     ],
   },
   {
@@ -383,6 +386,7 @@ export default function App() {
         {tab === "snapshots" && (
           <SnapshotsView hasProject={project !== null} />
         )}
+        {tab === "toolkit" && <ToolkitView />}
         {tab === "programme" && <ProgrammeView hasProject={project !== null} />}
         {tab === "license" && (
           <LicenseView license={license} onChange={setLicense} />
