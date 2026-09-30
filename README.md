@@ -100,6 +100,7 @@ work.
 | Reflected-XSS execution confirmation: a reflecting input — a query parameter or a reflected request header (`User-Agent`, `Referer`) — is loaded in a real headless browser, and the finding is filed only when a marker-setting payload actually runs; a value that reflects but is encoded refutes, rather than reporting reflection as XSS | **IMPLEMENTED** |
 | Cached-response exposure: replays an authenticated request with its session removed and confirms a shared cache is serving one identity's declared data to a caller with none | **IMPLEMENTED** |
 | Web cache poisoning: probes unkeyed request headers behind a unique cache-buster and confirms an injected value is stored and served back to a request that never sent it | **IMPLEMENTED** |
+| Host header injection: confirms the application builds an absolute URL (a reset link, a redirect) from a spoofable `X-Forwarded-Host`, the precondition for password-reset poisoning | **IMPLEMENTED** |
 | Cross-identity access, scheduled: every authenticated endpoint replayed as every other identity, owner inferred from the captured credential | **IMPLEMENTED** |
 | Intruder: one request, a payload list, and responses grouped by behaviour so the outlier is one short row (`nullhawk fuzz`) | **IMPLEMENTED** |
 | Scope enforcement at the transport boundary | **IMPLEMENTED** |

@@ -135,7 +135,8 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
             .chain(crate::checks::cmdi::suspect(exchange))
             .chain(crate::checks::cache_poison::suspect(exchange))
             .chain(crate::checks::crlf::suspect(exchange))
-            .chain(crate::checks::xss::suspect(exchange));
+            .chain(crate::checks::xss::suspect(exchange))
+            .chain(crate::checks::host_header::suspect(exchange));
 
         for hypothesis in raised_here {
             if is_ours(&hypothesis, &ours) {
@@ -222,7 +223,7 @@ mod tests {
             .map(|h| h.claim.as_str())
             .collect();
 
-        assert_eq!(claims.len(), 24, "{claims:#?}");
+        assert_eq!(claims.len(), 26, "{claims:#?}");
     }
 
     #[test]
@@ -234,7 +235,7 @@ mod tests {
         }
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 8, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 9, "{:#?}", standing.hypotheses);
     }
 
     #[test]
@@ -245,7 +246,7 @@ mod tests {
         capture(&project, "/search?q=hats");
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 8, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 9, "{:#?}", standing.hypotheses);
     }
 
     #[test]
@@ -290,7 +291,7 @@ mod tests {
         capture_as(&project, "/search?q=typed", "repeater");
         assert_eq!(
             standing(&project, &everything()).unwrap().hypotheses.len(),
-            8
+            9
         );
     }
 
@@ -303,7 +304,7 @@ mod tests {
         capture_as(&project, "/search?q=hxa3f9probe", "scanner");
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 8, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 9, "{:#?}", standing.hypotheses);
         assert!(
             standing.hypotheses[0].claim.contains("/search"),
             "{}",
@@ -318,8 +319,36 @@ mod tests {
 
     #[test]
     fn a_project_with_nothing_to_probe_says_so_without_blaming_scope() {
+        // A health check with no inputs and a plain-data response: no query parameter for
+        // the input-driven checks, and no HTML or redirect for host-header injection to
+        // build a URL in, so genuinely nothing to probe.
         let project = Project::in_memory().unwrap();
-        capture(&project, "/health");
+        let service = HttpService::new("api.example.com", 443, true);
+        let mut headers = Headers::new();
+        headers.set("Content-Type", "application/json");
+        project
+            .traffic()
+            .record(&CapturedExchange {
+                request: HttpRequest::get(service, "/health"),
+                response: HttpResponse {
+                    status: 200,
+                    reason: None,
+                    version: HttpVersion::Http11,
+                    headers,
+                    body: bytes::Bytes::from(r#"{"ok":true}"#),
+                    truncated: false,
+                },
+                encoded_body: None,
+                raw_request: None,
+                content_encoding: None,
+                origin: "proxy",
+                identity: None,
+                parent: None,
+                quirks: Vec::new(),
+                tls: None,
+                duration_ms: 1,
+            })
+            .unwrap();
 
         let standing = standing(&project, &everything()).unwrap();
         assert!(standing.hypotheses.is_empty());
@@ -339,6 +368,6 @@ mod tests {
         // The default selection reads in-scope traffic only, and nothing is in scope.
         let standing = standing(&project, &Selection::default()).unwrap();
         assert!(standing.hypotheses.is_empty());
-        assert_eq!(standing.out_of_scope, 8);
+        assert_eq!(standing.out_of_scope, 9);
     }
 }
