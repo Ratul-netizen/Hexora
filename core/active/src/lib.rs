@@ -332,6 +332,7 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
         Box::new(checks::xss::ReflectedXss),
         Box::new(checks::host_header::HostHeaderInjection),
         Box::new(checks::stored_xss::StoredXss),
+        Box::new(checks::dom_xss::DomXss),
     ]
 }
 
