@@ -12,6 +12,14 @@ import { mine, type MineResult } from "../lib/miner";
 import { generateBypasses, type BypassCandidate } from "../lib/bypass";
 import { TRANSFORMS, runPipeline, transformById } from "../lib/transforms";
 import { convert, detectFormat, type BodyFormat } from "../lib/convert";
+import {
+  CHARSETS,
+  bruteForce,
+  casePermutations,
+  mutateWordlist,
+  numberRange,
+  type Generated,
+} from "../lib/payloads";
 
 /**
  * The toolkit: the standalone power tools a tester reaches for that do not need the
@@ -20,7 +28,7 @@ import { convert, detectFormat, type BodyFormat } from "../lib/convert";
  * the forging and the sending are deliberate, separate acts you take with the result.
  */
 
-type Tool = "jwt" | "miner" | "transforms" | "convert" | "bypass";
+type Tool = "jwt" | "miner" | "transforms" | "convert" | "payloads" | "bypass";
 
 export function ToolkitView() {
   const [tool, setTool] = useState<Tool>("jwt");
@@ -52,6 +60,12 @@ export function ToolkitView() {
           Content-type
         </button>
         <button
+          className={tool === "payloads" ? "seg-btn on" : "seg-btn"}
+          onClick={() => setTool("payloads")}
+        >
+          Payloads
+        </button>
+        <button
           className={tool === "bypass" ? "seg-btn on" : "seg-btn"}
           onClick={() => setTool("bypass")}
         >
@@ -62,6 +76,7 @@ export function ToolkitView() {
       {tool === "miner" && <MinerPanel />}
       {tool === "transforms" && <TransformsPanel />}
       {tool === "convert" && <ConvertPanel />}
+      {tool === "payloads" && <PayloadsPanel />}
       {tool === "bypass" && <BypassPanel />}
     </div>
   );
@@ -348,6 +363,183 @@ function ConvertPanel() {
           <pre className="code-body mono variant-token">{converted}</pre>
         </section>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Payloads
+
+type PayloadMode = "own" | "numbers" | "brute" | "case" | "mutate";
+
+function PayloadsPanel() {
+  const [mode, setMode] = useState<PayloadMode>("own");
+
+  // own list
+  const [own, setOwn] = useState("");
+  // numbers
+  const [from, setFrom] = useState("0");
+  const [to, setTo] = useState("100");
+  const [step, setStep] = useState("1");
+  const [pad, setPad] = useState("0");
+  // brute
+  const [charsetKey, setCharsetKey] = useState("lowercase");
+  const [customCharset, setCustomCharset] = useState("");
+  const [minLen, setMinLen] = useState("1");
+  const [maxLen, setMaxLen] = useState("3");
+  // case + mutate share a base word/list
+  const [word, setWord] = useState("");
+  const [mutOpts, setMutOpts] = useState({
+    capitalize: true,
+    leet: true,
+    appendYears: true,
+    appendCommon: true,
+  });
+
+  const result: Generated = useMemo(() => {
+    const num = (s: string, d = 0) => {
+      const n = parseInt(s, 10);
+      return Number.isFinite(n) ? n : d;
+    };
+    switch (mode) {
+      case "own": {
+        const items = own.split(/\r?\n/).map((s) => s.trim()).filter((s) => s !== "");
+        const dedup = [...new Set(items)];
+        return { items: dedup, total: dedup.length, truncated: false };
+      }
+      case "numbers":
+        return numberRange(num(from), num(to, 100), num(step, 1), num(pad));
+      case "brute":
+        return bruteForce(customCharset || CHARSETS[charsetKey] || "", num(minLen, 1), num(maxLen, 1));
+      case "case":
+        return casePermutations(word);
+      case "mutate":
+        return mutateWordlist(
+          word.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+          mutOpts,
+        );
+    }
+  }, [mode, own, from, to, step, pad, charsetKey, customCharset, minLen, maxLen, word, mutOpts]);
+
+  const modes: { id: PayloadMode; label: string }[] = [
+    { id: "own", label: "Own list" },
+    { id: "numbers", label: "Numbers" },
+    { id: "brute", label: "Brute force" },
+    { id: "case", label: "Case" },
+    { id: "mutate", label: "Mutate wordlist" },
+  ];
+
+  return (
+    <div className="payloads">
+      <section className="card">
+        <h2>Payload generator</h2>
+        <p className="muted">
+          Build a list to paste into the Fuzzer. Bring your own, or generate one — number
+          ranges, charset brute-force, case permutations, or password-spray mutations of a
+          wordlist.
+        </p>
+        <div className="seg payload-modes">
+          {modes.map((m) => (
+            <button
+              key={m.id}
+              className={mode === m.id ? "seg-btn on" : "seg-btn"}
+              onClick={() => setMode(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "own" && (
+          <textarea
+            className="miner-input mono"
+            value={own}
+            spellCheck={false}
+            placeholder={"one payload per line\nadmin\npassword\nletmein"}
+            onChange={(e) => setOwn(e.target.value)}
+          />
+        )}
+
+        {mode === "numbers" && (
+          <div className="payload-fields">
+            <label>From <input type="text" className="narrow" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+            <label>To <input type="text" className="narrow" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+            <label>Step <input type="text" className="narrow" value={step} onChange={(e) => setStep(e.target.value)} /></label>
+            <label>Zero-pad <input type="text" className="narrow" value={pad} onChange={(e) => setPad(e.target.value)} /></label>
+          </div>
+        )}
+
+        {mode === "brute" && (
+          <div className="payload-fields">
+            <label>
+              Charset{" "}
+              <select value={charsetKey} onChange={(e) => setCharsetKey(e.target.value)}>
+                {Object.keys(CHARSETS).map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+            </label>
+            <label>Custom <input type="text" value={customCharset} placeholder="overrides preset" onChange={(e) => setCustomCharset(e.target.value)} /></label>
+            <label>Min len <input type="text" className="narrow" value={minLen} onChange={(e) => setMinLen(e.target.value)} /></label>
+            <label>Max len <input type="text" className="narrow" value={maxLen} onChange={(e) => setMaxLen(e.target.value)} /></label>
+          </div>
+        )}
+
+        {mode === "case" && (
+          <input
+            type="text"
+            className="grow"
+            value={word}
+            placeholder="a word — every upper/lower combination"
+            onChange={(e) => setWord(e.target.value)}
+          />
+        )}
+
+        {mode === "mutate" && (
+          <>
+            <textarea
+              className="miner-input mono"
+              value={word}
+              spellCheck={false}
+              placeholder={"base words, one per line\nadmin\ncompanyname"}
+              onChange={(e) => setWord(e.target.value)}
+            />
+            <div className="payload-fields">
+              {(["capitalize", "leet", "appendYears", "appendCommon"] as const).map((k) => (
+                <label key={k} className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={mutOpts[k]}
+                    onChange={(e) => setMutOpts((o) => ({ ...o, [k]: e.target.checked }))}
+                  />
+                  <span>{k}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="card-title-row">
+          <h3>
+            {result.total.toLocaleString()} payload{result.total === 1 ? "" : "s"}
+            {result.truncated && (
+              <span className="muted small"> — showing first {result.items.length.toLocaleString()}</span>
+            )}
+          </h3>
+          <button
+            className="chip-btn"
+            disabled={result.items.length === 0}
+            onClick={() => copy(result.items.join("\n"))}
+          >
+            Copy list
+          </button>
+        </div>
+        <pre className="code-body mono variant-token payload-out">
+          {result.items.slice(0, 500).join("\n")}
+          {result.items.length > 500 ? `\n… ${result.items.length - 500} more` : ""}
+        </pre>
+      </section>
     </div>
   );
 }

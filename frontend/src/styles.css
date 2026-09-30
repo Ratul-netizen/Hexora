@@ -2880,3 +2880,45 @@ table.grid td code {
   border-color: rgba(107, 191, 135, 0.4);
   box-shadow: 0 0 14px -3px rgba(107, 191, 135, 0.6);
 }
+
+/* ---- brand mark now holds the Nullhawk logo image ---- */
+.brand-mark {
+  background: #0e1526;
+  border-color: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  padding: 0;
+}
+.brand-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.35);
+  display: block;
+}
+
+/* ---- payload generator ---- */
+.payload-modes {
+  align-self: flex-start;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+.payload-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  align-items: center;
+  margin-top: 10px;
+}
+.payload-fields label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.payload-fields input.narrow {
+  width: 72px;
+}
+.payload-out {
+  max-height: 320px;
+}

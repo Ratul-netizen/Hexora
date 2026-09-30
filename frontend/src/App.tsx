@@ -27,6 +27,7 @@ import { SnapshotsView } from "./views/SnapshotsView";
 import { ToolkitView } from "./views/ToolkitView";
 import { WebSocketsView } from "./views/WebSocketsView";
 import { TabIcon } from "./components/TabIcon";
+import logoUrl from "./assets/nullhawk.jpg";
 import {
   currentProject,
   describeError,
@@ -225,21 +226,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-              <path
-                d="M12 2l8 4.5v6C20 17.8 16.6 21 12 22 7.4 21 4 17.8 4 12.5v-6L12 2z"
-                stroke="var(--accent)"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M8.5 13.5l2.5-5 2.5 8 2-4"
-                stroke="var(--accent)"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <img src={logoUrl} alt="" className="brand-logo" />
           </span>
           <span className="brand-text">
             <strong>Nullhawk</strong>
