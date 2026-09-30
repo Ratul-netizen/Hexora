@@ -11,5 +11,6 @@ pub mod echo;
 pub mod redirect;
 pub mod reflection;
 pub mod sqli;
+pub mod ssrf;
 pub mod ssti;
 pub mod traversal;
