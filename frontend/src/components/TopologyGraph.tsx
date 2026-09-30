@@ -128,13 +128,19 @@ export function TopologyGraph({
   nodes,
   links,
   height = 420,
+  onNodeClick,
 }: {
   nodes: TopoNode[];
   links: TopoLink[];
   height?: number;
+  /** A node was clicked (not dragged). Carries its id. */
+  onNodeClick?: (id: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Kept in a ref so the click handler reads the latest callback without re-subscribing.
+  const clickRef = useRef(onNodeClick);
+  clickRef.current = onNodeClick;
   // Kept in refs so the animation loop reads live values without re-subscribing.
   const rot = useRef({ x: -0.35, y: 0.5 });
   const drag = useRef<{ on: boolean; px: number; py: number; moved: boolean }>({
@@ -319,12 +325,30 @@ export function TopologyGraph({
       }
     };
     const onUp = (e: PointerEvent) => {
+      const wasDrag = drag.current.moved;
       drag.current.on = false;
       canvas.style.cursor = "grab";
       try {
         canvas.releasePointerCapture(e.pointerId);
       } catch {
         /* pointer already released */
+      }
+      // A click, not an orbit: pick the node under the cursor and report it.
+      if (!wasDrag && clickRef.current) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        let best: string | null = null;
+        let bestD = 18 * 18;
+        for (const n of dataRef.current.placed) {
+          const pt = project(n);
+          const d = (pt.sx - mx) ** 2 + (pt.sy - my) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = n.id;
+          }
+        }
+        if (best) clickRef.current(best);
       }
     };
     const onLeave = () => {

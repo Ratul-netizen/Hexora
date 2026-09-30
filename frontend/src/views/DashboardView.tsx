@@ -11,6 +11,7 @@ import {
   type ProjectSummary,
   type ProxyStatus,
   type SitemapHost,
+  type SitemapPath,
 } from "../ipc";
 import {
   TopologyGraph,
@@ -22,6 +23,7 @@ import {
   APP_LEGEND,
   buildAppGraph,
   classifyDevice,
+  endpointKind,
   parseSignals,
   type HostSignals,
 } from "../lib/appgraph";
@@ -91,6 +93,7 @@ export function DashboardView({
 }) {
   const [data, setData] = useState<DashboardData>(EMPTY);
   const [graphMode, setGraphMode] = useState<"infra" | "app">("infra");
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
   useEffect(() => {
     if (!project) {
@@ -158,6 +161,13 @@ export function DashboardView({
       ? buildAppGraph(data.hosts, data.signals)
       : topologyFromHosts(data.hosts, data.signals);
   }, [isSample, data.hosts, data.signals, graphMode]);
+
+  // What a clicked node is — a host, or one of its endpoints — resolved from the id
+  // shapes the two graph builders produce.
+  const nodeDetail = useMemo(
+    () => (selectedNode ? resolveNode(selectedNode, data.hosts, data.signals) : null),
+    [selectedNode, data.hosts, data.signals],
+  );
 
   // Detected backend tech per host, for the "Backend" panel. Every host is listed —
   // one that discloses nothing is said to, rather than hidden.
@@ -259,7 +269,21 @@ export function DashboardView({
               </span>
             </div>
           </div>
-          <TopologyGraph nodes={nodes} links={links} height={430} />
+          <div className="topo-stage">
+            <TopologyGraph
+              nodes={nodes}
+              links={links}
+              height={430}
+              onNodeClick={setSelectedNode}
+            />
+            {nodeDetail && (
+              <NodeDetail
+                detail={nodeDetail}
+                onClose={() => setSelectedNode(null)}
+                onNavigate={onNavigate}
+              />
+            )}
+          </div>
           <div className="topo-legend">
             {(graphMode === "app" ? APP_LEGEND : DEVICE_LEGEND).map((d) => (
               <span key={d.type} className="legend-item">
@@ -413,6 +437,115 @@ function LegendShape({ type }: { type: DeviceType }) {
     >
       {shapes[type]}
     </svg>
+  );
+}
+
+// ---------------------------------------------------------------- node detail
+
+type NodeDetailData =
+  | {
+      kind: "host";
+      host: SitemapHost;
+      device: ReturnType<typeof classifyDevice>;
+    }
+  | { kind: "endpoint"; host: SitemapHost; path: SitemapPath };
+
+/** Resolve a clicked node id back to the host or endpoint it stands for. */
+function resolveNode(
+  id: string,
+  hosts: SitemapHost[],
+  signals: Map<string, HostSignals>,
+): NodeDetailData | null {
+  for (const host of hosts) {
+    if (id === host.host || id === `host:${host.host}`) {
+      return { kind: "host", host, device: classifyDevice(host.host, signals.get(host.host)) };
+    }
+    for (const path of host.paths) {
+      const full = `${host.host}${path.path}`;
+      if (id === full || id.startsWith(`${full}#`)) {
+        return { kind: "endpoint", host, path };
+      }
+    }
+  }
+  return null;
+}
+
+function NodeDetail({
+  detail,
+  onClose,
+  onNavigate,
+}: {
+  detail: NodeDetailData;
+  onClose: () => void;
+  onNavigate: (tab: string) => void;
+}) {
+  return (
+    <div className="node-detail">
+      <button className="node-detail-close" onClick={onClose} aria-label="Close">
+        ×
+      </button>
+      {detail.kind === "host" ? (
+        <>
+          <div className="node-detail-head">
+            <LegendShape type={detail.device.type} />
+            <strong>{detail.host.host}</strong>
+          </div>
+          <div className="muted small">
+            {detail.device.type} · {detail.device.zone}
+            {detail.device.tech ? ` · ${detail.device.tech}` : ""}
+          </div>
+          <div className="muted small">
+            {detail.host.paths.length} path{detail.host.paths.length === 1 ? "" : "s"} ·{" "}
+            {detail.host.secure ? "https" : "http"}
+          </div>
+          <ul className="node-paths">
+            {detail.host.paths.slice(0, 40).map((p) => (
+              <li key={p.path}>
+                <span className={`method m-${(p.methods[0] ?? "get").toLowerCase()}`}>
+                  {p.methods[0] ?? "GET"}
+                </span>
+                <code title={p.path}>{p.path}</code>
+                {p.statuses.slice(0, 3).map((s) => (
+                  <span key={s} className={`status s${Math.floor(s / 100)}`}>
+                    {s}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <button className="linkish" onClick={() => onNavigate("sitemap")}>
+            Open in Site map →
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="node-detail-head">
+            <LegendShape type={endpointKind(detail.path)} />
+            <strong>{detail.path.path}</strong>
+          </div>
+          <div className="muted small mono">
+            {(detail.host.secure ? "https://" : "http://") + detail.host.host + detail.path.path}
+          </div>
+          <dl className="facts node-facts">
+            <dt>Methods</dt>
+            <dd>{detail.path.methods.join(", ")}</dd>
+            <dt>Statuses</dt>
+            <dd>{detail.path.statuses.join(", ") || "—"}</dd>
+            {detail.path.identities.length > 0 && (
+              <>
+                <dt>Seen as</dt>
+                <dd>{detail.path.identities.join(", ")}</dd>
+              </>
+            )}
+            <dt>Kind</dt>
+            <dd>{endpointKind(detail.path)}</dd>
+          </dl>
+          <button className="linkish" onClick={() => onNavigate("history")}>
+            Open History →
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
