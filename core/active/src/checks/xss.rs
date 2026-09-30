@@ -569,7 +569,10 @@ mod tests {
             .iter()
             .filter_map(|h| h.location.as_ref().map(|l| l.part))
             .collect();
-        assert!(kinds.contains(&MessagePart::Query), "the query input still raises");
+        assert!(
+            kinds.contains(&MessagePart::Query),
+            "the query input still raises"
+        );
         assert!(
             kinds.contains(&MessagePart::Header),
             "a reflectable request header now raises too: {kinds:?}"
