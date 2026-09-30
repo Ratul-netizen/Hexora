@@ -23,6 +23,7 @@ import { RepeaterView } from "./views/RepeaterView";
 import { ReportView } from "./views/ReportView";
 import { ScanView } from "./views/ScanView";
 import { SetupView } from "./views/SetupView";
+import { MobileView } from "./views/MobileView";
 import { SnapshotsView } from "./views/SnapshotsView";
 import { ToolkitView } from "./views/ToolkitView";
 import { WebSocketsView } from "./views/WebSocketsView";
@@ -68,6 +69,7 @@ type Tab =
   | "llm"
   | "oob"
   | "toolkit"
+  | "mobile"
   | "findings"
   | "crawler"
   | "report"
@@ -106,6 +108,7 @@ const GROUPS: { label: string; items: { id: Tab; label: string }[] }[] = [
       { id: "import", label: "Import API" },
       { id: "identifiers", label: "Identifiers" },
       { id: "toolkit", label: "Toolkit" },
+      { id: "mobile", label: "Mobile" },
     ],
   },
   {
@@ -388,6 +391,7 @@ export default function App() {
           <SnapshotsView hasProject={project !== null} />
         )}
         {tab === "toolkit" && <ToolkitView hasProject={project !== null} />}
+        {tab === "mobile" && <MobileView />}
         {tab === "programme" && <ProgrammeView hasProject={project !== null} />}
         {tab === "license" && (
           <LicenseView license={license} onChange={setLicense} />

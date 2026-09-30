@@ -189,6 +189,12 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8 6.2 21l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.2-2.2 2.6-2.6z" />
     </>
   ),
+  mobile: (
+    <>
+      <rect x="6" y="2" width="12" height="20" rx="2.5" />
+      <line x1="10" y1="18" x2="14" y2="18" />
+    </>
+  ),
 };
 
 export function TabIcon({ id }: { id: string }) {
