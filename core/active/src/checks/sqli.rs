@@ -77,7 +77,10 @@ const SIGNATURES: &[(&str, &str)] = &[
     ("pg_query()", "PostgreSQL"),
     ("PSQLException", "PostgreSQL"),
     ("syntax error at or near", "PostgreSQL"),
-    ("Unclosed quotation mark after the character string", "SQL Server"),
+    (
+        "Unclosed quotation mark after the character string",
+        "SQL Server",
+    ),
     ("Incorrect syntax near", "SQL Server"),
     ("System.Data.SqlClient.SqlException", "SQL Server"),
     ("Microsoft OLE DB Provider for SQL Server", "SQL Server"),
@@ -224,7 +227,10 @@ impl ActiveCheck for SqlInjection {
 
     fn writeup(&self, subject: &Subject, verification: &Verification) -> Writeup {
         let slot = slot_named(subject);
-        let where_ = slot.as_ref().map(describe).unwrap_or_else(|| "an input".into());
+        let where_ = slot
+            .as_ref()
+            .map(describe)
+            .unwrap_or_else(|| "an input".into());
 
         Writeup {
             target: subject.target,

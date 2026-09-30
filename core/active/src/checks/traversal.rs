@@ -99,14 +99,13 @@ impl ActiveCheck for PathTraversal {
             });
         }
 
-        let mut sent = 1usize;
-        for payload in PAYLOADS {
-            if sent >= budget.per_hypothesis.max(1) {
+        // One request already spent on the baseline, so the nth payload is the (n+1)th
+        // request; stop before the budget is exceeded.
+        for (spent, payload) in (1usize..).zip(PAYLOADS.iter()) {
+            if spent >= budget.per_hypothesis.max(1) {
                 break;
             }
-            let attempt = probe(subject, lab, &slot, payload).await;
-            sent += 1;
-            let Attempt::Answered(answer) = attempt else {
+            let Attempt::Answered(answer) = probe(subject, lab, &slot, payload).await else {
                 continue;
             };
             if let Some(file) = leaked_file(&answer.body) {
@@ -145,7 +144,10 @@ impl ActiveCheck for PathTraversal {
 
     fn writeup(&self, subject: &Subject, verification: &Verification) -> Writeup {
         let slot = slot_named(subject);
-        let where_ = slot.as_ref().map(describe).unwrap_or_else(|| "an input".into());
+        let where_ = slot
+            .as_ref()
+            .map(describe)
+            .unwrap_or_else(|| "an input".into());
 
         Writeup {
             target: subject.target,
@@ -369,7 +371,8 @@ mod tests {
 
     #[test]
     fn passwd_content_is_recognised_but_ordinary_pages_are_not() {
-        let passwd = b"root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n";
+        let passwd =
+            b"root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n";
         let hit = leaked_file(passwd).expect("passwd recognised");
         assert_eq!(hit.name, "/etc/passwd");
         assert!(leaked_file(b"<html>root: the page about roots</html>").is_none());

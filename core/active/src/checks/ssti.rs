@@ -170,7 +170,10 @@ impl ActiveCheck for TemplateInjection {
 
     fn writeup(&self, subject: &Subject, verification: &Verification) -> Writeup {
         let slot = slot_named(subject);
-        let where_ = slot.as_ref().map(describe).unwrap_or_else(|| "an input".into());
+        let where_ = slot
+            .as_ref()
+            .map(describe)
+            .unwrap_or_else(|| "an input".into());
 
         Writeup {
             target: subject.target,
@@ -253,7 +256,12 @@ impl Answer {
 /// Places a payload and returns what came back, or nothing if it could not be sent —
 /// the reason is not needed here, because a failed probe just moves on to the next
 /// delimiter family rather than settling anything.
-async fn probe(subject: &Subject, lab: &dyn Lab, slot: &ObjectLocation, value: &str) -> Option<Answer> {
+async fn probe(
+    subject: &Subject,
+    lab: &dyn Lab,
+    slot: &ObjectLocation,
+    value: &str,
+) -> Option<Answer> {
     let mut draft = subject.draft.clone();
     draft.request = substitute(&draft.request, slot, value).ok()?;
     let sent = lab.experiment(&draft, None).await.ok()?;
