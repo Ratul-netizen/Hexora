@@ -127,7 +127,10 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
             .into_iter()
             .chain(crate::checks::redirect::suspect(exchange))
             .chain(crate::checks::auth::suspect(exchange))
-            .chain(crate::checks::crossid::suspect(exchange));
+            .chain(crate::checks::crossid::suspect(exchange))
+            .chain(crate::checks::sqli::suspect(exchange))
+            .chain(crate::checks::traversal::suspect(exchange))
+            .chain(crate::checks::ssti::suspect(exchange));
 
         for hypothesis in raised_here {
             if is_ours(&hypothesis, &ours) {
@@ -198,6 +201,10 @@ mod tests {
 
     #[test]
     fn each_input_of_each_endpoint_becomes_one_work_item() {
+        // Three inputs across two endpoints (q, page, q), and each is probed by all four
+        // input-driven checks — reflection, SQL injection, path traversal and template
+        // injection — so three inputs raise twelve work items. The point the test guards
+        // is that a value is not an input: see the dedup tests below.
         let project = Project::in_memory().unwrap();
         capture(&project, "/search?q=shoes&page=2");
         capture(&project, "/other?q=hats");
@@ -209,7 +216,7 @@ mod tests {
             .map(|h| h.claim.as_str())
             .collect();
 
-        assert_eq!(claims.len(), 3, "{claims:#?}");
+        assert_eq!(claims.len(), 12, "{claims:#?}");
     }
 
     #[test]
@@ -221,7 +228,7 @@ mod tests {
         }
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 1, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 4, "{:#?}", standing.hypotheses);
     }
 
     #[test]
@@ -232,7 +239,7 @@ mod tests {
         capture(&project, "/search?q=hats");
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 1, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 4, "{:#?}", standing.hypotheses);
     }
 
     #[test]
@@ -277,7 +284,7 @@ mod tests {
         capture_as(&project, "/search?q=typed", "repeater");
         assert_eq!(
             standing(&project, &everything()).unwrap().hypotheses.len(),
-            1
+            4
         );
     }
 
@@ -290,7 +297,7 @@ mod tests {
         capture_as(&project, "/search?q=hxa3f9probe", "scanner");
 
         let standing = standing(&project, &everything()).unwrap();
-        assert_eq!(standing.hypotheses.len(), 1, "{:#?}", standing.hypotheses);
+        assert_eq!(standing.hypotheses.len(), 4, "{:#?}", standing.hypotheses);
         assert!(
             standing.hypotheses[0].claim.contains("/search"),
             "{}",
@@ -326,6 +333,6 @@ mod tests {
         // The default selection reads in-scope traffic only, and nothing is in scope.
         let standing = standing(&project, &Selection::default()).unwrap();
         assert!(standing.hypotheses.is_empty());
-        assert_eq!(standing.out_of_scope, 1);
+        assert_eq!(standing.out_of_scope, 4);
     }
 }

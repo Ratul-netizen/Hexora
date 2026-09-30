@@ -321,6 +321,9 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
         Box::new(checks::reflection::OriginReflection),
         Box::new(checks::echo::InputReflection),
         Box::new(checks::redirect::RedirectDestination),
+        Box::new(checks::sqli::SqlInjection),
+        Box::new(checks::traversal::PathTraversal),
+        Box::new(checks::ssti::TemplateInjection),
     ]
 }
 
