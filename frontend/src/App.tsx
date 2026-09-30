@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AuthzView } from "./views/AuthzView";
+import { DashboardView } from "./views/DashboardView";
 import { DecoderView } from "./views/DecoderView";
 import { FindingsView } from "./views/FindingsView";
 import { ChecksView } from "./views/ChecksView";
@@ -24,6 +25,7 @@ import { ScanView } from "./views/ScanView";
 import { SetupView } from "./views/SetupView";
 import { SnapshotsView } from "./views/SnapshotsView";
 import { WebSocketsView } from "./views/WebSocketsView";
+import { TabIcon } from "./components/TabIcon";
 import {
   currentProject,
   describeError,
@@ -45,6 +47,7 @@ type Boot =
   | { status: "error"; message: string };
 
 type Tab =
+  | "dashboard"
   | "setup"
   | "history"
   | "repeater"
@@ -70,37 +73,66 @@ type Tab =
   | "programme"
   | "license";
 
-/** The tab strip, in the order the work happens in. */
-const TABS: { id: Tab; label: string }[] = [
-  { id: "setup", label: "Setup" },
-  { id: "history", label: "History" },
-  { id: "repeater", label: "Repeater" },
-  { id: "decoder", label: "Decoder" },
-  { id: "websockets", label: "WebSocket" },
-  { id: "matchreplace", label: "Match & Replace" },
-  { id: "import", label: "Import API" },
-  { id: "identifiers", label: "Identifiers" },
-  { id: "scan", label: "Scan" },
-  { id: "checks", label: "Custom Checks" },
-  { id: "fuzzer", label: "Fuzzer" },
-  { id: "race", label: "Race" },
-  { id: "sequencer", label: "Sequencer" },
-  { id: "domxss", label: "DOM XSS" },
-  { id: "authz", label: "Authorization" },
-  { id: "llm", label: "LLM" },
-  { id: "oob", label: "Collaborator" },
-  { id: "findings", label: "Findings" },
-  { id: "crawler", label: "Crawler" },
-  { id: "sitemap", label: "Site map" },
-  { id: "report", label: "Report" },
-  { id: "snapshots", label: "Snapshots" },
-  { id: "programme", label: "Programme" },
-  { id: "license", label: "Licence" },
+/**
+ * The nav, grouped by the stage of the work rather than run together as one long
+ * list. The order inside a group is the order the work tends to happen in.
+ */
+const GROUPS: { label: string; items: { id: Tab; label: string }[] }[] = [
+  {
+    label: "Overview",
+    items: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "setup", label: "Setup" },
+    ],
+  },
+  {
+    label: "Traffic",
+    items: [
+      { id: "history", label: "History" },
+      { id: "repeater", label: "Repeater" },
+      { id: "websockets", label: "WebSocket" },
+      { id: "matchreplace", label: "Match & Replace" },
+      { id: "decoder", label: "Decoder" },
+    ],
+  },
+  {
+    label: "Discovery",
+    items: [
+      { id: "crawler", label: "Crawler" },
+      { id: "sitemap", label: "Site map" },
+      { id: "import", label: "Import API" },
+      { id: "identifiers", label: "Identifiers" },
+    ],
+  },
+  {
+    label: "Testing",
+    items: [
+      { id: "scan", label: "Scan" },
+      { id: "checks", label: "Custom Checks" },
+      { id: "fuzzer", label: "Fuzzer" },
+      { id: "race", label: "Race" },
+      { id: "sequencer", label: "Sequencer" },
+      { id: "domxss", label: "DOM XSS" },
+      { id: "authz", label: "Authorization" },
+      { id: "llm", label: "LLM" },
+      { id: "oob", label: "Collaborator" },
+    ],
+  },
+  {
+    label: "Results",
+    items: [
+      { id: "findings", label: "Findings" },
+      { id: "report", label: "Report" },
+      { id: "snapshots", label: "Snapshots" },
+      { id: "programme", label: "Programme" },
+      { id: "license", label: "Licence" },
+    ],
+  },
 ];
 
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ status: "loading" });
-  const [tab, setTab] = useState<Tab>("setup");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [proxy, setProxy] = useState<ProxyStatus>({
     running: false,
@@ -176,21 +208,46 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <strong>Nullhawk</strong>
-          <span className="muted small">
-            {boot.info.milestone} · v{boot.info.version}
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+              <path
+                d="M12 2l8 4.5v6C20 17.8 16.6 21 12 22 7.4 21 4 17.8 4 12.5v-6L12 2z"
+                stroke="var(--accent)"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M8.5 13.5l2.5-5 2.5 8 2-4"
+                stroke="var(--accent)"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className="brand-text">
+            <strong>Nullhawk</strong>
+            <span className="muted small">
+              {boot.info.milestone} · v{boot.info.version}
+            </span>
           </span>
         </div>
 
         <nav>
-          {TABS.map(({ id, label }) => (
-            <button
-              key={id}
-              className={tab === id ? "tab active" : "tab"}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
+          {GROUPS.map((group) => (
+            <div key={group.label} className="nav-group">
+              <div className="nav-group-label">{group.label}</div>
+              {group.items.map(({ id, label }) => (
+                <button
+                  key={id}
+                  className={tab === id ? "tab active" : "tab"}
+                  onClick={() => setTab(id)}
+                >
+                  <TabIcon id={id} />
+                  <span className="tab-label">{label}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       </aside>
@@ -223,6 +280,16 @@ export default function App() {
       </header>
 
       <main>
+        {tab === "dashboard" && (
+          <DashboardView
+            project={project}
+            proxy={proxy}
+            license={license}
+            captureCount={captureCount}
+            findingCount={findingCount}
+            onNavigate={(t) => setTab(t as Tab)}
+          />
+        )}
         {tab === "setup" && (
           <SetupView
             project={project}
