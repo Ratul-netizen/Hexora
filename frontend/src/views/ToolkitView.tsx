@@ -21,6 +21,7 @@ import {
   numberRange,
   type Generated,
 } from "../lib/payloads";
+import { METRICS, DEFAULT_METRICS, computeBase, type Metrics } from "../lib/cvss";
 
 /**
  * The toolkit: the standalone power tools a tester reaches for that do not need the
@@ -29,7 +30,14 @@ import {
  * the forging and the sending are deliberate, separate acts you take with the result.
  */
 
-type Tool = "jwt" | "miner" | "transforms" | "convert" | "payloads" | "bypass";
+type Tool =
+  | "jwt"
+  | "miner"
+  | "transforms"
+  | "convert"
+  | "payloads"
+  | "cvss"
+  | "bypass";
 
 export function ToolkitView({ hasProject }: { hasProject: boolean }) {
   const [tool, setTool] = useState<Tool>("jwt");
@@ -67,6 +75,12 @@ export function ToolkitView({ hasProject }: { hasProject: boolean }) {
           Payloads
         </button>
         <button
+          className={tool === "cvss" ? "seg-btn on" : "seg-btn"}
+          onClick={() => setTool("cvss")}
+        >
+          CVSS
+        </button>
+        <button
           className={tool === "bypass" ? "seg-btn on" : "seg-btn"}
           onClick={() => setTool("bypass")}
         >
@@ -78,6 +92,7 @@ export function ToolkitView({ hasProject }: { hasProject: boolean }) {
       {tool === "transforms" && <TransformsPanel />}
       {tool === "convert" && <ConvertPanel />}
       {tool === "payloads" && <PayloadsPanel />}
+      {tool === "cvss" && <CvssPanel />}
       {tool === "bypass" && <BypassPanel hasProject={hasProject} />}
     </div>
   );
@@ -540,6 +555,68 @@ function PayloadsPanel() {
           {result.items.slice(0, 500).join("\n")}
           {result.items.length > 500 ? `\n… ${result.items.length - 500} more` : ""}
         </pre>
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- CVSS
+
+function CvssPanel() {
+  const [metrics, setMetrics] = useState<Metrics>({ ...DEFAULT_METRICS });
+  const result = useMemo(() => computeBase(metrics), [metrics]);
+  const sev = result.severity.toLowerCase();
+
+  return (
+    <div className="cvss">
+      <section className="card">
+        <h2>CVSS 3.1 calculator</h2>
+        <p className="muted">
+          A severity a triager can check, and the vector that shows how it was reached —
+          the receipt a bug-bounty report travels with.
+        </p>
+        <div className="cvss-metrics">
+          {METRICS.map((def) => (
+            <label key={def.key} className="cvss-metric">
+              <span>{def.label}</span>
+              <div className="seg cvss-seg">
+                {def.options.map((o) => (
+                  <button
+                    key={o.value}
+                    className={metrics[def.key] === o.value ? "seg-btn on" : "seg-btn"}
+                    onClick={() => setMetrics((m) => ({ ...m, [def.key]: o.value }))}
+                    title={`${def.key}:${o.value}`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="cvss-score-row">
+          <div className={`cvss-score sev-${sev}`}>
+            <span className="cvss-num">{result.score.toFixed(1)}</span>
+            <span className="cvss-sev">{result.severity}</span>
+          </div>
+          <div className="cvss-vector-box">
+            <code className="cvss-vector">{result.vector}</code>
+            <div className="cvss-actions">
+              <button className="chip-btn" onClick={() => copy(result.vector)}>
+                Copy vector
+              </button>
+              <button
+                className="chip-btn"
+                onClick={() => copy(`${result.score.toFixed(1)} (${result.severity}) — ${result.vector}`)}
+              >
+                Copy for report
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

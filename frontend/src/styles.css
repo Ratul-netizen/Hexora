@@ -3050,3 +3050,89 @@ table.grid td code {
 .legend-shape.dev-redirect { color: var(--dev-endpoint); }
 
 .backend-tech.muted { color: var(--text-muted); font-style: italic; }
+
+/* ---- rendered report preview ---- */
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.report-frame {
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+/* ---- CVSS calculator ---- */
+.cvss-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+.cvss-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.cvss-seg {
+  flex-wrap: wrap;
+}
+.cvss-seg .seg-btn {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+.cvss-score-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.cvss-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+}
+.cvss-num {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+}
+.cvss-sev {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+}
+.cvss-score.sev-critical { color: #e0917a; background: rgba(224,145,122,0.12); border-color: rgba(224,145,122,0.4); }
+.cvss-score.sev-high { color: var(--danger); background: rgba(224,122,122,0.12); border-color: rgba(224,122,122,0.4); }
+.cvss-score.sev-medium { color: var(--warn); background: rgba(217,176,97,0.12); border-color: rgba(217,176,97,0.4); }
+.cvss-score.sev-low { color: var(--info); background: rgba(111,159,216,0.12); border-color: rgba(111,159,216,0.4); }
+.cvss-score.sev-none { color: var(--text-muted); }
+.cvss-vector-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cvss-vector {
+  font-size: 12px;
+  color: var(--accent);
+  word-break: break-all;
+}
+.cvss-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

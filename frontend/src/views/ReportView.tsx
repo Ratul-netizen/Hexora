@@ -17,6 +17,7 @@ export function ReportView({ hasProject }: { hasProject: boolean }) {
   const [showSecrets, setShowSecrets] = useState(false);
   const [path, setPath] = useState("");
   const [report, setReport] = useState<Rendered | null>(null);
+  const [view, setView] = useState<"rendered" | "source">("rendered");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -174,13 +175,70 @@ export function ReportView({ hasProject }: { hasProject: boolean }) {
             </ul>
           )}
 
-          {/* The document as text, even for HTML. Rendering the HTML would mean
-              executing markup that came from the application under test — the
-              report quotes response bodies, and some findings exist precisely
-              because that application reflects input. */}
-          <pre className="body report-preview">{report.content}</pre>
+          <ReportBody report={report} view={view} onView={setView} />
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * The rendered document, or its source.
+ *
+ * An HTML report is shown in a sandboxed iframe — `sandbox` with no `allow-scripts`,
+ * so the markup lays out and styles but cannot execute. That matters here more than
+ * anywhere: the report quotes response bodies, and some findings exist precisely
+ * because the application under test reflects input, so its HTML is untrusted. The
+ * sandbox is what makes a rendered preview safe; Source is always one click away.
+ */
+function ReportBody({
+  report,
+  view,
+  onView,
+}: {
+  report: Rendered;
+  view: "rendered" | "source";
+  onView: (v: "rendered" | "source") => void;
+}) {
+  const isHtml =
+    report.format === "html" || report.content.trimStart().startsWith("<");
+
+  const copy = () => navigator.clipboard?.writeText(report.content).catch(() => undefined);
+
+  return (
+    <>
+      <div className="report-toolbar">
+        {isHtml && (
+          <div className="seg">
+            <button
+              className={view === "rendered" ? "seg-btn on" : "seg-btn"}
+              onClick={() => onView("rendered")}
+            >
+              Rendered
+            </button>
+            <button
+              className={view === "source" ? "seg-btn on" : "seg-btn"}
+              onClick={() => onView("source")}
+            >
+              Source
+            </button>
+          </div>
+        )}
+        <button className="chip-btn" onClick={copy}>
+          Copy
+        </button>
+      </div>
+
+      {isHtml && view === "rendered" ? (
+        <iframe
+          className="report-frame"
+          sandbox=""
+          srcDoc={report.content}
+          title="Rendered report"
+        />
+      ) : (
+        <pre className="body report-preview">{report.content}</pre>
+      )}
+    </>
   );
 }
