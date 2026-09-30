@@ -130,6 +130,40 @@ pub trait Lab: Send + Sync {
     /// [`Self::experiment`] — and it saves every check from being handed a store it
     /// would then be free to read anything out of.
     fn draft_of(&self, request: nullhawk_types::ids::RequestId) -> Result<Draft>;
+
+    /// Mints an out-of-band canary, when this run has a collaborator configured.
+    ///
+    /// A canary is a fresh correlation token and a URL to plant in a request. A blind
+    /// vulnerability — one that fetches a URL, or resolves a name, but reveals nothing
+    /// in the response — is proven by the target *reaching the collaborator*, which
+    /// [`Self::interactions`] then reports under the token.
+    ///
+    /// `None` means no collaborator is configured, so callback-based detection is not
+    /// available and a check must fall back to whatever it can prove in-band. The
+    /// default returns `None`, so an implementation without a collaborator — and every
+    /// test double — needs no change.
+    fn canary(&self) -> Option<Canary> {
+        None
+    }
+
+    /// Interactions the collaborator has recorded for a token since it was minted.
+    ///
+    /// Empty when there is no collaborator, or when nothing has called back yet — a
+    /// check polls a few times, because a callback is not instantaneous. The default
+    /// returns an empty list.
+    async fn interactions(&self, _token: &str) -> Result<Vec<nullhawk_oob::Interaction>> {
+        Ok(Vec::new())
+    }
+}
+
+/// A minted out-of-band canary: a URL to plant, and the token a callback to it carries.
+#[derive(Debug, Clone)]
+pub struct Canary {
+    /// The correlation token. A recorded interaction bearing it is one this request
+    /// provoked, not background noise.
+    pub token: String,
+    /// The URL to place in a request field a blind sink might fetch or resolve.
+    pub url: String,
 }
 
 /// A [`Lab`] backed by the repeater.
@@ -147,6 +181,9 @@ pub struct RepeaterLab<'a, T: nullhawk_engine::transport::HttpTransport> {
     /// recorded as the repeater would be handed a person's permissions and could
     /// reach a host nobody declared. See [`SendAs::scanner`].
     unattributed: nullhawk_engine::transport::Origin,
+    /// The out-of-band collaborator, when the run was given one. Its presence is what
+    /// makes [`Lab::canary`] mint payloads and [`Lab::interactions`] poll for callbacks.
+    collaborator: Option<nullhawk_oob::Collaborator>,
 }
 
 impl<'a, T: nullhawk_engine::transport::HttpTransport> RepeaterLab<'a, T> {
@@ -158,6 +195,7 @@ impl<'a, T: nullhawk_engine::transport::HttpTransport> RepeaterLab<'a, T> {
         Self {
             repeater,
             unattributed: nullhawk_engine::transport::Origin::Repeater,
+            collaborator: None,
         }
     }
 
@@ -172,7 +210,17 @@ impl<'a, T: nullhawk_engine::transport::HttpTransport> RepeaterLab<'a, T> {
         Self {
             repeater,
             unattributed: nullhawk_engine::transport::Origin::Scanner,
+            collaborator: None,
         }
+    }
+
+    /// Gives the lab an out-of-band collaborator, enabling callback-based detection.
+    ///
+    /// Without it [`Lab::canary`] returns `None` and every check falls back to what it
+    /// can prove in-band; with it, a blind sink can be caught by its callback.
+    pub fn with_collaborator(mut self, collaborator: nullhawk_oob::Collaborator) -> Self {
+        self.collaborator = Some(collaborator);
+        self
     }
 
     fn sender<'b>(&self, identity: Option<&'b Identity>) -> SendAs<'b> {
@@ -201,6 +249,20 @@ impl<T: nullhawk_engine::transport::HttpTransport> Lab for RepeaterLab<'_, T> {
 
     fn draft_of(&self, request: nullhawk_types::ids::RequestId) -> Result<Draft> {
         self.repeater.draft_from(request)
+    }
+
+    fn canary(&self) -> Option<Canary> {
+        self.collaborator.as_ref().map(|collaborator| {
+            let (token, url) = collaborator.mint();
+            Canary { token, url }
+        })
+    }
+
+    async fn interactions(&self, token: &str) -> Result<Vec<nullhawk_oob::Interaction>> {
+        match &self.collaborator {
+            Some(collaborator) => collaborator.poll(token).await,
+            None => Ok(Vec::new()),
+        }
     }
 }
 

@@ -786,6 +786,18 @@ impl Lab for Metered<'_> {
     ) -> Result<nullhawk_repeater::Draft> {
         self.inner.draft_of(request)
     }
+
+    // The out-of-band methods are delegated, not left to the trait defaults: this
+    // wrapper stands in for the real lab, and a canary the inner lab could mint would
+    // otherwise be silently unavailable to every check the scheduler runs. A callback
+    // is not a request to the target, so neither counts against the ceiling.
+    fn canary(&self) -> Option<nullhawk_verify::Canary> {
+        self.inner.canary()
+    }
+
+    async fn interactions(&self, token: &str) -> Result<Vec<nullhawk_oob::Interaction>> {
+        self.inner.interactions(token).await
+    }
 }
 
 /// How many requests the run has left.
@@ -873,6 +885,59 @@ mod tests {
         assert!(ceiling.take());
         assert!(!ceiling.has_room(4));
         assert!(ceiling.has_room(2));
+    }
+
+    #[tokio::test]
+    async fn the_metered_wrapper_forwards_out_of_band_access_to_the_inner_lab() {
+        // The bug this guards, found in live testing: the scheduler hands every check a
+        // `Metered` wrapper, and a wrapper that forwards `experiment` but lets `canary`
+        // fall through to the trait default silently disables every collaborator-based
+        // check — the canary a run configured would never reach the detector.
+        struct WithCanary;
+        #[async_trait::async_trait]
+        impl Lab for WithCanary {
+            async fn experiment(
+                &self,
+                _: &nullhawk_repeater::Draft,
+                _: Option<&nullhawk_types::identity::Identity>,
+            ) -> Result<nullhawk_repeater::Sent> {
+                unreachable!("this test does not send")
+            }
+            fn would_leave_scope(
+                &self,
+                _: &nullhawk_repeater::Draft,
+                _: Option<&nullhawk_types::identity::Identity>,
+            ) -> bool {
+                false
+            }
+            fn draft_of(
+                &self,
+                _: nullhawk_types::ids::RequestId,
+            ) -> Result<nullhawk_repeater::Draft> {
+                unreachable!("this test does not load")
+            }
+            fn canary(&self) -> Option<nullhawk_verify::Canary> {
+                Some(nullhawk_verify::Canary {
+                    token: "tok".into(),
+                    url: "http://collaborator/tok".into(),
+                })
+            }
+        }
+
+        let ceiling = RequestCeiling::new(10);
+        let cancel = Cancel::new();
+        let metered = Metered {
+            inner: &WithCanary,
+            spend: &ceiling,
+            cancel: &cancel,
+        };
+
+        let canary = metered
+            .canary()
+            .expect("the wrapper must forward the inner lab's canary, not default to None");
+        assert_eq!(canary.token, "tok");
+        // And a callback poll reaches the inner lab (here, empty) rather than the default.
+        assert!(metered.interactions("tok").await.unwrap().is_empty());
     }
 
     #[test]

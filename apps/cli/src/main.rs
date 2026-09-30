@@ -1293,6 +1293,19 @@ enum ScanCommand {
         /// captured the run starts with what it had, and stops when that expires.
         #[arg(long)]
         refresh: bool,
+
+        /// An out-of-band collaborator authority (host or host:port) to confirm blind
+        /// vulnerabilities by their callbacks. Run one with `nullhawk oob serve`.
+        ///
+        /// Without it, checks that need a callback report those cases as refuted rather
+        /// than probing for something they cannot observe.
+        #[arg(long, value_name = "AUTHORITY")]
+        collaborator: Option<String>,
+
+        /// Embed the collaborator token as a subdomain (`<token>.domain`) rather than a
+        /// path (`host/<token>`). Needs a wildcard DNS record for the collaborator.
+        #[arg(long)]
+        collaborator_subdomain: bool,
     },
 }
 
@@ -2073,6 +2086,8 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             insecure,
             no_save,
             refresh,
+            collaborator,
+            collaborator_subdomain,
         }) => {
             license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             active::active(active::Args {
@@ -2087,6 +2102,8 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
                 insecure: *insecure,
                 no_save: *no_save,
                 refresh: *refresh,
+                collaborator: collaborator.as_deref(),
+                collaborator_subdomain: *collaborator_subdomain,
                 json: cli.json,
             })
         }

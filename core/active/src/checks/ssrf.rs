@@ -17,22 +17,37 @@
 //!
 //! It only reads, and only the metadata index — not the credential path beneath it. A
 //! confirmed hit means the credential path is reachable; retrieving it is the tester's
-//! call, not an automated scan's. Blind SSRF (no reflected content) is the collaborator's
-//! job and is deliberately out of scope here.
+//! call, not an automated scan's.
+//!
+//! # Blind SSRF, when a collaborator is configured
+//!
+//! Where the metadata trick reflects nothing, a *blind* fetch — one that makes the
+//! request but reveals nothing in the response — is still caught if the run was given an
+//! out-of-band collaborator ([`Lab::canary`]). The input is set to a collaborator URL
+//! carrying an unguessable token; a callback bearing that token is proof the server made
+//! the request, whatever its response said. Without a collaborator this case is honestly
+//! reported as refuted rather than silently skipped.
 
 use async_trait::async_trait;
 use nullhawk_types::finding::{
     Evidence, FindingSource, Hypothesis, Location, MessagePart, Severity,
 };
+use nullhawk_types::ids::InteractionId;
 use nullhawk_types::inject::{inputs, inputs_in, substitute, value_at};
 use nullhawk_types::object::ObjectLocation;
 use nullhawk_types::verify::{
     DetectorId, DetectorInfo, DetectorMode, Support, Verification, Writeup,
 };
 use nullhawk_types::Result;
-use nullhawk_verify::Lab;
+use nullhawk_verify::{Canary, Lab};
 
 use crate::{ActiveCheck, Budget, Subject};
+
+/// How long to wait for a callback, and how often to check. A blind fetch is not
+/// instantaneous — the target has to make its own request to the collaborator — so the
+/// token is polled a handful of times before the sink is called quiet.
+const CALLBACK_POLLS: usize = 6;
+const CALLBACK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
 
 /// The check.
 pub struct ServerSideRequestForgery;
@@ -42,7 +57,7 @@ const SETTLES: &str = "input.ssrf";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("input.ssrf"),
     name: "Server-side request forgery",
-    version: "1.0.0",
+    version: "1.1.0",
     about: "whether an input makes the server fetch a caller-chosen URL — proven by the \
             contents of the cloud metadata endpoint coming back from an internal address",
     mode: DetectorMode::Active,
@@ -172,11 +187,21 @@ impl ActiveCheck for ServerSideRequestForgery {
             Attempt::Failed(why) => return Ok(Verification::Inconclusive { why }),
         };
         let Some(hit) = first_signature(&metadata.body) else {
+            // The metadata trick reflects nothing here. A *blind* fetch — one that makes
+            // the request but reveals nothing in its response — is invisible to every
+            // in-band check, and is exactly what a collaborator exists to catch. Only
+            // when the run has one: without a collaborator this is honestly Refuted, not
+            // silently skipped.
+            if let Some(canary) = lab.canary() {
+                if let Some(verdict) = blind_ssrf(subject, lab, &slot, canary).await {
+                    return Ok(verdict);
+                }
+            }
             return Ok(Verification::Refuted {
                 note: format!(
-                    "{} pointed at the cloud metadata address did not return its contents \
-                     — this input does not fetch a caller-chosen URL, or the host is not \
-                     on a metadata-bearing cloud",
+                    "{} pointed at the cloud metadata address did not return its contents, \
+                     and no out-of-band interaction arrived — this input does not fetch a \
+                     caller-chosen URL, or the host is not on a metadata-bearing cloud",
                     describe(&slot),
                 ),
             });
@@ -359,6 +384,63 @@ fn from_exchange(subject: &Subject) -> Evidence {
             subject.exchange.method, subject.exchange.url
         ),
     }
+}
+
+/// Plants a collaborator canary in the input and waits for a callback.
+///
+/// This is the blind case: the response may reveal nothing, so the proof is not in it.
+/// The URL carries a token only this request minted, so an interaction bearing it is one
+/// this request provoked — an unguessable token is what lets a self-hosted collaborator
+/// on a public host tell a real hit from background noise.
+///
+/// Returns `None` — not a refutation — when the probe could not be sent or nothing had
+/// called back within the polling window: a later, slower callback is possible, and
+/// "nothing yet" is not "nothing ever". The caller turns that into the honest Refuted.
+async fn blind_ssrf(
+    subject: &Subject,
+    lab: &dyn Lab,
+    slot: &ObjectLocation,
+    canary: Canary,
+) -> Option<Verification> {
+    let request = match probe(subject, lab, slot, &canary.url).await {
+        Attempt::Answered(answer) => answer.request,
+        Attempt::Failed(_) => return None,
+    };
+
+    for _ in 0..CALLBACK_POLLS {
+        tokio::time::sleep(CALLBACK_INTERVAL).await;
+        let Ok(interactions) = lab.interactions(&canary.token).await else {
+            continue;
+        };
+        if let Some(hit) = interactions.into_iter().next() {
+            return Some(Verification::Reproduced {
+                note: format!(
+                    "{} made the server fetch a URL the input controls: a {} interaction \
+                     reached the collaborator from {}, carrying the token planted only in \
+                     this request. The response revealed nothing — this is a blind \
+                     server-side request forgery, proven by the callback rather than the \
+                     page",
+                    describe(slot),
+                    hit.protocol,
+                    hit.source,
+                ),
+                evidence: vec![
+                    from_exchange(subject),
+                    Evidence::Exchange {
+                        request,
+                        response: None,
+                        note: format!("the input was set to the collaborator URL {}", canary.url),
+                    },
+                    Evidence::OutOfBand {
+                        request,
+                        interaction: InteractionId::new(),
+                        protocol: hit.protocol,
+                    },
+                ],
+            });
+        }
+    }
+    None
 }
 
 fn slot_named(subject: &Subject) -> Option<ObjectLocation> {

@@ -100,6 +100,10 @@ pub struct Args<'a> {
     pub no_save: bool,
     /// Adopt the freshest session from proxy traffic before planning.
     pub refresh: bool,
+    /// An out-of-band collaborator authority, for confirming blind vulnerabilities.
+    pub collaborator: Option<&'a str>,
+    /// Embed the collaborator token as a subdomain rather than a path.
+    pub collaborator_subdomain: bool,
     pub json: bool,
 }
 
@@ -138,6 +142,19 @@ pub fn active(args: Args<'_>) -> Result<()> {
     // automated traffic, so the scope guard refuses an out-of-scope target rather
     // than flagging it the way it would a request a person typed.
     let lab = RepeaterLab::scanner(&repeater);
+    // A collaborator, if one was named, turns on callback-based detection of blind
+    // vulnerabilities. Without it those cases are honestly refuted, not skipped.
+    let lab = match args.collaborator {
+        Some(authority) => {
+            let mode = if args.collaborator_subdomain {
+                nullhawk_oob::PayloadMode::Subdomain
+            } else {
+                nullhawk_oob::PayloadMode::Path
+            };
+            lab.with_collaborator(nullhawk_oob::Collaborator::new(authority, mode))
+        }
+        None => lab,
+    };
 
     // The freshest session this project has seen, before anything is planned.
     //
