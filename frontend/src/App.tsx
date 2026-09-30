@@ -143,6 +143,7 @@ export default function App() {
     address: null,
   });
   const [repeating, setRepeating] = useState<string | null>(null);
+  const [repeaterSeed, setRepeaterSeed] = useState<{ url: string; n: number } | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [openExchange, setOpenExchange] = useState<string | null>(null);
   const [license, setLicense] = useState<LicenseStatus | null>(null);
@@ -207,6 +208,13 @@ export default function App() {
   const openRace = useCallback((id: string) => {
     setTesting(id);
     setTab("race");
+  }, []);
+
+  // Open a URL (from the site map) as a fresh Repeater draft. The nonce makes a repeat
+  // click on the same path re-seed the editor.
+  const openRepeaterUrl = useCallback((url: string) => {
+    setRepeaterSeed((s) => ({ url, n: (s?.n ?? 0) + 1 }));
+    setTab("repeater");
   }, []);
 
   // Following a citation out of a finding, or out of a matrix cell, lands in
@@ -315,6 +323,7 @@ export default function App() {
         {tab === "repeater" && (
           <RepeaterView
             requestId={repeating}
+            seed={repeaterSeed}
             onCaptured={() => setCaptureCount((n) => n + 1)}
           />
         )}
@@ -368,7 +377,12 @@ export default function App() {
         {tab === "crawler" && (
           <CrawlerView hasProject={project !== null} license={license} />
         )}
-        {tab === "sitemap" && <SitemapView hasProject={project !== null} />}
+        {tab === "sitemap" && (
+          <SitemapView
+            hasProject={project !== null}
+            onOpenInRepeater={openRepeaterUrl}
+          />
+        )}
         {tab === "report" && <ReportView hasProject={project !== null} />}
         {tab === "snapshots" && (
           <SnapshotsView hasProject={project !== null} />

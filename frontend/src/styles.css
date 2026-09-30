@@ -2946,3 +2946,24 @@ table.grid td code {
   border-bottom: 1px solid var(--border);
 }
 .bypass-hit:last-child { border-bottom: none; }
+
+/* ---- site map: filter + per-row action ---- */
+.sitemap-filter {
+  margin-left: auto;
+  min-width: 160px;
+}
+.sitemap .tree td.sitemap-actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+.sitemap .tree tr:hover td.sitemap-actions .chip-btn {
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
+.sitemap .tree td.sitemap-actions .chip-btn {
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sitemap .tree tr:hover td.sitemap-actions .chip-btn {
+  opacity: 1;
+}

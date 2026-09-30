@@ -143,7 +143,12 @@ export function DashboardView({
 
   const zones = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const n of nodes) counts.set(n.zone, (counts.get(n.zone) ?? 0) + 1);
+    // Count devices (hosts), not the endpoint leaves fanned out around them, so the
+    // number matches the Hosts tile.
+    for (const n of nodes) {
+      if (n.type === "endpoint" && n.id.includes("#")) continue;
+      counts.set(n.zone, (counts.get(n.zone) ?? 0) + 1);
+    }
     return Array.from(counts.entries());
   }, [nodes]);
 
@@ -345,11 +350,32 @@ function topologyFromHosts(hosts: SitemapHost[]): { nodes: TopoNode[]; links: To
       label: h.host,
       type,
       zone,
-      weight: 0.25 + (h.paths.length / maxPaths) * 0.75,
+      weight: 0.35 + (h.paths.length / maxPaths) * 0.65,
     };
   });
-
   const links = starLinks(nodes);
+
+  // With only a few hosts the graph is a lonely dot or two, so fan each host's endpoints
+  // out around it — the paths it actually served, as small child nodes. Capped, and only
+  // when there is room, so a hundred-host engagement is not buried in leaves.
+  if (hosts.length <= 4) {
+    const perHost = Math.max(4, Math.floor(28 / Math.max(1, hosts.length)));
+    for (const h of hosts) {
+      const { zone } = classify(h.host);
+      h.paths.slice(0, perHost).forEach((p, i) => {
+        const id = `${h.host}${p.path}#${i}`;
+        nodes.push({
+          id,
+          label: p.path.length > 20 ? p.path.slice(0, 19) + "…" : p.path,
+          type: "endpoint",
+          zone,
+          weight: 0.18,
+        });
+        links.push({ source: id, target: h.host });
+      });
+    }
+  }
+
   return { nodes, links };
 }
 

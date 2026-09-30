@@ -14,9 +14,16 @@ import {
  * With "read forms" it also shows the forms discovered but never submitted. This is the
  * payoff of a crawl: the pages it fetched show up here.
  */
-export function SitemapView({ hasProject }: { hasProject: boolean }) {
+export function SitemapView({
+  hasProject,
+  onOpenInRepeater,
+}: {
+  hasProject: boolean;
+  onOpenInRepeater: (url: string) => void;
+}) {
   const [data, setData] = useState<SitemapData | null>(null);
   const [forms, setForms] = useState(false);
+  const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -65,6 +72,14 @@ export function SitemapView({ hasProject }: { hasProject: boolean }) {
             {forms ? `, ${formTotal} form(s)` : ""}
           </span>
         )}
+        <input
+          type="text"
+          className="sitemap-filter"
+          value={filter}
+          placeholder="Filter paths…"
+          spellCheck={false}
+          onChange={(e) => setFilter(e.target.value)}
+        />
       </div>
 
       {error && <p className="callout danger">{error}</p>}
@@ -75,7 +90,15 @@ export function SitemapView({ hasProject }: { hasProject: boolean }) {
         </p>
       )}
 
-      {data?.hosts.map((host) => (
+      {data?.hosts.map((host) => {
+        const needle = filter.trim().toLowerCase();
+        const paths =
+          needle === ""
+            ? host.paths
+            : host.paths.filter((p) => p.path.toLowerCase().includes(needle));
+        if (paths.length === 0) return null;
+        const base = `${host.secure ? "https" : "http"}://${host.host}`;
+        return (
         <section className="card sitemap-host" key={`${host.secure}:${host.host}`}>
           <h2>
             <span className="scheme">{host.secure ? "https" : "http"}://</span>
@@ -83,7 +106,7 @@ export function SitemapView({ hasProject }: { hasProject: boolean }) {
           </h2>
           <table className="tree">
             <tbody>
-              {host.paths.map((p) => (
+              {paths.map((p) => (
                 <tr key={p.path}>
                   <td className="mono path">{p.path}</td>
                   <td className="methods">{p.methods.join(", ")}</td>
@@ -96,6 +119,15 @@ export function SitemapView({ hasProject }: { hasProject: boolean }) {
                   </td>
                   <td className="identities muted">
                     {p.identities.length > 0 ? `as ${p.identities.join(", ")}` : ""}
+                  </td>
+                  <td className="sitemap-actions">
+                    <button
+                      className="chip-btn"
+                      title="Open this path in the Repeater"
+                      onClick={() => onOpenInRepeater(base + p.path)}
+                    >
+                      Repeater
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -113,7 +145,8 @@ export function SitemapView({ hasProject }: { hasProject: boolean }) {
             </div>
           )}
         </section>
-      ))}
+        );
+      })}
 
       {data && data.out_of_scope.length > 0 && (
         <section className="card out-of-scope">
