@@ -18,5 +18,6 @@ pub mod reflection;
 pub mod sqli;
 pub mod ssrf;
 pub mod ssti;
+pub mod stored_xss;
 pub mod traversal;
 pub mod xss;
