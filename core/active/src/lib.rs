@@ -329,6 +329,7 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
         Box::new(checks::cmdi::OsCommandInjection),
         Box::new(checks::cache_poison::CachePoisoning),
         Box::new(checks::crlf::CrlfInjection),
+        Box::new(checks::xss::ReflectedXss),
     ]
 }
 

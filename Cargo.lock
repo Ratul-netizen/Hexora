@@ -2279,6 +2279,7 @@ dependencies = [
  "chrono",
  "futures",
  "nullhawk-authz",
+ "nullhawk-browser",
  "nullhawk-engine",
  "nullhawk-http",
  "nullhawk-oob",

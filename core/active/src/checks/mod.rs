@@ -18,3 +18,4 @@ pub mod sqli;
 pub mod ssrf;
 pub mod ssti;
 pub mod traversal;
+pub mod xss;
