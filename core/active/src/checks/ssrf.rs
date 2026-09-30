@@ -70,10 +70,42 @@ const SIGNATURES: &[&str] = &[
 /// Parameter names that commonly name a resource the server will fetch. Used only to
 /// decide whether an SSRF probe is worth a request — a match is not required to report.
 const SINK_NAMES: &[&str] = &[
-    "url", "uri", "link", "src", "href", "dest", "destination", "redirect", "redir",
-    "return", "returnto", "next", "continue", "callback", "cb", "feed", "rss", "image",
-    "img", "file", "path", "page", "domain", "host", "site", "target", "out", "load",
-    "resource", "fetch", "proxy", "remote", "webhook", "source", "avatar", "preview",
+    "url",
+    "uri",
+    "link",
+    "src",
+    "href",
+    "dest",
+    "destination",
+    "redirect",
+    "redir",
+    "return",
+    "returnto",
+    "next",
+    "continue",
+    "callback",
+    "cb",
+    "feed",
+    "rss",
+    "image",
+    "img",
+    "file",
+    "path",
+    "page",
+    "domain",
+    "host",
+    "site",
+    "target",
+    "out",
+    "load",
+    "resource",
+    "fetch",
+    "proxy",
+    "remote",
+    "webhook",
+    "source",
+    "avatar",
+    "preview",
 ];
 
 #[async_trait]
@@ -199,7 +231,10 @@ impl ActiveCheck for ServerSideRequestForgery {
 
     fn writeup(&self, subject: &Subject, verification: &Verification) -> Writeup {
         let slot = slot_named(subject);
-        let where_ = slot.as_ref().map(describe).unwrap_or_else(|| "an input".into());
+        let where_ = slot
+            .as_ref()
+            .map(describe)
+            .unwrap_or_else(|| "an input".into());
 
         Writeup {
             target: subject.target,
@@ -407,7 +442,10 @@ mod tests {
     }
 
     fn query(name: &str) -> ObjectLocation {
-        ObjectLocation::Query { name: name.into(), occurrence: 0 }
+        ObjectLocation::Query {
+            name: name.into(),
+            occurrence: 0,
+        }
     }
 
     #[test]
