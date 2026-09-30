@@ -58,7 +58,7 @@ const SETTLES: &str = "input.xss";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("input.xss"),
     name: "Reflected cross-site scripting",
-    version: "1.0.0",
+    version: "1.1.0",
     about: "whether a reflected input executes as script — proven by loading the page in a \
             real browser and reading back a marker the payload set",
     mode: DetectorMode::Active,
@@ -346,6 +346,35 @@ async fn executed(
         return Executed::Error;
     };
 
+    // For a header input the payload rides a request header on the navigation, not the
+    // URL (substitute left the path unchanged). User-Agent has its own override; every
+    // other header goes through the extra-headers channel.
+    if let ObjectLocation::Header { name, .. } = slot {
+        if cdp
+            .call("Network.enable", serde_json::json!({}))
+            .await
+            .is_err()
+        {
+            return Executed::Error;
+        }
+        let set = if name.eq_ignore_ascii_case("user-agent") {
+            cdp.call(
+                "Network.setUserAgentOverride",
+                serde_json::json!({ "userAgent": payload }),
+            )
+            .await
+        } else {
+            cdp.call(
+                "Network.setExtraHTTPHeaders",
+                serde_json::json!({ "headers": { name: payload } }),
+            )
+            .await
+        };
+        if set.is_err() {
+            return Executed::Error;
+        }
+    }
+
     if cdp.navigate(&url, NAV_TIMEOUT).await.is_err() {
         return Executed::Error;
     }
@@ -456,14 +485,15 @@ fn path_of(url: &str) -> &str {
         .unwrap_or("/")
 }
 
-/// Raises one suspicion per query input — a work item at `Info`, settled by an experiment.
+/// Raises one suspicion per input — a work item at `Info`, settled by an experiment.
 ///
-/// Query parameters only: the browser drives a navigation, and a reflected *header* would
-/// need the header set on that navigation, which this first cut does not do.
+/// Query parameters and request headers both: a header a page reflects (a `User-Agent` an
+/// error page echoes, a `Referer` a "you came from" line shows) is as much a reflected-XSS
+/// sink as a query parameter, and the browser confirms it by carrying the payload on the
+/// navigation's header rather than in its URL.
 pub fn suspect(exchange: &nullhawk_scan::Exchange) -> Vec<Hypothesis> {
     inputs_in(&exchange.path, &exchange.request_headers)
         .into_iter()
-        .filter(|slot| matches!(slot, ObjectLocation::Query { .. }))
         .map(|slot| Hypothesis {
             detector: SETTLES.to_string(),
             claim: format!(
@@ -509,6 +539,41 @@ mod tests {
         assert_eq!(info.mode, DetectorMode::Active);
         assert!(info.sends());
         assert_eq!(info.settles, Some(SETTLES));
+    }
+
+    #[test]
+    fn it_raises_for_a_reflectable_request_header_not_only_query() {
+        // A header a page echoes is a reflected-XSS sink too; the browser carries the
+        // payload on the navigation's header rather than in its URL.
+        let mut headers = nullhawk_types::http::Headers::new();
+        headers.set("User-Agent", "Mozilla/5.0");
+        let exchange = nullhawk_scan::Exchange {
+            id: nullhawk_types::ids::RequestId::new(),
+            target: nullhawk_types::ids::TargetId::new(),
+            host: "shop.example".into(),
+            port: 443,
+            secure: true,
+            method: "GET".into(),
+            url: "https://shop.example/page?q=1".into(),
+            path: "/page?q=1".into(),
+            status: 200,
+            request_headers: headers,
+            response_headers: nullhawk_types::http::Headers::new(),
+            response_bytes: 0,
+            authenticated: false,
+            tls: None,
+            sent_at: "2026-10-01T00:00:00Z".into(),
+            origin: "proxy".into(),
+        };
+        let kinds: Vec<MessagePart> = suspect(&exchange)
+            .iter()
+            .filter_map(|h| h.location.as_ref().map(|l| l.part))
+            .collect();
+        assert!(kinds.contains(&MessagePart::Query), "the query input still raises");
+        assert!(
+            kinds.contains(&MessagePart::Header),
+            "a reflectable request header now raises too: {kinds:?}"
+        );
     }
 
     #[test]
