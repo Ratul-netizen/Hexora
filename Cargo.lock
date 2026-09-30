@@ -2288,6 +2288,7 @@ dependencies = [
  "nullhawk-storage",
  "nullhawk-types",
  "nullhawk-verify",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
