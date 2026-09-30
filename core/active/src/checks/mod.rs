@@ -12,6 +12,7 @@ pub mod cmdi;
 pub mod crlf;
 pub mod crossid;
 pub mod echo;
+pub mod host_header;
 pub mod redirect;
 pub mod reflection;
 pub mod sqli;
