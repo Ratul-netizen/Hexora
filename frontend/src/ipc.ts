@@ -1086,6 +1086,8 @@ export interface DetectorView {
   mode: string;
   /** Whether running it puts traffic on the wire. */
   sends: boolean;
+  /** How loud running it is on the target: `silent`, `moderate` or `loud`. */
+  intrusiveness: string;
   observes: boolean;
   hypothesizes: boolean;
   /** The check whose suspicions this one settles, when that is its job. */
