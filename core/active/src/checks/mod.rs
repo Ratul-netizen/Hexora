@@ -18,6 +18,7 @@ pub mod echo;
 pub mod host_header;
 pub mod redirect;
 pub mod reflection;
+pub mod smuggling;
 pub mod sqli;
 pub mod ssrf;
 pub mod ssti;
