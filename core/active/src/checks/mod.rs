@@ -5,6 +5,7 @@
 //! scheduler with nothing to schedule proves nothing; this one closes a loop that was
 //! left open on purpose in M13.2.
 
+pub mod access;
 pub mod auth;
 pub mod cache;
 pub mod cache_poison;

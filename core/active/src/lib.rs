@@ -317,6 +317,7 @@ impl Cancel {
 pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
     vec![
         Box::new(checks::auth::AuthEnforcement),
+        Box::new(checks::access::AccessBypass),
         Box::new(checks::cache::CacheExposure),
         Box::new(checks::crossid::CrossIdentity),
         Box::new(checks::reflection::OriginReflection),
