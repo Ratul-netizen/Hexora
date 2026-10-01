@@ -70,6 +70,7 @@ const INFO: DetectorInfo = DetectorInfo {
     // It settles other checks' suspicions and raises none of its own.
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// Origins that cannot be on anybody's allowlist.

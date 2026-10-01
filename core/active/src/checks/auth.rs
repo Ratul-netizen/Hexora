@@ -65,6 +65,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 #[async_trait]

@@ -36,6 +36,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: true,
     hypothesizes: true,
     settles: None,
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
 };
 
 /// Whether the response says credentialed cross-origin reads are allowed.

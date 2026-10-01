@@ -62,6 +62,7 @@ pub fn list(json: bool) -> Result<()> {
                         "about": check.about,
                         "mode": check.mode.as_str(),
                         "sends": check.sends(),
+                        "intrusiveness": check.intrusiveness.label(),
                         "observes": check.observes,
                         "hypothesizes": check.hypothesizes,
                         "settles": check.settles,
@@ -73,15 +74,16 @@ pub fn list(json: bool) -> Result<()> {
     }
 
     println!(
-        "{:<26} {:<9} {:<8} {:<12} WHAT IT LOOKS FOR",
-        "ID", "VERSION", "MODE", "PRODUCES"
+        "{:<26} {:<9} {:<8} {:<9} {:<12} WHAT IT LOOKS FOR",
+        "ID", "VERSION", "MODE", "NOISE", "PRODUCES"
     );
     for check in checks {
         println!(
-            "{:<26} {:<9} {:<8} {:<12} {}",
+            "{:<26} {:<9} {:<8} {:<9} {:<12} {}",
             check.id.to_string(),
             check.version,
             check.mode.as_str(),
+            check.intrusiveness.label(),
             produces(check),
             check.about
         );
@@ -90,6 +92,16 @@ pub fn list(json: bool) -> Result<()> {
     println!();
     let sending = registry.sending().count();
     println!("{} check(s); {sending} of them send traffic.", checks.len());
+    let loud = checks
+        .iter()
+        .filter(|c| c.intrusiveness == nullhawk_types::verify::Intrusiveness::Loud)
+        .count();
+    if loud > 0 {
+        println!(
+            "{loud} of them are loud (a browser, a time delay, or a payload sweep); \
+             `scan active --quiet` leaves those out."
+        );
+    }
 
     let (answered, unanswered) = settlement(&registry);
     if !answered.is_empty() || !unanswered.is_empty() {
@@ -236,5 +248,26 @@ mod tests {
     fn listing_works_in_both_forms() {
         list(false).unwrap();
         list(true).unwrap();
+    }
+
+    #[test]
+    fn silence_is_exactly_not_sending() {
+        // The invariant `scan active --quiet` and the NOISE column both rest on: a check
+        // is `silent` precisely when it puts nothing on the wire. A passive check marked
+        // louder than silent, or a sending check marked silent, would make the one word a
+        // tester reads before pointing this at production a lie — so it fails here, not
+        // there.
+        use nullhawk_types::verify::Intrusiveness;
+        for check in registry().all() {
+            let silent = check.intrusiveness == Intrusiveness::Silent;
+            assert_eq!(
+                silent,
+                !check.sends(),
+                "{} is {} but {} send",
+                check.id,
+                check.intrusiveness.label(),
+                if check.sends() { "does" } else { "does not" }
+            );
+        }
     }
 }

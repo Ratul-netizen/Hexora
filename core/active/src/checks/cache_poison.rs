@@ -59,6 +59,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// Headers a cache commonly leaves out of its key, and which an application commonly

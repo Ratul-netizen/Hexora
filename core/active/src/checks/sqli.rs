@@ -95,6 +95,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Loud,
 };
 
 /// Database error signatures, paired with the engine they name. Substrings rather than

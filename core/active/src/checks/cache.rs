@@ -72,6 +72,7 @@ const INFO: DetectorInfo = DetectorInfo {
     // It settles a passive check's suspicion and raises none of its own.
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// Headers a cache in front of the origin uses to report a hit.

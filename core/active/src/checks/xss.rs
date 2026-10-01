@@ -65,6 +65,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Loud,
 };
 
 /// The global the payload sets, and reads back to prove it ran.

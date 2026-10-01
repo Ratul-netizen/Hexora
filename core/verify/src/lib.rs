@@ -434,6 +434,7 @@ mod tests {
                 observes: false,
                 hypothesizes: true,
                 settles: None,
+                intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
             }
         }
 
@@ -538,6 +539,7 @@ mod tests {
             observes: true,
             hypothesizes: false,
             settles: None,
+            intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
         };
         let loud = DetectorInfo {
             id: DetectorId("authz.cross_identity"),
@@ -548,6 +550,7 @@ mod tests {
             observes: false,
             hypothesizes: true,
             settles: None,
+            intrusiveness: nullhawk_types::verify::Intrusiveness::Loud,
         };
 
         let registry = Registry::new().with([quiet, loud]);
@@ -571,6 +574,7 @@ mod tests {
             observes: false,
             hypothesizes: true,
             settles: None,
+            intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
         };
         let registry = Registry::new().with([check]).with([check]);
         assert_eq!(registry.all().len(), 1);

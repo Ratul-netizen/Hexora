@@ -70,6 +70,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// Two large factors and two multipliers, so the products are eight-digit numbers a page

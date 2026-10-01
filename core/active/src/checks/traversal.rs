@@ -46,6 +46,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// Traversal payloads, unix then windows, plain then encoded. Deep enough to escape a

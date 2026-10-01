@@ -61,6 +61,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Loud,
 };
 
 /// The global a stored payload sets, and that a clean load reads back.
