@@ -63,8 +63,8 @@ const SETTLES: &str = "cors.configuration";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("cors.reflection"),
     name: "Origin reflection",
-    version: "1.0.0",
-    about: "whether an application reflects any Origin it is sent, with credentials allowed",
+    version: "1.1.0",
+    about: "whether an application reflects any Origin it is sent — outright, or past a broken matcher via a null origin or a prefix trick — with credentials allowed",
     mode: DetectorMode::Active,
     observes: false,
     // It settles other checks' suspicions and raises none of its own.
@@ -81,6 +81,12 @@ const PROBES: [&str; 2] = [
     "https://nullhawk-probe.invalid",
     "https://nullhawk-second-probe.invalid",
 ];
+
+/// The attacker-controlled domain the prefix-match probe is built under. An attacker who
+/// owned it could create the subdomain `<trusted-origin>.evil-nullhawk.invalid`, which is
+/// exactly what a matcher comparing the start of the Origin string would wrongly accept —
+/// but `.invalid` cannot actually be registered, so the probe names nothing real.
+const EVIL: &str = "evil-nullhawk.invalid";
 
 #[async_trait]
 impl ActiveCheck for OriginReflection {
@@ -133,12 +139,42 @@ impl ActiveCheck for OriginReflection {
         }
 
         if allowed != PROBES[0] {
+            // An allowlist is present — it answered with an origin of its own choosing
+            // rather than the arbitrary one. But a matcher can be present and broken: the
+            // common mistakes are trusting a null origin and comparing only the *start* of
+            // the Origin string. Try the origins those two let through before concluding
+            // the allowlist holds, because an allowlist that can be walked past is a worse
+            // finding than plain reflection, not a safe result.
+            // probe1 has already spent one request; the rest of the budget is for edges.
+            // Named so it does not shadow `allowed`, the Allow-Origin value the notes cite.
+            let edge_budget = budget.per_hypothesis.max(1).saturating_sub(1);
+            for (class, origin) in edge_origins(subject.exchange.secure, &host)
+                .into_iter()
+                .take(edge_budget)
+            {
+                let edge = match probe(subject, lab, &origin).await {
+                    Probe::Answered(answer) => answer,
+                    Probe::Failed(_) => continue,
+                };
+                if edge.allow_origin.as_deref() == Some(origin.as_str()) && edge.credentialed {
+                    return Ok(Verification::Supported {
+                        support: Support::Distinctive,
+                        note: format!(
+                            "{host} answered an arbitrary origin with {allowed} of its own \
+                             choosing, but echoed {origin} — {class} — with \
+                             Access-Control-Allow-Credentials: true. A matcher is present \
+                             and lets through an origin an attacker controls"
+                        ),
+                        evidence: evidence(subject, &first, Some(&edge)),
+                    });
+                }
+            }
             return Ok(Verification::Refuted {
                 note: format!(
                     "{host} was sent Origin: {} and answered \
-                     Access-Control-Allow-Origin: {allowed}. It answers with an origin \
-                     of its own choosing rather than the one it was asked about, which \
-                     is an allowlist working",
+                     Access-Control-Allow-Origin: {allowed}; a null origin and a \
+                     prefix-match origin were refused too. An allowlist is present and was \
+                     not bypassed by the tricks tried",
                     PROBES[0]
                 ),
             });
@@ -229,11 +265,10 @@ impl ActiveCheck for OriginReflection {
                 path_of(&subject.exchange.url),
             ),
             description: format!(
-                "{} was sent an Origin header naming a domain that cannot belong to \
-                 anybody — {} — and answered Access-Control-Allow-Origin with that same \
-                 value and Access-Control-Allow-Credentials: true. {}",
+                "{} was sent an Origin header naming a domain that cannot belong to any \
+                 legitimate site, and reflected it into Access-Control-Allow-Origin with \
+                 Access-Control-Allow-Credentials: true. {}",
                 subject.exchange.url,
-                PROBES[0],
                 verification.note(),
             ),
             impact: "Any website a logged-in user visits can make requests to this \
@@ -251,11 +286,12 @@ impl ActiveCheck for OriginReflection {
                           origins that genuinely need them."
                 .into(),
             reproduction: format!(
-                "Send {} {} with the header `Origin: {}` and read \
-                 Access-Control-Allow-Origin and Access-Control-Allow-Credentials on \
-                 the response. `nullhawk poc <project> <finding>` compiles the exact \
-                 requests that were made.",
-                subject.exchange.method, subject.exchange.url, PROBES[0],
+                "Send {} {} with an Origin header naming a domain outside any allowlist — \
+                 `{}`, or `Origin: null`, or `https://<this-host>.{}` — and read \
+                 Access-Control-Allow-Origin and Access-Control-Allow-Credentials on the \
+                 response. `nullhawk poc <project> <finding>` compiles the exact requests \
+                 that were made.",
+                subject.exchange.method, subject.exchange.url, PROBES[0], EVIL,
             ),
             cwe: Some("CWE-942".into()),
             owasp: Some("A05:2021 Security Misconfiguration".into()),
@@ -279,13 +315,29 @@ fn path_of(url: &str) -> &str {
         .unwrap_or("/")
 }
 
+/// Origins a broken matcher lets through, built from the request's own scheme and host.
+///
+/// * `null` — the value a sandboxed iframe or a redirected request sends; an application
+///   that trusts it hands every such context a credentialed cross-origin read.
+/// * `<scheme>://<host>.evil-nullhawk.invalid` — the trusted origin with an attacker
+///   suffix. A matcher that checks only that the Origin *starts with* the trusted value
+///   accepts it, and an attacker who owned the suffix domain could serve from exactly
+///   there.
+fn edge_origins(secure: bool, host: &str) -> Vec<(&'static str, String)> {
+    let scheme = if secure { "https" } else { "http" };
+    vec![
+        ("a null origin", "null".to_string()),
+        ("a prefix-match bypass", format!("{scheme}://{host}.{EVIL}")),
+    ]
+}
+
 /// What one probe established.
 struct Answer {
     request: nullhawk_types::ids::RequestId,
     status: u16,
     allow_origin: Option<String>,
     credentialed: bool,
-    sent: &'static str,
+    sent: String,
 }
 
 enum Probe {
@@ -298,7 +350,7 @@ enum Probe {
 /// Everything else about the request is left exactly as it was captured, including its
 /// credential: whether a *credentialed* cross-origin read is allowed is the question,
 /// and stripping the session would answer a different one.
-async fn probe(subject: &Subject, lab: &dyn Lab, origin: &'static str) -> Probe {
+async fn probe(subject: &Subject, lab: &dyn Lab, origin: &str) -> Probe {
     let mut draft = subject.draft.clone();
     draft.request.headers.set("Origin", origin);
 
@@ -321,7 +373,7 @@ async fn probe(subject: &Subject, lab: &dyn Lab, origin: &'static str) -> Probe 
         status: sent.exchange.response.status,
         allow_origin,
         credentialed,
-        sent: origin,
+        sent: origin.to_string(),
     })
 }
 
@@ -395,8 +447,37 @@ mod tests {
     }
 
     #[test]
+    fn the_edge_origins_are_a_null_and_a_prefix_trick_that_name_nothing_real() {
+        let edges = edge_origins(true, "app.example.com");
+        let origins: Vec<&str> = edges.iter().map(|(_, o)| o.as_str()).collect();
+        assert!(origins.contains(&"null"), "{origins:?}");
+        // The prefix-match probe is the trusted origin with an attacker suffix, so a
+        // startsWith matcher accepts it — but it is under `.invalid`, so it is not real.
+        assert!(
+            origins.contains(&"https://app.example.com.evil-nullhawk.invalid"),
+            "{origins:?}"
+        );
+        for (_, origin) in &edges {
+            assert!(
+                origin == "null" || origin.ends_with(".invalid"),
+                "{origin} could name a registrable domain"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cleartext_host_builds_a_cleartext_prefix_probe() {
+        // The probe mirrors the request's scheme, so it tests the matcher as it is reached.
+        let edges = edge_origins(false, "intranet.local");
+        assert!(edges
+            .iter()
+            .any(|(_, o)| o == "http://intranet.local.evil-nullhawk.invalid"));
+    }
+
+    #[test]
     fn it_reports_itself_as_active_and_as_a_settler() {
         let info = OriginReflection.about();
+        assert_eq!(info.version, "1.1.0");
         assert_eq!(info.mode, DetectorMode::Active);
         assert!(
             info.sends(),
