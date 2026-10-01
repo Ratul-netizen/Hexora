@@ -104,6 +104,9 @@ pub struct Args<'a> {
     pub collaborator: Option<&'a str>,
     /// Embed the collaborator token as a subdomain rather than a path.
     pub collaborator_subdomain: bool,
+    /// Leave out the loud checks — the ones that drive a browser, wait out a time
+    /// delay, or sweep many payloads — for a monitored target where silence matters.
+    pub quiet: bool,
     pub json: bool,
 }
 
@@ -166,7 +169,15 @@ pub fn active(args: Args<'_>) -> Result<()> {
         refresh_sessions(&project)?;
     }
 
-    let checks = nullhawk_active::active_checks();
+    let mut checks = nullhawk_active::active_checks();
+    if args.quiet {
+        // The loud settlers stay home: anything they alone could have confirmed is left
+        // as the lead it already was, not silently dropped. A quiet run reaches less and
+        // says so in the plan, which is the trade the flag exists to make.
+        checks.retain(|check| {
+            check.about().intrusiveness != nullhawk_types::verify::Intrusiveness::Loud
+        });
+    }
     let plan = Plan::prepare(&project, &lab, &checks, &hypotheses, &budget)?;
 
     if args.json {

@@ -47,6 +47,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Loud,
 };
 
 /// How long the page is given to load and run its script before the sinks are read.

@@ -35,6 +35,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: true,
     hypothesizes: false,
     settles: None,
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
 };
 
 impl PassiveCheck for TlsObservations {

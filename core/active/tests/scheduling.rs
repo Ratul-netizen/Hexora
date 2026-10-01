@@ -268,6 +268,7 @@ impl ActiveCheck for Chatty {
             observes: false,
             hypothesizes: false,
             settles: None,
+            intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
         }
     }
 

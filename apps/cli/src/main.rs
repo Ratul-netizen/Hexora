@@ -1306,6 +1306,13 @@ enum ScanCommand {
         /// path (`host/<token>`). Needs a wildcard DNS record for the collaborator.
         #[arg(long)]
         collaborator_subdomain: bool,
+
+        /// Leave out the loud checks — the ones that drive a real browser, wait out an
+        /// injected time delay, or sweep many payloads. Faster and quieter on a monitored
+        /// target; anything only a loud check could confirm stays a lead. `nullhawk
+        /// detectors` marks which checks are loud.
+        #[arg(long)]
+        quiet: bool,
     },
 }
 
@@ -2088,6 +2095,7 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             refresh,
             collaborator,
             collaborator_subdomain,
+            quiet,
         }) => {
             license::gate().require(nullhawk_engine::license::Feature::ActiveScanner)?;
             active::active(active::Args {
@@ -2104,6 +2112,7 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
                 refresh: *refresh,
                 collaborator: collaborator.as_deref(),
                 collaborator_subdomain: *collaborator_subdomain,
+                quiet: *quiet,
                 json: cli.json,
             })
         }

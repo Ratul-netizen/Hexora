@@ -40,6 +40,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: true,
     hypothesizes: false,
     settles: None,
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
 };
 
 /// A `Set-Cookie`, with the value deliberately absent.

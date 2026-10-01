@@ -87,6 +87,7 @@ impl ExtensionCheck {
                 observes: true,
                 hypothesizes: false,
                 settles: None,
+                intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
             },
             name: ext.manifest.name.clone(),
             sandbox,

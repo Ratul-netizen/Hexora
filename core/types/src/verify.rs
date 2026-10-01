@@ -99,6 +99,33 @@ impl DetectorMode {
     }
 }
 
+/// How much noise running a check makes on the target.
+///
+/// The difference between a check safe to run against a monitored production system and
+/// one a blue team will watch arrive — recorded so a tester can choose, rather than
+/// learning it from a logged alert. Ordered from quietest to loudest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum Intrusiveness {
+    /// Sends nothing at all. Every passive check.
+    Silent,
+    /// A bounded handful of ordinary-looking requests.
+    Moderate,
+    /// Loud: drives a real browser, waits out injected time delays, or sweeps many
+    /// payloads — slow, and conspicuous in a log.
+    Loud,
+}
+
+impl Intrusiveness {
+    /// A one-word label for a listing.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Silent => "silent",
+            Self::Moderate => "moderate",
+            Self::Loud => "loud",
+        }
+    }
+}
+
 /// What a check is, for a human and for a comparison between two engagements.
 ///
 /// Serialize only: this is a static description compiled into the binary, so it goes
@@ -140,6 +167,11 @@ pub struct DetectorInfo {
     /// Printed by `nullhawk detectors`, so a tester can see which of this build's
     /// suspicions have somebody to answer them and which are still dead ends.
     pub settles: Option<&'static str>,
+    /// How loud running this check is on the target.
+    ///
+    /// Lets `scan active --quiet` leave out the browser-driving and payload-sweeping
+    /// checks, for a monitored target where speed and silence matter more than reach.
+    pub intrusiveness: Intrusiveness,
 }
 
 impl DetectorInfo {
@@ -655,6 +687,7 @@ mod tests {
             observes: false,
             hypothesizes: true,
             settles: None,
+            intrusiveness: Intrusiveness::Moderate,
         };
         assert_eq!(info.id.to_string(), "authz.bola");
         assert!(info.sends(), "an active check sends, by definition");

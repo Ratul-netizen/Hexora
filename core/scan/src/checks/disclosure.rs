@@ -28,6 +28,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: true,
     hypothesizes: false,
     settles: None,
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
 };
 
 /// The headers that name a product, and what to call each of them.

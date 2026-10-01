@@ -84,6 +84,7 @@ pub const CROSS_IDENTITY: DetectorInfo = DetectorInfo {
     // experiment and `--verify` is the second. Recorded so the registry does not list
     // it among the suspicions nothing in this build can answer.
     settles: Some("authz.cross_identity"),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// The check that builds the request nobody captured.
@@ -96,6 +97,7 @@ pub const CONSTRUCTED_OBJECT: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: true,
     settles: Some("authz.constructed_object"),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 /// The longest excerpt quoted as evidence from a response body.

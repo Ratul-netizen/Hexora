@@ -77,6 +77,7 @@ fn compile(def: &CustomDef) -> Result<CustomCheck, String> {
             observes: true,
             hypothesizes: false,
             settles: None,
+            intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
         },
         query,
         name: def.name.clone(),

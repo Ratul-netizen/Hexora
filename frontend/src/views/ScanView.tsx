@@ -129,6 +129,7 @@ export function ScanView({
                 <th>Check</th>
                 <th>Version</th>
                 <th>Mode</th>
+                <th>Noise</th>
                 <th>Produces</th>
                 <th>What it looks for</th>
               </tr>
@@ -146,6 +147,13 @@ export function ScanView({
                         production at 3pm. */}
                     <span className={detector.sends ? "tag insecure" : "tag"}>
                       {detector.mode}
+                    </span>
+                  </td>
+                  <td>
+                    {/* How loud it is on the target — the choice `scan active
+                        --quiet` makes for a monitored system. */}
+                    <span className={`tag ${noiseClass(detector.intrusiveness)}`}>
+                      {detector.intrusiveness}
                     </span>
                   </td>
                   <td className="muted small">{produces(detector)}</td>
@@ -715,4 +723,11 @@ function produces(detector: DetectorView): string {
   // like if you only ask what it raises.
   if (detector.settles) return `settles ${detector.settles}`;
   return "nothing";
+}
+
+/** The severity-tag colour that matches a detector's noise level. */
+function noiseClass(intrusiveness: string): string {
+  if (intrusiveness === "loud") return "high";
+  if (intrusiveness === "moderate") return "medium";
+  return "low";
 }

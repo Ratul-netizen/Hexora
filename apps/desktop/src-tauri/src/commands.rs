@@ -3005,6 +3005,8 @@ pub struct DetectorView {
     pub about: String,
     pub mode: String,
     pub sends: bool,
+    /// How loud running it is on the target: `silent`, `moderate` or `loud`.
+    pub intrusiveness: String,
     pub observes: bool,
     pub hypothesizes: bool,
     /// The check whose suspicions this one settles, when that is its job.
@@ -3033,6 +3035,7 @@ pub fn detectors_list() -> CommandResult<Vec<DetectorView>> {
             about: check.about.to_string(),
             mode: check.mode.as_str().to_string(),
             sends: check.sends(),
+            intrusiveness: check.intrusiveness.label().to_string(),
             observes: check.observes,
             hypothesizes: check.hypothesizes,
             settles: check.settles.map(|id| id.to_string()),

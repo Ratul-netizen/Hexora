@@ -30,6 +30,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: true,
     hypothesizes: false,
     settles: None,
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Silent,
 };
 
 /// Path fragments that mark a chat/LLM endpoint. Mirrors `nullhawk_llm::looks_like_llm_path`.

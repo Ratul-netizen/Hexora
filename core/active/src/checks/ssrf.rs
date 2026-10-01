@@ -64,6 +64,7 @@ const INFO: DetectorInfo = DetectorInfo {
     observes: false,
     hypothesizes: false,
     settles: Some(SETTLES),
+    intrusiveness: nullhawk_types::verify::Intrusiveness::Moderate,
 };
 
 const METADATA_URL: &str = "http://169.254.169.254/latest/meta-data/";
