@@ -16,6 +16,7 @@ use nullhawk_storage::{migrations, Project};
 
 mod active;
 mod authz;
+mod browse;
 mod check;
 mod crawl;
 mod detectors;
@@ -788,6 +789,43 @@ enum Command {
         /// Print what was found without writing the pages into the project.
         #[arg(long)]
         no_save: bool,
+    },
+
+    /// Browser-driven capture: drive a headless browser through a capturing proxy.
+    ///
+    /// Reaches what the static crawler cannot — the routes and XHR endpoints a single-page
+    /// app only exposes after its JavaScript runs. It navigates the seeds, waits for each
+    /// page to settle, and follows the rendered DOM's same-origin, in-scope links to a
+    /// shallow depth; every request the browser makes is captured into the project. It does
+    /// not submit forms and does not log in.
+    Browse {
+        /// Project directory.
+        path: PathBuf,
+
+        /// A starting URL. Repeatable. When none are given, in-scope URLs the project
+        /// already captured are used as seeds.
+        #[arg(long = "url")]
+        url: Vec<String>,
+
+        /// The most pages to navigate.
+        #[arg(long, default_value_t = 40)]
+        max_pages: usize,
+
+        /// How deep the rendered DOM's links are followed from a seed.
+        #[arg(long, default_value_t = 2)]
+        max_depth: usize,
+
+        /// Milliseconds to wait after each page loads, for its XHR/fetch to complete.
+        #[arg(long, default_value_t = 2500)]
+        settle: u64,
+
+        /// Show the browser window instead of running it headless.
+        #[arg(long)]
+        show: bool,
+
+        /// Do not verify the target's TLS certificate.
+        #[arg(long)]
+        insecure: bool,
     },
 
     /// Out-of-band collaborator: confirm blind vulnerabilities via callbacks you catch.
@@ -1826,6 +1864,24 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
                 json: cli.json,
             })
         }
+        Command::Browse {
+            path,
+            url,
+            max_pages,
+            max_depth,
+            settle,
+            show,
+            insecure,
+        } => browse::run(browse::Args {
+            project: path.as_path(),
+            seeds: url,
+            max_pages: *max_pages,
+            max_depth: *max_depth,
+            settle_ms: *settle,
+            show: *show,
+            insecure: *insecure,
+            json: cli.json,
+        }),
         Command::Oob(OobCommand::Serve {
             listen,
             dns,
