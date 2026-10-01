@@ -827,7 +827,10 @@ enum Command {
 
         /// Record a login: open a visible browser at the --url login page, wait for you to
         /// log in by hand, and save the resulting session as this identity (created or
-        /// updated). No crawling — this only captures the session for later --identity use.
+        /// updated). No crawling — this captures the session for later --identity use, and
+        /// notes the login request so `identity renew` can replay it to refresh the session.
+        /// The session is written to the project file in cleartext, like every credential
+        /// (Nullhawk does not yet encrypt credentials at rest; the project file is sensitive).
         #[arg(long, value_name = "LABEL")]
         record_login: Option<String>,
 
