@@ -132,6 +132,7 @@ fn work_items(project: &Project, selection: &Selection) -> Result<Vec<Hypothesis
             .chain(crate::checks::traversal::suspect(exchange))
             .chain(crate::checks::ssti::suspect(exchange))
             .chain(crate::checks::ssrf::suspect(exchange))
+            .chain(crate::checks::ssrf_redirect::suspect(exchange))
             .chain(crate::checks::cmdi::suspect(exchange))
             .chain(crate::checks::cache_poison::suspect(exchange))
             .chain(crate::checks::crlf::suspect(exchange))

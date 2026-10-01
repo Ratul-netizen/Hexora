@@ -21,6 +21,7 @@ pub mod reflection;
 pub mod smuggling;
 pub mod sqli;
 pub mod ssrf;
+pub mod ssrf_redirect;
 pub mod ssti;
 pub mod stored_xss;
 pub mod traversal;
