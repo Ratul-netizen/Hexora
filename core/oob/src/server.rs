@@ -89,7 +89,54 @@ async fn handle(mut stream: TcpStream, peer: SocketAddr, store: Store) -> std::i
             at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         });
     }
+    // A redirect hop. `?to=<url>` makes this callback answer 302 to that URL — the one
+    // thing needed to test whether a server-side fetch *follows* a redirect off the host
+    // it was pointed at, which is the open-redirect→SSRF primitive. The interaction is
+    // recorded above first, so the callback proving the fetch reached here is never lost to
+    // the redirect.
+    if let Some(target) = query_param(&path, "to") {
+        return redirect(&mut stream, &percent_decode(&target)).await;
+    }
     respond(&mut stream, "text/plain", "nullhawk-oob\n").await
+}
+
+/// Writes a 302 to `location` and closes.
+async fn redirect(stream: &mut TcpStream, location: &str) -> std::io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
+/// Decodes `%XX` escapes in a query value. A server-side HTTP client may or may not encode
+/// the redirect target it was handed, so the collaborator accepts both and decodes if it
+/// must. Leaves anything that is not a valid escape exactly as written.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(hi * 16 + lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Reads the request head (up to the blank line), bounded so a slow or hostile peer cannot
@@ -161,6 +208,27 @@ mod tests {
             Some("abc")
         );
         assert_eq!(query_param("/", "token"), None);
+    }
+
+    #[test]
+    fn a_redirect_target_is_read_whether_or_not_the_client_encoded_it() {
+        // A fetch that was pointed at `/<token>?to=<url>` arrives either way, depending on
+        // whether the server-side HTTP client re-encoded the target. Both must work.
+        let plain = query_param("/tok?to=http://169.254.169.254/latest/meta-data/", "to").unwrap();
+        assert_eq!(
+            percent_decode(&plain),
+            "http://169.254.169.254/latest/meta-data/"
+        );
+
+        let encoded =
+            query_param("/tok?to=http%3A%2F%2F169.254.169.254%2Flatest%2F", "to").unwrap();
+        assert_eq!(percent_decode(&encoded), "http://169.254.169.254/latest/");
+    }
+
+    #[test]
+    fn percent_decode_leaves_a_stray_percent_alone() {
+        assert_eq!(percent_decode("100%done"), "100%done");
+        assert_eq!(percent_decode("a%2z"), "a%2z");
     }
 
     #[test]
