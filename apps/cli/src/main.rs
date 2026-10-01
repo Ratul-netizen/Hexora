@@ -825,6 +825,16 @@ enum Command {
         #[arg(long)]
         identity: Option<String>,
 
+        /// Record a login: open a visible browser at the --url login page, wait for you to
+        /// log in by hand, and save the resulting session as this identity (created or
+        /// updated). No crawling — this only captures the session for later --identity use.
+        #[arg(long, value_name = "LABEL")]
+        record_login: Option<String>,
+
+        /// How long to wait for a login when recording one, in seconds.
+        #[arg(long, default_value_t = 180)]
+        login_timeout: u64,
+
         /// Show the browser window instead of running it headless.
         #[arg(long)]
         show: bool,
@@ -1877,6 +1887,8 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             max_depth,
             settle,
             identity,
+            record_login,
+            login_timeout,
             show,
             insecure,
         } => browse::run(browse::Args {
@@ -1886,6 +1898,8 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             max_depth: *max_depth,
             settle_ms: *settle,
             identity: identity.as_deref(),
+            record_login: record_login.as_deref(),
+            login_timeout: *login_timeout,
             show: *show,
             insecure: *insecure,
             json: cli.json,

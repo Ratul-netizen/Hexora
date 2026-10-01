@@ -20,11 +20,11 @@
 //! It does not submit forms (a POST is state-changing) and it does not log in (crawling as
 //! an identity is a later step); both are stated gaps rather than quiet ones.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nullhawk_browser::{Browser, Cdp, LaunchOptions};
 use nullhawk_http::{TcpTransport, TlsConfig};
@@ -50,6 +50,10 @@ pub struct Args<'a> {
     pub settle_ms: u64,
     /// Crawl as this identity (label or id): its cookie session is injected into the browser.
     pub identity: Option<&'a str>,
+    /// Record a login: capture the session from a hand-driven login into this identity.
+    pub record_login: Option<&'a str>,
+    /// Seconds to wait for a login when recording one.
+    pub login_timeout: u64,
     /// Show the browser window instead of running it headless.
     pub show: bool,
     /// Do not verify the target's TLS certificate (self-signed test targets).
@@ -129,6 +133,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
         .map_err(|e| NullhawkError::Internal(format!("failed to start the async runtime: {e}")))?;
 
     let json = args.json;
+    let record_label = args.record_login.map(str::to_string);
     let outcome = runtime.block_on(async move {
         let config = ProxyConfig {
             // An ephemeral loopback port: the browser is the only client, and it is told
@@ -143,15 +148,115 @@ pub fn run(args: Args<'_>) -> Result<()> {
             let _ = server.serve().await;
         });
 
-        let result = drive(&scope, addr, &seeds, &args, cookie_header.as_deref()).await;
+        // Two modes through the same captured proxy: record a login (wait for a session), or
+        // crawl (navigate and follow links).
+        let result = if args.record_login.is_some() {
+            capture_login(addr, &seeds, &args)
+                .await
+                .map(Outcome::Captured)
+        } else {
+            drive(&scope, addr, &seeds, &args, cookie_header.as_deref())
+                .await
+                .map(Outcome::Crawled)
+        };
 
-        // The proxy's only job was to capture this browse; nothing else uses it.
+        // The proxy's only job was this browse; nothing else uses it.
         proxy_task.abort();
         result
     })?;
 
     let captured = counter.recorded();
-    report(&outcome, captured, json);
+    match outcome {
+        Outcome::Crawled(browsed) => report(&browsed, captured, json),
+        Outcome::Captured(login) => {
+            // record_label is Some here: capture_login runs only when --record-login was given.
+            save_login(&project, &record_label.unwrap_or_default(), login, json)?
+        }
+    }
+    Ok(())
+}
+
+/// What a browse produced: a crawl's tally, or a recorded login's captured session.
+enum Outcome {
+    Crawled(Browsed),
+    Captured(Option<CapturedLogin>),
+}
+
+/// A session captured from a hand-driven login.
+struct CapturedLogin {
+    /// The full `Cookie:` header value for the in-scope cookies the browser held.
+    cookie_header: String,
+    /// The cookie names that appeared or changed during the login — the likely session.
+    session_names: Vec<String>,
+}
+
+/// Saves a captured login as a cookie identity, creating it or updating one with the same
+/// label. The session cookies are the ones that changed during the login, so cross-identity
+/// testing compares exactly the value that says who the caller is.
+fn save_login(
+    project: &nullhawk_storage::Project,
+    label: &str,
+    login: Option<CapturedLogin>,
+    json: bool,
+) -> Result<()> {
+    let Some(login) = login else {
+        if json {
+            println!("{}", serde_json::json!({ "captured": false }));
+        } else {
+            println!(
+                "No session was captured — no cookie appeared or changed on an in-scope host \
+                 within the timeout. Log in before it elapses, or raise --login-timeout."
+            );
+        }
+        return Ok(());
+    };
+
+    let store = project.identities();
+    // Reuse an existing identity with this label — keeping its id, privilege, ownership and
+    // extra headers — so a re-recorded login refreshes the session in place rather than
+    // leaving two identities that differ only in cookie. A brand-new one is a logged-in user.
+    let identity = match crate::identity::resolve(&store, label) {
+        Ok(existing) => Identity {
+            credential: Credential::Cookie {
+                value: nullhawk_types::redact::Secret::new(login.cookie_header),
+            },
+            session_cookies: login.session_names.clone(),
+            ..existing
+        },
+        Err(_) => Identity {
+            id: nullhawk_types::ids::IdentityId::new(),
+            label: label.to_string(),
+            privilege: nullhawk_types::identity::PrivilegeLevel::User,
+            credential: Credential::Cookie {
+                value: nullhawk_types::redact::Secret::new(login.cookie_header),
+            },
+            extra_headers: Vec::new(),
+            owned_object_ids: Vec::new(),
+            session_cookies: login.session_names.clone(),
+        },
+    };
+    store.put(&identity)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "captured": true,
+                "identity": label,
+                "session_cookies": login.session_names,
+            })
+        );
+    } else {
+        println!(
+            "Captured a session for `{label}` ({}). Crawl behind the login with `nullhawk \
+             browse <project> --identity {label}` or test authorization with it.",
+            if login.session_names.is_empty() {
+                "no session cookie identified".to_string()
+            } else {
+                format!("session cookie(s): {})", login.session_names.join(", "))
+            },
+        );
+    }
     Ok(())
 }
 
@@ -270,6 +375,123 @@ async fn inject_cookies(cdp: &mut Cdp, cookie_header: &str, origins: &[String]) 
                 .await;
         }
     }
+}
+
+/// Opens a visible browser at the login page and waits for a session to appear.
+///
+/// Always visible — a login is something a person does — and it watches the browser's own
+/// cookie store rather than parsing traffic, so whatever the login sets (a cookie from a
+/// redirect, a header, or script) is seen the same way. A cookie that appears or changes
+/// value on an in-scope host is taken to be the session.
+async fn capture_login(
+    proxy: SocketAddr,
+    seeds: &[String],
+    args: &Args<'_>,
+) -> Result<Option<CapturedLogin>> {
+    let login_url = seeds.first().ok_or_else(|| {
+        NullhawkError::invalid_input("--url", "recording a login needs the login page's URL")
+    })?;
+    let browser = Browser::launch_with(&LaunchOptions {
+        // A login is driven by a person, so the window must be visible whatever --show says.
+        headless: false,
+        proxy: Some(addr_string(proxy)),
+        ignore_certificate_errors: true,
+    })?;
+    let mut cdp = browser.connect().await?;
+    let hosts = login_hosts(seeds);
+    let _ = cdp.navigate(login_url, Duration::from_secs(20)).await;
+    let baseline = read_cookies(&mut cdp, &hosts).await;
+
+    eprintln!(
+        "A browser window has opened at {login_url}. Log in there — waiting up to {}s for a \
+         session to appear.",
+        args.login_timeout
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(args.login_timeout);
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let now = read_cookies(&mut cdp, &hosts).await;
+        let changed: Vec<String> = now
+            .iter()
+            .filter(|(name, value)| baseline.get(name.as_str()) != Some(value))
+            .map(|(name, _)| name.clone())
+            .collect();
+        if !changed.is_empty() {
+            let cookie_header = cookie_header_from(&now);
+            drop(browser);
+            return Ok(Some(CapturedLogin {
+                cookie_header,
+                session_names: changed,
+            }));
+        }
+    }
+
+    // Timed out. If the browser holds in-scope cookies anyway, capture them — better than
+    // nothing — but single out no name as the session, since none was seen to change.
+    let now = read_cookies(&mut cdp, &hosts).await;
+    drop(browser);
+    if now.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(CapturedLogin {
+            cookie_header: cookie_header_from(&now),
+            session_names: Vec::new(),
+        }))
+    }
+}
+
+/// The in-scope cookies the browser holds, name → value.
+async fn read_cookies(cdp: &mut Cdp, hosts: &[String]) -> BTreeMap<String, String> {
+    let _ = cdp.call("Network.enable", serde_json::json!({})).await;
+    let mut cookies = BTreeMap::new();
+    let Ok(value) = cdp
+        .call("Network.getAllCookies", serde_json::json!({}))
+        .await
+    else {
+        return cookies;
+    };
+    let Some(list) = value.get("cookies").and_then(|c| c.as_array()) else {
+        return cookies;
+    };
+    for cookie in list {
+        let name = cookie.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let val = cookie.get("value").and_then(|v| v.as_str()).unwrap_or("");
+        let domain = cookie
+            .get("domain")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim_start_matches('.');
+        if !name.is_empty()
+            && !domain.is_empty()
+            && hosts.iter().any(|h| h == domain || h.ends_with(domain))
+        {
+            cookies.insert(name.to_string(), val.to_string());
+        }
+    }
+    cookies
+}
+
+/// A `Cookie:` header value assembled from a cookie map.
+fn cookie_header_from(cookies: &BTreeMap<String, String>) -> String {
+    cookies
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// The distinct hosts the seed URLs name — whose cookies the login's session is among.
+fn login_hosts(seeds: &[String]) -> Vec<String> {
+    let mut hosts = Vec::new();
+    for seed in seeds {
+        if let Ok((service, _)) = HttpService::parse_url(seed) {
+            if !hosts.contains(&service.host) {
+                hosts.push(service.host);
+            }
+        }
+    }
+    hosts
 }
 
 /// The distinct origins (`scheme://host:port/`) the seed URLs name, to plant the session on.
@@ -396,6 +618,29 @@ mod tests {
             "https://app.example.com/a",
             "http://app.example.com/a"
         ));
+    }
+
+    #[test]
+    fn a_cookie_header_is_assembled_in_a_stable_order() {
+        let mut cookies = BTreeMap::new();
+        cookies.insert("session".to_string(), "abc".to_string());
+        cookies.insert("csrf".to_string(), "def".to_string());
+        // BTreeMap order is stable, so the same jar always yields the same header.
+        assert_eq!(cookie_header_from(&cookies), "csrf=def; session=abc");
+        assert_eq!(cookie_header_from(&BTreeMap::new()), "");
+    }
+
+    #[test]
+    fn login_hosts_are_the_distinct_seed_hosts() {
+        let hosts = login_hosts(&[
+            "https://app.example.com/login".into(),
+            "https://app.example.com/".into(),
+            "http://127.0.0.1:8000/signin".into(),
+        ]);
+        assert_eq!(
+            hosts,
+            vec!["app.example.com".to_string(), "127.0.0.1".to_string()]
+        );
     }
 
     #[test]
