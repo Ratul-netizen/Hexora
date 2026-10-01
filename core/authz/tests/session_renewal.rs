@@ -31,6 +31,7 @@ fn identity(cookie: &str) -> Identity {
         extra_headers: Vec::new(),
         owned_object_ids: Vec::new(),
         session_cookies: Vec::new(),
+        login_request: None,
     }
 }
 

@@ -154,6 +154,15 @@ pub struct Identity {
     /// manufactures an IDOR that is not there.
     #[serde(default)]
     pub session_cookies: Vec<String>,
+    /// The captured request that establishes this session — the recorded login.
+    ///
+    /// Set by `browse --record-login`. `identity renew` replays it to mint a fresh session
+    /// without a second hand-login, which is also what lets a long scan re-authenticate
+    /// when the session expires mid-run. `None` for an identity whose session was not
+    /// recorded as a replayable request — entered by hand, or set by script with no
+    /// `Set-Cookie` response to re-run.
+    #[serde(default)]
+    pub login_request: Option<crate::ids::RequestId>,
 }
 
 impl Identity {
@@ -167,6 +176,7 @@ impl Identity {
             extra_headers: Vec::new(),
             owned_object_ids: Vec::new(),
             session_cookies: Vec::new(),
+            login_request: None,
         }
     }
 
@@ -182,6 +192,7 @@ impl Identity {
             extra_headers: Vec::new(),
             owned_object_ids: Vec::new(),
             session_cookies: Vec::new(),
+            login_request: None,
         }
     }
 

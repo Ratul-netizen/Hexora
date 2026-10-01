@@ -1119,11 +1119,13 @@ enum IdentityCommand {
         /// The identity, by label or id.
         who: String,
 
-        /// The captured login/refresh request to replay, from `nullhawk history`.
+        /// The captured login/refresh request to replay, from `nullhawk history`. Defaults
+        /// to the login `browse --record-login` recorded for this identity.
         #[arg(long, value_name = "ID")]
-        from: String,
+        from: Option<String>,
 
-        /// Read the new session from this cookie in the response's Set-Cookie.
+        /// Read the new session from this cookie in the response's Set-Cookie. Defaults to
+        /// the identity's recorded session cookie.
         #[arg(long, value_name = "NAME")]
         cookie: Option<String>,
 
@@ -2062,7 +2064,7 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             identity::renew(identity::RenewArgs {
                 project: path,
                 who,
-                from,
+                from: from.as_deref(),
                 cookie: cookie.as_deref(),
                 header: header.as_deref(),
                 json_field: json_field.as_deref(),

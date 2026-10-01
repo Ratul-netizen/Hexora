@@ -146,15 +146,16 @@ impl IdentityStore {
         conn.execute(
             "INSERT INTO identities
                 (id, label, privilege, credential_json, extra_headers, owned_object_ids,
-                 session_cookies_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 session_cookies_json, login_request, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                 label = excluded.label,
                 privilege = excluded.privilege,
                 credential_json = excluded.credential_json,
                 extra_headers = excluded.extra_headers,
                 owned_object_ids = excluded.owned_object_ids,
-                session_cookies_json = excluded.session_cookies_json",
+                session_cookies_json = excluded.session_cookies_json,
+                login_request = excluded.login_request",
             params![
                 identity.id.to_string(),
                 identity.label,
@@ -163,6 +164,7 @@ impl IdentityStore {
                 extra_headers,
                 owned,
                 session_cookies,
+                identity.login_request.map(|id| id.to_string()),
                 crate::traffic::now(),
             ],
         )?;
@@ -174,7 +176,7 @@ impl IdentityStore {
         let conn = self.db.connection()?;
         let mut statement = conn.prepare(
             "SELECT id, label, privilege, credential_json, extra_headers, owned_object_ids,
-                    session_cookies_json
+                    session_cookies_json, login_request
              FROM identities ORDER BY id",
         )?;
         let rows = statement.query_map([], |row| {
@@ -186,6 +188,7 @@ impl IdentityStore {
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?;
 
@@ -247,8 +250,21 @@ impl IdentityStore {
     }
 }
 
-fn decode(row: (String, String, String, String, String, String, String)) -> Result<Identity> {
-    let (id, label, privilege, credential, extra_headers, owned, session_cookies) = row;
+#[allow(clippy::type_complexity)]
+fn decode(
+    row: (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+    ),
+) -> Result<Identity> {
+    let (id, label, privilege, credential, extra_headers, owned, session_cookies, login_request) =
+        row;
 
     let stored: StoredCredential =
         serde_json::from_str(&credential).map_err(|e| StorageError::Decode {
@@ -283,6 +299,13 @@ fn decode(row: (String, String, String, String, String, String, String)) -> Resu
         extra_headers,
         owned_object_ids,
         session_cookies,
+        login_request: login_request
+            .map(|raw| raw.parse())
+            .transpose()
+            .map_err(|e| StorageError::Decode {
+                entity: "login request id",
+                reason: format!("{e}"),
+            })?,
     })
 }
 
@@ -335,6 +358,22 @@ mod tests {
             Credential::Bearer { token } => assert_eq!(token.expose(), TEST_TOKEN),
             other => panic!("credential changed kind on the way back: {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_recorded_login_request_round_trips_and_defaults_to_none() {
+        let store = store();
+        // Default: an identity with no recorded login reads back as None.
+        store.put(&Identity::bearer("Plain", TEST_TOKEN)).unwrap();
+        let plain = store.by_label("Plain").unwrap();
+        assert_eq!(plain.login_request, None);
+
+        // Set: the recorded login survives the round trip.
+        let login = nullhawk_types::ids::RequestId::new();
+        let mut identity = Identity::bearer("Recorded", TEST_TOKEN);
+        identity.login_request = Some(login);
+        store.put(&identity).unwrap();
+        assert_eq!(store.get(identity.id).unwrap().login_request, Some(login));
     }
 
     #[test]
