@@ -8,6 +8,7 @@
 pub mod access;
 pub mod auth;
 pub mod cache;
+pub mod cache_deception;
 pub mod cache_poison;
 pub mod cmdi;
 pub mod crlf;
