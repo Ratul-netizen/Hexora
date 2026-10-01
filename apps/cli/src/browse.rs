@@ -34,6 +34,7 @@ use nullhawk_proxy::{
 use nullhawk_storage::repository::{Cursor, Limit};
 use nullhawk_types::error::{NullhawkError, Result};
 use nullhawk_types::http::HttpService;
+use nullhawk_types::identity::{Credential, Identity};
 use nullhawk_types::scope::Scope;
 
 /// Options for `nullhawk browse`.
@@ -47,6 +48,8 @@ pub struct Args<'a> {
     pub max_depth: usize,
     /// Milliseconds to wait after each page loads, for its XHR/fetch to complete.
     pub settle_ms: u64,
+    /// Crawl as this identity (label or id): its cookie session is injected into the browser.
+    pub identity: Option<&'a str>,
     /// Show the browser window instead of running it headless.
     pub show: bool,
     /// Do not verify the target's TLS certificate (self-signed test targets).
@@ -82,6 +85,30 @@ pub fn run(args: Args<'_>) -> Result<()> {
         return nothing_to_browse(args.json);
     }
 
+    // The identity to carry into the browser, if one was named. Only a cookie session has a
+    // browser equivalent — a bearer or header credential does not — so a non-cookie identity
+    // is refused here rather than silently crawling anonymously.
+    let cookie_header = match args.identity {
+        Some(who) => {
+            let identity = crate::identity::resolve(&project.identities(), who)?;
+            match cookie_header_of(&identity) {
+                Some(header) => Some(header),
+                None => {
+                    return Err(NullhawkError::invalid_input(
+                        "--identity",
+                        format!(
+                            "{} is not a cookie-based identity, and only a cookie session can \
+                             be carried into a browser. Use `nullhawk crawl --identity` for a \
+                             bearer or header identity",
+                            identity.label
+                        ),
+                    ))
+                }
+            }
+        }
+        None => None,
+    };
+
     let ca_dir = crate::proxy::resolve_ca_dir(None)?;
     let ca = Arc::new(CertificateAuthority::load_or_create(&ca_dir)?);
     let transport = if args.insecure {
@@ -116,7 +143,7 @@ pub fn run(args: Args<'_>) -> Result<()> {
             let _ = server.serve().await;
         });
 
-        let result = drive(&scope, addr, &seeds, &args).await;
+        let result = drive(&scope, addr, &seeds, &args, cookie_header.as_deref()).await;
 
         // The proxy's only job was to capture this browse; nothing else uses it.
         proxy_task.abort();
@@ -141,6 +168,7 @@ async fn drive(
     proxy: SocketAddr,
     seeds: &[String],
     args: &Args<'_>,
+    inject: Option<&str>,
 ) -> Result<Browsed> {
     let browser = Browser::launch_with(&LaunchOptions {
         headless: !args.show,
@@ -150,6 +178,12 @@ async fn drive(
         ignore_certificate_errors: true,
     })?;
     let mut cdp = browser.connect().await?;
+
+    // Plant the identity's session cookies before the first navigation, on every origin the
+    // seeds name, so a page that needs a session is fetched as that principal from the start.
+    if let Some(cookie_header) = inject {
+        inject_cookies(&mut cdp, cookie_header, &seed_origins(seeds)).await;
+    }
 
     let mut queue: VecDeque<(String, usize)> = seeds.iter().map(|url| (url.clone(), 0)).collect();
     let mut visited: HashSet<String> = HashSet::new();
@@ -201,6 +235,56 @@ async fn rendered_links(cdp: &mut Cdp) -> Vec<String> {
             .unwrap_or_default(),
         Err(_) => Vec::new(),
     }
+}
+
+/// The `Cookie:` header value for a cookie identity, or None for any other kind — only a
+/// cookie session has a browser equivalent.
+fn cookie_header_of(identity: &Identity) -> Option<String> {
+    match &identity.credential {
+        Credential::Cookie { value } => Some(value.expose().clone()),
+        _ => None,
+    }
+}
+
+/// Plants each cookie from a `Cookie:` header value into the browser, for every given
+/// origin. The `url` form of `setCookie` is used rather than a bare domain: it is the one
+/// that reliably binds a cookie to an exact origin, including a loopback IP and port, which
+/// a bare `domain` does not. The Network domain is enabled first so the store exists before
+/// any navigation.
+async fn inject_cookies(cdp: &mut Cdp, cookie_header: &str, origins: &[String]) {
+    let _ = cdp.call("Network.enable", serde_json::json!({})).await;
+    for pair in cookie_header.split(';') {
+        let Some((name, value)) = pair.trim().split_once('=') else {
+            continue;
+        };
+        for origin in origins {
+            let _ = cdp
+                .call(
+                    "Network.setCookie",
+                    serde_json::json!({
+                        "name": name.trim(),
+                        "value": value.trim(),
+                        "url": origin,
+                    }),
+                )
+                .await;
+        }
+    }
+}
+
+/// The distinct origins (`scheme://host:port/`) the seed URLs name, to plant the session on.
+fn seed_origins(seeds: &[String]) -> Vec<String> {
+    let mut origins = Vec::new();
+    for seed in seeds {
+        if let Ok((service, _)) = HttpService::parse_url(seed) {
+            let scheme = if service.secure { "https" } else { "http" };
+            let origin = format!("{scheme}://{}:{}/", service.host, service.port);
+            if !origins.contains(&origin) {
+                origins.push(origin);
+            }
+        }
+    }
+    origins
 }
 
 /// Whether two URLs share a scheme, host and port — the boundary a crawl should not cross
@@ -312,6 +396,23 @@ mod tests {
             "https://app.example.com/a",
             "http://app.example.com/a"
         ));
+    }
+
+    #[test]
+    fn seed_origins_are_distinct_scheme_host_port_roots() {
+        // The session is planted per origin; a path or a repeat must not change or multiply it.
+        let origins = seed_origins(&[
+            "https://app.example.com/dashboard".into(),
+            "https://app.example.com/settings".into(),
+            "http://127.0.0.1:8000/x".into(),
+        ]);
+        assert_eq!(
+            origins,
+            vec![
+                "https://app.example.com:443/".to_string(),
+                "http://127.0.0.1:8000/".to_string(),
+            ]
+        );
     }
 
     #[test]

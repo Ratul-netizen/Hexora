@@ -819,6 +819,12 @@ enum Command {
         #[arg(long, default_value_t = 2500)]
         settle: u64,
 
+        /// Crawl as this identity (label or id), reaching behind the login. Its session
+        /// cookie is injected into the browser, so pages that need a session are captured
+        /// as that principal. Only cookie-based identities can be carried into a browser.
+        #[arg(long)]
+        identity: Option<String>,
+
         /// Show the browser window instead of running it headless.
         #[arg(long)]
         show: bool,
@@ -1870,6 +1876,7 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             max_pages,
             max_depth,
             settle,
+            identity,
             show,
             insecure,
         } => browse::run(browse::Args {
@@ -1878,6 +1885,7 @@ fn run(cli: &Cli) -> nullhawk_types::Result<()> {
             max_pages: *max_pages,
             max_depth: *max_depth,
             settle_ms: *settle,
+            identity: identity.as_deref(),
             show: *show,
             insecure: *insecure,
             json: cli.json,
