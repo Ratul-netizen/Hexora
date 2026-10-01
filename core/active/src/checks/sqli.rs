@@ -10,6 +10,8 @@
 //! error-based:   value'   → a database error surfaces
 //!                value''  → the doubled quote balances, and the error does not.
 //!                The error follows the quote, not the request. That is the tell.
+//!                Where the stack hides the database's message behind a bare 500, the
+//!                status toggling with the quote is reported as a lead, not a finding.
 //!
 //! boolean-based: value' AND '1'='1   → answers like the original
 //!                value' AND '1'='2   → answers differently
@@ -86,7 +88,7 @@ const SETTLES: &str = "input.sqli";
 const INFO: DetectorInfo = DetectorInfo {
     id: DetectorId("input.sqli"),
     name: "SQL injection",
-    version: "1.2.0",
+    version: "1.3.0",
     about: "whether an input is concatenated into a SQL query — by the error an \
             unbalanced quote raises, or a boolean condition the response tracks",
     mode: DetectorMode::Active,
@@ -159,43 +161,58 @@ impl ActiveCheck for SqlInjection {
             Attempt::Failed(why) => return Ok(Verification::Inconclusive { why }),
         };
 
+        // A weaker lead kept aside: an error that tracks the quote but names no database.
+        // Returned only if nothing stronger confirms below, so a boolean/timing/OOB hit
+        // always wins over it.
+        let mut generic_lead: Option<Verification> = None;
+
         // ---- error-based ----
         if budget.per_hypothesis >= 2 {
             let quoted = match probe(subject, lab, &slot, &format!("{base}'")).await {
                 Attempt::Answered(a) => a,
                 Attempt::Failed(why) => return Ok(Verification::Inconclusive { why }),
             };
+            // A balanced control is only worth a request when the single quote actually
+            // broke something — a named database error, or a generic one. A clean response
+            // needs no control.
+            let balanced = if budget.per_hypothesis >= 3
+                && (first_signature(&quoted.body).is_some() || generic_error(&quoted))
+            {
+                match probe(subject, lab, &slot, &format!("{base}''")).await {
+                    Attempt::Answered(a) => Some(a),
+                    Attempt::Failed(_) => None,
+                }
+            } else {
+                None
+            };
+
             if let Some(hit) = first_signature(&quoted.body) {
                 // Confirm the quote is the cause: a doubled quote balances the string, and
                 // a genuine SQL error follows the syntax, not the request.
-                if budget.per_hypothesis >= 3 {
-                    if let Attempt::Answered(balanced) =
-                        probe(subject, lab, &slot, &format!("{base}''")).await
-                    {
-                        if first_signature(&balanced.body).is_none() {
-                            return Ok(Verification::Reproduced {
-                                note: format!(
-                                    "an unbalanced quote in {} raised a {} error, and a \
-                                     balanced pair of quotes did not — the error follows \
-                                     the SQL syntax the input broke",
-                                    describe(&slot),
-                                    hit.engine,
-                                ),
-                                evidence: vec![
-                                    from_exchange(subject),
-                                    excerpt_of(&quoted, &hit),
-                                    Evidence::Comparison {
-                                        baseline: balanced.request,
-                                        variant: quoted.request,
-                                        difference: format!(
-                                            "a single quote produced a {} error; a doubled \
-                                             quote did not",
-                                            hit.engine
-                                        ),
-                                    },
-                                ],
-                            });
-                        }
+                if let Some(balanced) = &balanced {
+                    if first_signature(&balanced.body).is_none() {
+                        return Ok(Verification::Reproduced {
+                            note: format!(
+                                "an unbalanced quote in {} raised a {} error, and a \
+                                 balanced pair of quotes did not — the error follows \
+                                 the SQL syntax the input broke",
+                                describe(&slot),
+                                hit.engine,
+                            ),
+                            evidence: vec![
+                                from_exchange(subject),
+                                excerpt_of(&quoted, &hit),
+                                Evidence::Comparison {
+                                    baseline: balanced.request,
+                                    variant: quoted.request,
+                                    difference: format!(
+                                        "a single quote produced a {} error; a doubled \
+                                         quote did not",
+                                        hit.engine
+                                    ),
+                                },
+                            ],
+                        });
                     }
                 }
                 return Ok(Verification::Supported {
@@ -207,6 +224,42 @@ impl ActiveCheck for SqlInjection {
                     ),
                     evidence: vec![from_exchange(subject), excerpt_of(&quoted, &hit)],
                 });
+            }
+
+            // No named database in the error. A *generic* error that appears only with the
+            // unbalanced quote is weaker — an application errors for many reasons — but an
+            // error that tracks quote balance is the shape of a broken SQL string, and on a
+            // stack that hides its database's error text (a 500 and nothing more) it may be
+            // all that shows. Kept as a lead; a boolean or timing confirmation below wins.
+            if generic_error(&quoted) {
+                if let Some(balanced) = &balanced {
+                    if !generic_error(balanced) {
+                        generic_lead = Some(Verification::Supported {
+                            support: Support::Distinctive,
+                            note: format!(
+                                "an unbalanced quote in {} produced a generic error (a {} \
+                                 response, no database name), and a balanced pair of quotes \
+                                 did not — the error tracks the quote, which is the shape of \
+                                 a broken SQL string. The database may be hiding its own \
+                                 error text; confirm by hand",
+                                describe(&slot),
+                                quoted.status,
+                            ),
+                            evidence: vec![
+                                from_exchange(subject),
+                                Evidence::Comparison {
+                                    baseline: balanced.request,
+                                    variant: quoted.request,
+                                    difference: format!(
+                                        "a single quote answered {} and a doubled quote \
+                                         answered {}",
+                                        quoted.status, balanced.status
+                                    ),
+                                },
+                            ],
+                        });
+                    }
+                }
             }
         }
 
@@ -273,6 +326,12 @@ impl ActiveCheck for SqlInjection {
             if let Some(verdict) = out_of_band(subject, lab, &slot, &base, canary, budget).await {
                 return Ok(verdict);
             }
+        }
+
+        // Nothing confirmed. If a generic error tracked the quote, surface it as the lead
+        // it is rather than refuting outright.
+        if let Some(lead) = generic_lead {
+            return Ok(lead);
         }
 
         Ok(Verification::Refuted {
@@ -435,6 +494,29 @@ fn sleep_payloads(base: &str, secs: u64) -> Vec<(&'static str, String)> {
             format!("{base}' WAITFOR DELAY '0:0:{secs}'-- -"),
         ),
     ]
+}
+
+/// Whether a response looks like an error, without naming a database — a 5xx status, or a
+/// SQL-shaped error phrase that the signature list does not already cover. Used only in a
+/// quote-balance *differential*: an error that toggles with the quote is suggestive even
+/// when the stack hides its database's own message behind a bare 500. Bare "error" is
+/// excluded deliberately — it appears on far too many ordinary pages.
+fn generic_error(answer: &Answer) -> bool {
+    if (500..600).contains(&answer.status) {
+        return true;
+    }
+    let body = String::from_utf8_lossy(&answer.body).to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "syntax error",
+        "unterminated",
+        "unclosed quotation mark",
+        "quoted string not properly terminated",
+        "unexpected end of sql",
+        "sqlexception",
+        "sqlstate",
+        "odbc",
+    ];
+    MARKERS.iter().any(|m| body.contains(m))
 }
 
 /// Whether a probe cleared the baseline by most of the delay it asked for — the bar a
@@ -872,6 +954,31 @@ mod tests {
         assert!(!slept(80, 380, d));
         // A slow endpoint (baseline 1900ms) is not itself a sleep.
         assert!(!slept(1900, 2000, d));
+    }
+
+    #[test]
+    fn a_generic_error_is_a_5xx_or_a_sql_shaped_phrase_never_bare_error() {
+        let mk = |status: u16, body: &str| Answer {
+            request: nullhawk_types::ids::RequestId::new(),
+            status,
+            body: body.as_bytes().to_vec(),
+        };
+        // The ginandjuice.shop shape: a bare 500 with no database name.
+        assert!(generic_error(&mk(500, "<h1>Error</h1>")));
+        // SQL-shaped phrases the signature list does not already cover.
+        assert!(generic_error(&mk(
+            200,
+            "Warning: unterminated quoted string"
+        )));
+        assert!(generic_error(&mk(200, "System.Data.SqlException thrown")));
+        // Bare "error" on an ordinary page must NOT trip it — the differential guards the
+        // 5xx case, but a 200 "Error 404" page is not a SQL error.
+        assert!(!generic_error(&mk(200, "Error 404: page not found")));
+        assert!(!generic_error(&mk(404, "not found")));
+        assert!(!generic_error(&mk(
+            200,
+            "Welcome to MySQL Workbench downloads"
+        )));
     }
 
     #[test]
