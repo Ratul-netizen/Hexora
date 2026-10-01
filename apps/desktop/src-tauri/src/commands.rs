@@ -2195,6 +2195,7 @@ pub fn identity_add(
         // The window has no field for these yet, so a cookie credential declared here
         // is compared whole — which is the CLI's behaviour before `--session-cookie`.
         session_cookies: Vec::new(),
+        login_request: None,
     };
 
     let project = open(&state)?;

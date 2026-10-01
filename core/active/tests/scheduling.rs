@@ -355,6 +355,7 @@ fn cookie_identity(label: &str, jar: &str, session: &[&str]) -> nullhawk_types::
         extra_headers: Vec::new(),
         owned_object_ids: Vec::new(),
         session_cookies: session.iter().map(|s| s.to_string()).collect(),
+        login_request: None,
     }
 }
 

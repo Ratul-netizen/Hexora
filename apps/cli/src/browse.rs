@@ -220,6 +220,12 @@ fn save_login(
     };
 
     let store = project.identities();
+    let scope = project.settings().scope()?;
+    // The replayable login: the captured request whose response set the session. Stored on
+    // the identity so `identity renew <label>` can replay it to refresh the session without a
+    // second hand-login. A session a script set with no Set-Cookie response leaves none.
+    let replay = find_login_request(&project.traffic(), &scope, &login.session_names);
+
     // Reuse an existing identity with this label — keeping its id, privilege, ownership and
     // extra headers — so a re-recorded login refreshes the session in place rather than
     // leaving two identities that differ only in cookie. A brand-new one is a logged-in user.
@@ -229,6 +235,8 @@ fn save_login(
                 value: nullhawk_types::redact::Secret::new(login.cookie_header),
             },
             session_cookies: login.session_names.clone(),
+            // A fresh recording's login wins; an old one is kept only if none was found now.
+            login_request: replay.or(existing.login_request),
             ..existing
         },
         Err(_) => Identity {
@@ -241,17 +249,10 @@ fn save_login(
             extra_headers: Vec::new(),
             owned_object_ids: Vec::new(),
             session_cookies: login.session_names.clone(),
+            login_request: replay,
         },
     };
     store.put(&identity)?;
-
-    // The replayable login: the captured request whose response set the session. With it, the
-    // session can be refreshed later by replaying that one request — no second hand-login —
-    // through the existing `identity renew`. A session set by script rather than a Set-Cookie
-    // response has no such request, so none is offered; the identity above is still usable.
-    let scope = project.settings().scope()?;
-    let replay = find_login_request(&project.traffic(), &scope, &login.session_names);
-    let session_cookie = login.session_names.first().cloned();
 
     if json {
         println!(
@@ -273,14 +274,14 @@ fn save_login(
                 format!("session cookie(s): {}", login.session_names.join(", "))
             },
         );
-        if let (Some(id), Some(cookie)) = (replay, session_cookie) {
+        if replay.is_some() {
             println!();
             println!(
-                "The login was recorded for replay. When the session expires, refresh it \
-                 without logging in again:"
+                "The login was recorded. When the session expires, replay it to mint a fresh \
+                 one — no second log-in:"
             );
             println!(
-                "  nullhawk identity renew {} {label} --from {id} --cookie {cookie}",
+                "  nullhawk identity renew {} {label}",
                 project_path.display()
             );
         }

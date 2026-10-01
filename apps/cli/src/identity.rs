@@ -64,6 +64,8 @@ pub fn add(args: AddArgs<'_>) -> Result<()> {
         extra_headers: parse_headers(args.headers)?,
         owned_object_ids: args.owns.to_vec(),
         session_cookies: args.session_cookies.to_vec(),
+        // A hand-added identity has no recorded login to replay; `browse --record-login` sets it.
+        login_request: None,
     };
     store.put(&identity)?;
 
@@ -460,8 +462,8 @@ pub struct RenewArgs<'a> {
     pub project: &'a Path,
     /// The identity to update.
     pub who: &'a str,
-    /// The captured login/refresh request to replay, from `nullhawk history`.
-    pub from: &'a str,
+    /// The captured login/refresh request to replay. Defaults to the identity's recorded login.
+    pub from: Option<&'a str>,
     /// Read the new session from this cookie in the response's `Set-Cookie`.
     pub cookie: Option<&'a str>,
     /// Or from this response header's value.
@@ -489,19 +491,43 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
     let identity = resolve(&identities, args.who)?;
     let kind = credential_kind_key(&identity.credential)?;
 
-    let request_id: RequestId = args.from.parse().map_err(|e| {
-        NullhawkError::invalid_input("--from", format!("{} is not a request id: {e}", args.from))
-    })?;
+    // The request to replay: the one named, or the login `browse --record-login` recorded.
+    let request_id: RequestId = match args.from {
+        Some(raw) => raw.parse().map_err(|e| {
+            NullhawkError::invalid_input("--from", format!("{raw} is not a request id: {e}"))
+        })?,
+        None => identity.login_request.ok_or_else(|| {
+            NullhawkError::invalid_input(
+                "--from",
+                "this identity has no recorded login to replay. Record one with `nullhawk \
+                 browse <project> --record-login`, or name a captured login request with --from",
+            )
+        })?,
+    };
 
-    let sources = [args.cookie, args.header, args.json_field]
+    // Where the new token is: as named, or — when nothing was said and the identity has a
+    // recorded session cookie — that cookie.
+    let named = [args.cookie, args.header, args.json_field]
         .iter()
         .filter(|s| s.is_some())
         .count();
-    if sources != 1 {
+    if named > 1 {
         return Err(NullhawkError::invalid_input(
             "source",
-            "say where the new token is in the login response: exactly one of --cookie <name>, \
-             --header <name>, or --json-field <path>",
+            "name only one of --cookie, --header or --json-field",
+        ));
+    }
+    let cookie: Option<String> = if named == 0 {
+        identity.session_cookies.first().cloned()
+    } else {
+        args.cookie.map(str::to_string)
+    };
+    if cookie.is_none() && args.header.is_none() && args.json_field.is_none() {
+        return Err(NullhawkError::invalid_input(
+            "source",
+            "say where the new token is in the login response: --cookie <name>, --header <name>, \
+             or --json-field <path>. A login recorded with --record-login defaults to its \
+             session cookie",
         ));
     }
 
@@ -521,7 +547,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
             "Would replay {} {} and read the new session from {}.",
             draft.request.method,
             draft.request.url(),
-            describe_source(&args)
+            describe_source(cookie.as_deref(), args.header, args.json_field)
         );
         println!("Nothing was sent.");
         return Ok(());
@@ -534,7 +560,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
     let sent = runtime.block_on(repeater.send_as(&draft, SendAs::repeater()))?;
     let response = &sent.exchange.response;
 
-    let new_value = if let Some(name) = args.cookie {
+    let new_value = if let Some(name) = cookie.as_deref() {
         let value = cookie_value(&response.headers, name).ok_or_else(|| {
             NullhawkError::invalid_input(
                 "--cookie",
@@ -597,7 +623,7 @@ pub fn renew(args: RenewArgs<'_>) -> Result<()> {
         println!(
             "Renewed the session for `{}` from {} (status {}).",
             identity.label,
-            describe_source(&args),
+            describe_source(cookie.as_deref(), args.header, args.json_field),
             response.status
         );
         println!("The new credential is stored; the token itself is not printed.");
@@ -651,12 +677,12 @@ fn json_field(body: &[u8], path: &str) -> Option<String> {
 }
 
 /// How the new token is being read, for messages.
-fn describe_source(args: &RenewArgs<'_>) -> String {
-    if let Some(name) = args.cookie {
+fn describe_source(cookie: Option<&str>, header: Option<&str>, json_field: Option<&str>) -> String {
+    if let Some(name) = cookie {
         format!("the `{name}` cookie in the response")
-    } else if let Some(name) = args.header {
+    } else if let Some(name) = header {
         format!("the `{name}` response header")
-    } else if let Some(path) = args.json_field {
+    } else if let Some(path) = json_field {
         format!("`{path}` in the response body")
     } else {
         "the response".to_string()
