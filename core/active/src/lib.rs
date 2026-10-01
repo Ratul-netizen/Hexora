@@ -319,6 +319,7 @@ pub fn active_checks() -> Vec<Box<dyn ActiveCheck>> {
         Box::new(checks::auth::AuthEnforcement),
         Box::new(checks::access::AccessBypass),
         Box::new(checks::cache::CacheExposure),
+        Box::new(checks::cache_deception::CacheDeception),
         Box::new(checks::crossid::CrossIdentity),
         Box::new(checks::reflection::OriginReflection),
         Box::new(checks::echo::InputReflection),
