@@ -312,6 +312,12 @@ fn parse_status_line(
     let version = match version_token {
         "HTTP/1.1" => HttpVersion::Http11,
         "HTTP/1.0" => HttpVersion::Http10,
+        // A response captured over HTTP/2 or /3 is stored with that version on its status
+        // line. On a live HTTP/1 connection a server never sends these — the wire parse is
+        // unchanged — but Nullhawk must read its own stored h2/h3 response back when the
+        // repeater diffs a resend against the captured original.
+        "HTTP/2" | "HTTP/2.0" => HttpVersion::Http2,
+        "HTTP/3" | "HTTP/3.0" => HttpVersion::Http3,
         // Anything else on an HTTP/1 connection is not something we can frame.
         other => {
             return Err(NullhawkError::Protocol(ProtocolError::InvalidStatusLine(
@@ -693,6 +699,22 @@ mod tests {
     fn an_unsupported_version_is_rejected() {
         assert!(parse(b"HTTP/9.9 200 OK\r\n\r\n").is_err());
         assert!(parse(b"NOT-HTTP 200 OK\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn a_captured_h2_or_h3_response_parses_with_its_version() {
+        // The repeater stores an h2/h3 exchange with its version on the status line and must
+        // read it back to diff a resend against the captured original. A live HTTP/1
+        // connection never sends these, so the wire parse is unaffected.
+        assert_eq!(
+            parse_ok(b"HTTP/2 200 OK\r\n\r\n").version,
+            HttpVersion::Http2
+        );
+        assert_eq!(parse_ok(b"HTTP/2 200\r\n\r\n").version, HttpVersion::Http2);
+        assert_eq!(
+            parse_ok(b"HTTP/3 200 OK\r\n\r\n").version,
+            HttpVersion::Http3
+        );
     }
 
     #[test]

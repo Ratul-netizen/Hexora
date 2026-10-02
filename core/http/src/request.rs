@@ -212,6 +212,13 @@ fn parse_request_line(line: &[u8]) -> Result<(String, RequestTarget, HttpVersion
     let version = match parts.next().unwrap_or("HTTP/1.0").trim() {
         "HTTP/1.1" => HttpVersion::Http11,
         "HTTP/1.0" | "HTTP/0.9" => HttpVersion::Http10,
+        // A request captured over HTTP/2 or /3 is reconstructed for the repeater's editable
+        // form carrying that version. It is not framed on an h1 request line on the wire —
+        // the transport sends it over the ALPN-negotiated protocol — but Nullhawk must parse
+        // its own stored form back. Rejecting it broke `repeat` on every h2 site, which today
+        // is most of them.
+        "HTTP/2" | "HTTP/2.0" => HttpVersion::Http2,
+        "HTTP/3" | "HTTP/3.0" => HttpVersion::Http3,
         other => {
             return Err(NullhawkError::Protocol(ProtocolError::Malformed {
                 protocol: "HTTP/1.1",
@@ -388,6 +395,21 @@ mod tests {
         );
         assert_eq!(head.version, HttpVersion::Http11);
         assert!(head.quirks.is_empty(), "{:?}", head.quirks);
+    }
+
+    #[test]
+    fn a_captured_h2_or_h3_request_reconstructs_with_its_version() {
+        // The repeater rebuilds an h2/h3 capture into the editable request it resends, which
+        // carries that version. The transport frames it over the ALPN-negotiated protocol;
+        // this parse is only Nullhawk reading its own stored form back.
+        assert_eq!(
+            parse_ok(b"GET / HTTP/2\r\nHost: h\r\n\r\n").version,
+            HttpVersion::Http2
+        );
+        assert_eq!(
+            parse_ok(b"GET / HTTP/3\r\nHost: h\r\n\r\n").version,
+            HttpVersion::Http3
+        );
     }
 
     #[test]
